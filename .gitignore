@@ -1,0 +1,17 @@
+node_modules/
+dist-installer/
+release/
+.android-sdk/
+*.zip
+*.xlsm
+*.pdf
+*.db
+data/
+PDFs/
+extracted_media/
+__pycache__/
+data/*.db-journal
+data/backups/
+android/.gradle/
+android/app/build/
+npm-debug.log*

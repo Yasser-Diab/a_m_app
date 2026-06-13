@@ -1,0 +1,12 @@
+{
+  "appId": "com.sherifalihassan.priceoffer",
+  "appName": "Accounting Management",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
