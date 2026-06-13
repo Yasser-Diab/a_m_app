@@ -7,7 +7,8 @@ let mainWindow;
 
 async function createWindow() {
   const port = Number(process.env.PRICE_OFFER_PORT || 4181);
-  apiServer = await createServer({ port });
+  const dataDir = app.isPackaged ? path.join(app.getPath('userData'), 'data') : undefined;
+  apiServer = await createServer({ port, dataDir });
   await apiServer.listen(port);
 
   mainWindow = new BrowserWindow({

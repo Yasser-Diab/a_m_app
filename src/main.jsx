@@ -32,6 +32,7 @@ import {
   UserPlus,
   Users,
   WalletCards,
+  X,
 } from 'lucide-react';
 import hgadLogo from './assets/hgad-logo.png';
 import hgadDarkLogo from './assets/sticker logo s.png';
@@ -146,6 +147,28 @@ function getInitialApiBase() {
 
 function money(value) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value || 0));
+}
+
+function formatUserDateTime(value) {
+  if (!value) return '-';
+  const normalized = String(value).includes('T') ? String(value) : `${String(value).replace(' ', 'T')}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('en-GB', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
+function workTimeLabel(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
 function text(value) {
@@ -479,7 +502,13 @@ function App() {
     setMessage(`تم تسجيل الدخول: ${data.user.display_name}`);
   }
 
-  function logout() {
+  async function logout() {
+    if (currentUser?.id) {
+      api.request('/api/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ user_id: currentUser.id }),
+      }).catch(() => {});
+    }
     setCurrentUser(null);
     localStorage.removeItem('priceOfferUser');
     setMessage('');
@@ -939,6 +968,13 @@ function App() {
               if (entryDirty && !window.confirm('هناك تعديل أو إضافة لم يتم حفظها. هل تريد إغلاق التقرير المرتبط؟')) return;
               setEditorContext(null);
             }}
+            onBack={() => {
+              if (entryDirty && !window.confirm('هناك تعديل أو إضافة لم يتم حفظها. هل تريد الرجوع؟')) return;
+              setEditorContext(null);
+              setEditingId(null);
+              setEntryDirty(false);
+              setActiveTab('dashboard');
+            }}
             busy={busy}
             currentUser={currentUser}
             refreshAll={refreshAll}
@@ -970,11 +1006,32 @@ function App() {
 function AppBrandMark({ small = false }) {
   return (
     <div className={small ? 'am-brand-mark small' : 'am-brand-mark'} dir="ltr" aria-label={`${APP_MARK} ${APP_BYLINE}`}>
+      <span className="brand-digit-cloud" aria-hidden="true">
+        {'0123456789'.split('').map((digit, index) => (
+          <span key={`${digit}-${index}`} style={{ '--digit-index': index }}>{digit}</span>
+        ))}
+      </span>
       <strong>
         <span className="am-a">A</span><span className="am-dot">.</span><span className="am-m">M</span>
       </strong>
       <small>{APP_BYLINE}</small>
     </div>
+  );
+}
+
+function readyCountClass(count) {
+  if (!count) return 'zero';
+  if (count < 10) return 'blue';
+  if (count < 20) return 'green';
+  return `wheel-${Math.floor(count / 10) % 6}`;
+}
+
+function ItemReadyBadge({ count, suffix = 'بند جاهز' }) {
+  return (
+    <span className={`ready-count ${readyCountClass(count)}`} title={`${count} ${suffix}`}>
+      <strong>{count}</strong>
+      <span>{suffix}</span>
+    </span>
   );
 }
 
@@ -2279,6 +2336,7 @@ function EntryEditor({
   onDeleteRow,
   setMessage,
   onCloseContext,
+  onBack,
   busy,
   currentUser,
   refreshAll,
@@ -2358,6 +2416,7 @@ function EntryEditor({
         refreshAll={refreshAll}
         setMessage={setMessage}
         busy={busy}
+        onBack={onBack}
       />
     );
   }
@@ -2633,7 +2692,7 @@ function calculateDraftRow(row, fixed) {
   };
 }
 
-function SmartEntryEditor({ api, lookups, entryForm, setEntryForm, nextDoc, setEditingId, currentUser, refreshAll, setMessage, busy }) {
+function SmartEntryEditor({ api, lookups, entryForm, setEntryForm, nextDoc, setEditingId, currentUser, refreshAll, setMessage, busy, onBack }) {
   const [rows, setRows] = useState([smartRowFrom(entryForm)]);
   const [historyRows, setHistoryRows] = useState([]);
   const [previewData, setPreviewData] = useState(null);
@@ -3017,6 +3076,11 @@ function SmartEntryEditor({ api, lookups, entryForm, setEntryForm, nextDoc, setE
       <form className="panel entry-editor smart-entry" onSubmit={(event) => event.preventDefault()}>
         <div className="panel-head">
           <h2>إدخال مستند جديد</h2>
+          {onBack && (
+            <button type="button" onClick={onBack} title="إغلاق والرجوع">
+              <X size={17} /> إغلاق
+            </button>
+          )}
           <div className="document-id">
             <span>ID</span>
             <strong>{entryForm.operation_no || nextDoc?.operation_no || 'Auto'}</strong>
@@ -3100,10 +3164,10 @@ function SmartEntryEditor({ api, lookups, entryForm, setEntryForm, nextDoc, setE
           <div className="section-title-row">
             <h3>بنود المستند</h3>
             <div className="section-title-actions">
-              <span className="muted-count">{rowData.length} بند جاهز</span>
+              <ItemReadyBadge count={rowData.length} />
               <button
                 type="button"
-                className="icon-button"
+                className="icon-button expand-table-button"
                 title={tableExpanded ? 'تصغير جدول البنود' : 'توسيع جدول البنود لملء الشاشة'}
                 onClick={() => setTableExpanded((current) => !current)}
               >
@@ -3183,7 +3247,7 @@ function SmartEntryEditor({ api, lookups, entryForm, setEntryForm, nextDoc, setE
           }}>
             <Plus size={18} /> مسح النموذج
           </button>
-          <span>{rowData.length} بند جاهز للحفظ</span>
+          <ItemReadyBadge count={rowData.length} suffix="بند جاهز للحفظ" />
         </div>
       </form>
 
@@ -3202,6 +3266,10 @@ function SmartEntryEditor({ api, lookups, entryForm, setEntryForm, nextDoc, setE
 
 function InlineDocumentEditor({ api, data, document, party, onCloseContext, onDeleteRow, setMessage }) {
   const [rows, setRows] = useState(data.rows || []);
+  const initialTaxFlags = TAXES.reduce((flags, tax) => {
+    flags[tax.key] = (data.rows || []).some((row) => !!row[tax.key]);
+    return flags;
+  }, {});
   const [main, setMain] = useState({
     operation_no: data.operation_no || '',
     party: data.party || party?.display_name || '',
@@ -3209,6 +3277,10 @@ function InlineDocumentEditor({ api, data, document, party, onCloseContext, onDe
     building_unit: data.building_unit || document?.building_unit || '',
     work_type: data.overall_work_type || '',
     entry_date: rows[0]?.entry_date || new Date().toISOString().slice(0, 10),
+    status: document?.status || rows[0]?.document_status || 'draft',
+    discount_type: document?.discount_type || rows[0]?.discount_type || 'none',
+    discount_value: document?.discount_value ?? rows[0]?.discount_value ?? '',
+    ...initialTaxFlags,
   });
   const [saving, setSaving] = useState(false);
 
@@ -3219,31 +3291,40 @@ function InlineDocumentEditor({ api, data, document, party, onCloseContext, onDe
   async function saveMain() {
     setSaving(true);
     try {
+      const taxPatch = TAXES.reduce((patch, tax) => {
+        patch[tax.key] = main[tax.key] ? 1 : 0;
+        return patch;
+      }, {});
+      const documentPatch = {
+        project: main.project,
+        building_unit: main.building_unit,
+        status: main.status,
+        discount_type: main.discount_type || 'none',
+        discount_value: Number(main.discount_value || 0),
+      };
       if (document?.id) {
         await api.request(`/api/documents/${document.id}`, {
           method: 'PUT',
-          body: JSON.stringify({ project: main.project, building_unit: main.building_unit }),
+          body: JSON.stringify(documentPatch),
         });
       }
-      await Promise.all(rows.map((row) => api.request(`/api/entries/${row.id}`, {
+      const savedRows = await Promise.all(rows.map((row) => api.request(`/api/entries/${row.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           ...row,
+          ...taxPatch,
           customer_name: main.party,
           customer_display_name: main.party,
           project: main.project,
           building_unit: row.building_unit || main.building_unit,
           work_type: main.work_type,
           entry_date: main.entry_date,
+          document_status: main.status,
+          discount_type: documentPatch.discount_type,
+          discount_value: documentPatch.discount_value,
         }),
       })));
-      setRows((current) => current.map((row) => ({
-        ...row,
-        customer_display_name: main.party,
-        project: main.project,
-        work_type: main.work_type,
-        entry_date: main.entry_date,
-      })));
+      setRows(savedRows);
       setMessage('تم حفظ بيانات المستند الرئيسية.');
     } catch (error) {
       setMessage(`تعذر حفظ بيانات المستند: ${error.message}`);
@@ -3299,6 +3380,35 @@ function InlineDocumentEditor({ api, data, document, party, onCloseContext, onDe
           <Field label="نوع الأعمال">
             <input value={main.work_type} onChange={(event) => setMain({ ...main, work_type: event.target.value })} />
           </Field>
+          <Field label="الحالة">
+            <select value={main.status} onChange={(event) => setMain({ ...main, status: event.target.value })}>
+              <option value="draft">مسودة</option>
+              <option value="approved">معتمد</option>
+              <option value="closed">مغلق</option>
+            </select>
+          </Field>
+          <Field label="نوع الخصم">
+            <select value={main.discount_type || 'none'} onChange={(event) => setMain({ ...main, discount_type: event.target.value })}>
+              <option value="none">بدون</option>
+              <option value="rate">نسبة</option>
+              <option value="amount">مبلغ</option>
+            </select>
+          </Field>
+          <Field label="قيمة الخصم">
+            <input type="number" step="0.01" value={main.discount_value || ''} onChange={(event) => setMain({ ...main, discount_value: event.target.value })} />
+          </Field>
+        </div>
+        <div className="tax-grid compact-tax-grid inline-tax-grid">
+          {TAXES.map((tax) => (
+            <label key={tax.key} className="check-tile" title={tax.label}>
+              <input
+                type="checkbox"
+                checked={!!main[tax.key]}
+                onChange={(event) => setMain({ ...main, [tax.key]: event.target.checked })}
+              />
+              <span>{tax.label}</span>
+            </label>
+          ))}
         </div>
         <div className="form-actions">
           <button className="primary" type="button" onClick={saveMain} disabled={saving}>
@@ -3580,10 +3690,12 @@ function SettingsView({
       }
     }
     loadUsers();
+    const timer = currentUser?.role === 'admin' ? window.setInterval(loadUsers, 30000) : null;
     return () => {
       cancelled = true;
+      if (timer) window.clearInterval(timer);
     };
-  }, [api]);
+  }, [api, currentUser?.role]);
 
   async function saveTerms(key, value) {
     try {
@@ -3759,7 +3871,7 @@ function SettingsView({
             <div className="table-scroll compact-table">
               <table>
                 <thead>
-                  <tr><th>ID</th><th>اسم الدخول</th><th>اسم التقرير</th><th>الدور</th><th>الحالة</th><th>فواتير</th><th>دفعات</th><th>حالة المستند</th><th>كلمة مرور جديدة</th><th></th></tr>
+                  <tr><th>ID</th><th>اسم الدخول</th><th>اسم التقرير</th><th>الدور</th><th>الحالة</th><th>آخر ظهور</th><th>وقت العمل</th><th>فواتير</th><th>دفعات</th><th>حالة المستند</th><th>كلمة مرور جديدة</th><th></th></tr>
                 </thead>
                 <tbody>
                   {users.map((user) => (
@@ -3781,6 +3893,8 @@ function SettingsView({
                               <option value="0">موقوف</option>
                             </select>
                           </td>
+                          <td>{formatUserDateTime(user.last_seen_at)}</td>
+                          <td>{user.work_time_label || workTimeLabel(user.work_time_seconds)}</td>
                           <td><input type="checkbox" checked={!!(editingUser.can_create_invoices ?? user.can_create_invoices)} onChange={(event) => setEditingUser({ ...editingUser, can_create_invoices: event.target.checked ? 1 : 0 })} /></td>
                           <td><input type="checkbox" checked={!!(editingUser.can_create_payments ?? user.can_create_payments)} onChange={(event) => setEditingUser({ ...editingUser, can_create_payments: event.target.checked ? 1 : 0 })} /></td>
                           <td><input type="checkbox" checked={!!(editingUser.can_change_status ?? user.can_change_status)} onChange={(event) => setEditingUser({ ...editingUser, can_change_status: event.target.checked ? 1 : 0 })} /></td>
@@ -3804,6 +3918,8 @@ function SettingsView({
                           </td>
                           <td>{user.role}</td>
                           <td>{user.is_active ? 'نشط' : 'موقوف'}</td>
+                          <td>{formatUserDateTime(user.last_seen_at)}</td>
+                          <td>{user.work_time_label || workTimeLabel(user.work_time_seconds)}</td>
                           <td>{user.can_create_invoices ? 'نعم' : '-'}</td>
                           <td>{user.can_create_payments ? 'نعم' : '-'}</td>
                           <td>{user.can_change_status ? 'نعم' : '-'}</td>

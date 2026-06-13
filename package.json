@@ -1,6 +1,6 @@
 {
   "name": "accounting-management",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Local multi-user price offers, invoices, account statements, and contractor certificates.",
   "main": "electron/main.cjs",
   "private": true,
@@ -52,11 +52,13 @@
       "dist/**/*",
       "electron/**/*",
       "server/**/*",
+      "tools/print_pdf.cjs",
       "node_modules/**/*",
       "package.json"
     ],
     "win": {
       "icon": "build/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
       "target": [
         {
           "target": "nsis",

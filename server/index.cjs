@@ -719,8 +719,16 @@ function ensureDefaultUsers(database) {
   database.run("UPDATE users SET can_create_invoices = 1, can_create_payments = 1, can_change_status = 1 WHERE role = 'admin'");
 }
 
+function durationLabel(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
 function publicUser(row) {
   if (!row) return null;
+  const workSeconds = Math.max(0, Number(row.work_time_seconds || 0));
   return {
     id: row.id,
     username: row.username,
@@ -732,6 +740,9 @@ function publicUser(row) {
     is_active: row.is_active,
     last_login_at: row.last_login_at || null,
     last_seen_at: row.last_seen_at || null,
+    last_online_at: row.last_seen_at || null,
+    work_time_seconds: workSeconds,
+    work_time_label: durationLabel(workSeconds),
     is_online: normalizeBool(row.is_online),
   };
 }
@@ -1366,6 +1377,44 @@ function contractorCertificateNumber(rows = [], requested = '') {
   return dates.length ? String(dates.length) : '';
 }
 
+function contractorCertificateGroups(rows = []) {
+  const dates = uniqueRowValues(rows, 'entry_date').sort();
+  const dateIndex = new Map(dates.map((date, index) => [date, String(index + 1)]));
+  const groups = new Map();
+  const sorted = [...rows].sort((a, b) => {
+    const certA = normalizeText(a.certificate_no) || dateIndex.get(a.entry_date) || '1';
+    const certB = normalizeText(b.certificate_no) || dateIndex.get(b.entry_date) || '1';
+    return String(certA).localeCompare(String(certB), 'en', { numeric: true })
+      || String(a.entry_date || '').localeCompare(String(b.entry_date || ''))
+      || Number(a.id || 0) - Number(b.id || 0);
+  });
+  for (const row of sorted) {
+    const key = normalizeText(row.certificate_no) || dateIndex.get(row.entry_date) || '1';
+    if (!groups.has(key)) groups.set(key, { key, date: row.entry_date || '', rows: [] });
+    const group = groups.get(key);
+    if (!group.date && row.entry_date) group.date = row.entry_date;
+    group.rows.push(row);
+  }
+  return [...groups.values()];
+}
+
+function contractorLocationText(row, hasMultipleProjects) {
+  const location = [normalizeText(row.building_unit), normalizeText(row.floor_apartment)]
+    .filter(Boolean)
+    .join(' - ') || 'اعمال عامة';
+  if (!hasMultipleProjects) return location;
+  return [normalizeText(row.project) || 'اعمال عامة', location].join('\n');
+}
+
+function contractorGroupTotals(rows = []) {
+  return rows.reduce((totals, row) => {
+    totals.item_count += numberOrZero(row.item_count);
+    totals.quantity += numberOrZero(row.quantity);
+    totals.gross_total += numberOrZero(row.gross_total);
+    return totals;
+  }, { item_count: 0, quantity: 0, gross_total: 0 });
+}
+
 const AR_ONES = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة'];
 const AR_TENS = ['', 'عشرة', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
 const AR_TEENS = ['عشرة', 'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
@@ -1431,7 +1480,7 @@ function contractorPaymentTableHtml(data) {
       <thead><tr><th>\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062f\u0641\u0639\u0629</th><th>\u0628\u064a\u0627\u0646 \u0627\u0644\u062f\u0641\u0639\u0629</th><th>\u0645\u0644\u0627\u062d\u0638\u0629</th><th>\u0627\u0644\u0645\u0628\u0644\u063a</th></tr></thead>
       <tbody>${rows.map((row) => `
         <tr class="payment-row">
-          <td>${escapeHtml(row.entry_date || '')}</td>
+          <td class="nowrap date-cell">${escapeHtml(row.entry_date || '')}</td>
           <td>${escapeHtml(row.work_type || row.description || '\u062a\u062d\u0635\u064a\u0644')}</td>
           <td>${escapeHtml(row.collection_note || row.notes || '')}</td>
           <td>${money(Math.abs(numberOrZero(row.collection_amount)))}</td>
@@ -1442,6 +1491,43 @@ function contractorPaymentTableHtml(data) {
 function detailReportTableHtml(data, showDimensions, dimensionUnit) {
   const rows = data.rows || [];
   if (!rows.length) return '';
+  if (data.type === 'contractor') {
+    const hasMultipleProjects = uniqueRowValues(rows, 'project').length > 1;
+    const groups = contractorCertificateGroups(rows);
+    const body = [];
+    for (const group of groups) {
+      body.push(`<tr class="group-row certificate-row"><td colspan="8">مستخلص رقم ${escapeHtml(group.key)}</td></tr>`);
+      group.rows.forEach((row) => {
+        body.push(`
+          <tr>
+            <td class="nowrap date-cell">${escapeHtml(row.entry_date || group.date || '')}</td>
+            <td class="desc">${escapeHtml(row.work_type || reportDescriptionText(row) || '-')}</td>
+            <td class="location-cell">${escapeHtml(contractorLocationText(row, hasMultipleProjects)).replace(/\n/g, '<br>')}</td>
+            <td>${escapeHtml(unitLabel(row.unit_code))}</td>
+            <td>${displayNumber(row.item_count, true)}</td>
+            <td>${displayNumber(row.quantity, true)}</td>
+            <td>${displayNumber(row.rate, true)}</td>
+            <td>${money(row.gross_total)}</td>
+          </tr>`);
+      });
+      if ((group.rows || []).length > 1) {
+        const subtotal = contractorGroupTotals(group.rows);
+        body.push(`
+          <tr class="subtotal">
+            <td colspan="4">إجمالي مستخلص رقم ${escapeHtml(group.key)}</td>
+            <td>${displayNumber(subtotal.item_count, true)}</td>
+            <td>${displayNumber(subtotal.quantity, true)}</td>
+            <td></td>
+            <td>${money(subtotal.gross_total)}</td>
+          </tr>`);
+      }
+    }
+    return `
+      <table class="report-table contractor-detail">
+        <thead><tr><th>التاريخ</th><th>البيان</th><th>الموقع</th><th>الوحدة</th><th>العدد</th><th>الكمية</th><th>الفئة</th><th>الإجمالي</th></tr></thead>
+        <tbody>${body.join('')}</tbody>
+      </table>`;
+  }
   const generalWorksLabel = '\u0627\u0639\u0645\u0627\u0644 \u0639\u0627\u0645\u0629';
   const subtotalMode = data.subtotal_mode || 'none';
   const enableBuildingSubtotal = ['building', 'unit'].includes(subtotalMode);
@@ -1600,9 +1686,9 @@ function renderReportHtmlV2(data) {
   const projectValues = uniqueRowValues(rows, 'project');
   const buildingValues = uniqueRowValues(rows, 'building_unit');
   const projectValue = projectValues.length === 1 ? projectValues[0] : (data.project || 'متعدد - راجع البنود');
-  const buildingValue = buildingValues.length === 1 ? buildingValues[0] : (buildingValues.length > 1 ? 'متعدد - راجع البنود' : data.building_unit || '');
+  const buildingValue = data.type === 'contractor' ? '' : (buildingValues.length === 1 ? buildingValues[0] : (buildingValues.length > 1 ? 'متعدد - راجع البنود' : data.building_unit || ''));
   const headerInfo = [
-    ['العميل', data.party || '-'],
+    [data.type === 'contractor' ? 'المقاول' : 'العميل', data.party || '-'],
     ['المشروع', [projectValue, buildingValue].filter(Boolean).join(' - ') || '-'],
   ];
   const statementRows = data.statementRows || [];
@@ -1611,8 +1697,8 @@ function renderReportHtmlV2(data) {
       <thead><tr><th>التاريخ</th><th>المستند</th><th>المشروع</th><th>التفاصيل</th><th>الكمية</th><th>ضرائب / خصم</th><th>إجمالي المستند</th><th>التحصيل</th><th>الرصيد</th></tr></thead>
       <tbody>${statementRows.map((row) => `
         <tr class="${row.is_payment ? 'payment-row' : ''}">
-          <td>${escapeHtml(row.entry_date || '')}</td>
-          <td class="statement-doc">${escapeHtml(row.description || '')}</td>
+          <td class="nowrap date-cell">${escapeHtml(row.entry_date || '')}</td>
+          <td class="statement-doc nowrap id-cell">${escapeHtml(row.description || '')}</td>
           <td>${escapeHtml(row.project_label || row.project || '')}</td>
           <td>${escapeHtml(row.details || '')}</td>
           <td>${row.is_payment ? '-' : money(row.quantity)}</td>
@@ -1642,7 +1728,7 @@ function renderReportHtmlV2(data) {
     .brand-en,.brand-ar,h1,.terms h2,.term-block h3{font-family:Georgia,"Times New Roman",serif}
     .brand-en{color:#a87921;font-weight:700;font-size:16px;letter-spacing:.5px;text-transform:uppercase;text-shadow:0 1px 0 #f5eee0}
     .brand-ar{color:#a87921;font-weight:700;font-size:16px;margin-top:2px;text-shadow:0 1px 0 #f5eee0}
-    h1{font-size:17px;margin:12px 0 3px;font-weight:700}
+    h1{font-size:21px;margin:12px 0 4px;font-weight:700}
     .subtitle{font-size:15px;margin:0 0 8px;color:#111}
     .issue-dates{position:absolute;left:4px;top:8px;width:300px;direction:ltr;text-align:left;color:#1f2933;font-size:9.8px;line-height:1.55;border-left:3px solid #a87921;padding-left:8px;white-space:normal}
     .info-band{display:grid;grid-template-columns:repeat(2,1fr);gap:0;background:#f3f0e8;border:1px solid #d9cfb8;margin:8px 0 10px}
@@ -1652,11 +1738,15 @@ function renderReportHtmlV2(data) {
     .report-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:11px;page-break-inside:auto}
     .report-table thead{display:table-header-group}
     .report-table tfoot{display:table-footer-group}
-    .report-table tr{break-inside:avoid;page-break-inside:avoid}
-    .report-table th,.report-table td{break-inside:avoid;page-break-inside:avoid}
+    .report-table tr{break-inside:avoid-page!important;page-break-inside:avoid!important}
+    .report-table th,.report-table td{break-inside:avoid-page!important;page-break-inside:avoid!important}
     th,td{border:1px solid #d6d0c3;padding:5px 6px;vertical-align:top}
     th{background:#202020;color:#d6a84f;font-weight:700;text-align:center}
     td{text-align:center}
+    .nowrap,.date-cell,.id-cell{white-space:nowrap}
+    .date-cell{width:82px}
+    .id-cell{width:118px}
+    .location-cell{white-space:pre-line;line-height:1.45}
     tbody tr:nth-child(odd):not(.group-row):not(.subtotal){background:#faf8f2}
     .desc{text-align:right;min-width:320px;line-height:1.45;white-space:normal;unicode-bidi:plaintext}
     .desc-line{display:block;unicode-bidi:plaintext}
@@ -2313,11 +2403,23 @@ async function createServer(options = {}) {
     res.json({ user: publicUser(fresh) });
   });
 
+  app.post('/api/auth/logout', (req, res) => {
+    const id = Number(req.body.user_id || 0);
+    if (id) {
+      database.run("UPDATE users SET last_seen_at = datetime('now', '-3 minutes') WHERE id = ?", [id]);
+    }
+    res.json({ ok: true });
+  });
+
   app.get('/api/users', (req, res) => {
     res.json(database.all(`
       SELECT id, username, display_name, role, can_create_invoices, can_create_payments, can_change_status,
              is_active, last_login_at, last_seen_at, created_at,
-             CASE WHEN last_seen_at IS NOT NULL AND last_seen_at >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END AS is_online
+             CASE WHEN last_seen_at IS NOT NULL AND last_seen_at >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END AS is_online,
+             CASE
+               WHEN last_login_at IS NULL OR last_seen_at IS NULL OR last_seen_at < last_login_at THEN 0
+               ELSE CAST(strftime('%s', last_seen_at) - strftime('%s', last_login_at) AS INTEGER)
+             END AS work_time_seconds
       FROM users
       ORDER BY is_online DESC, role = 'admin' DESC, display_name COLLATE NOCASE
     `).map(publicUser));
