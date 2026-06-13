@@ -956,7 +956,11 @@ function renderReportHtml(data) {
     .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:12px;margin-bottom:14px}
     .logo{width:78px;height:auto}.meta{text-align:left;direction:ltr;color:#475569}
     h1{margin:6px 0 4px;font-size:24px}.party{font-size:15px;color:#334155}
-    table{width:100%;border-collapse:collapse;font-size:11px;margin-top:10px}
+    table{width:100%;border-collapse:collapse;font-size:11px;margin-top:10px;page-break-inside:auto}
+    thead{display:table-header-group}
+    tfoot{display:table-footer-group}
+    tr{break-inside:avoid;page-break-inside:avoid}
+    th,td{break-inside:avoid;page-break-inside:avoid}
     th,td{border:1px solid #cbd5e1;padding:6px;vertical-align:top}th{background:#1f3f73;color:white}.desc{min-width:260px}
     .totals{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}
     .box{border:1px solid #cbd5e1;padding:8px;background:#f8fafc}
@@ -1072,7 +1076,11 @@ function renderReportHtmlV2(data) {
     .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:12px;margin-bottom:14px}
     .logo{width:78px;height:auto}.meta{text-align:left;direction:ltr;color:#475569}
     h1{margin:6px 0 4px;font-size:24px}.party{font-size:15px;color:#334155}
-    table{width:100%;border-collapse:collapse;font-size:11px;margin-top:10px}
+    table{width:100%;border-collapse:collapse;font-size:11px;margin-top:10px;page-break-inside:auto}
+    thead{display:table-header-group}
+    tfoot{display:table-footer-group}
+    tr{break-inside:avoid;page-break-inside:avoid}
+    th,td{break-inside:avoid;page-break-inside:avoid}
     th,td{border:1px solid #cbd5e1;padding:6px;vertical-align:top}th{background:#1f3f73;color:white}.desc{min-width:260px}
     .totals{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}
     .box{border:1px solid #cbd5e1;padding:8px;background:#f8fafc}
@@ -1641,7 +1649,11 @@ function renderReportHtmlV2(data) {
     .info-item{display:grid;grid-template-columns:auto 1fr;gap:10px;padding:8px 12px;align-items:center;min-height:34px}
     .info-item span{font-weight:700;color:#111}
     .info-item strong{font-weight:500;text-align:right}
-    .report-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:11px}
+    .report-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:11px;page-break-inside:auto}
+    .report-table thead{display:table-header-group}
+    .report-table tfoot{display:table-footer-group}
+    .report-table tr{break-inside:avoid;page-break-inside:avoid}
+    .report-table th,.report-table td{break-inside:avoid;page-break-inside:avoid}
     th,td{border:1px solid #d6d0c3;padding:5px 6px;vertical-align:top}
     th{background:#202020;color:#d6a84f;font-weight:700;text-align:center}
     td{text-align:center}
