@@ -21,6 +21,27 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sender TEXT,
+  message TEXT,
+  reply_to_id INTEGER,
+  attachment_name TEXT,
+  attachment_mime TEXT,
+  attachment_path TEXT,
+  deleted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chat_message_reads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL,
+  user_name TEXT NOT NULL,
+  seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(message_id, user_name),
+  FOREIGN KEY (message_id) REFERENCES chat_messages(id)
+);
+
 CREATE TABLE IF NOT EXISTS work_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   source_row INTEGER,
@@ -33,6 +54,8 @@ CREATE TABLE IF NOT EXISTS work_items (
   document_id INTEGER,
   party_role TEXT DEFAULT 'customer',
   party_category TEXT,
+  source_customer_id INTEGER,
+  source_customer_name TEXT,
   base_party_name TEXT,
   search_party_name TEXT,
   statement_text TEXT,

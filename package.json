@@ -1,7 +1,8 @@
 {
   "name": "accounting-management",
-  "version": "1.2.2",
+  "version": "1.3.2",
   "description": "Local multi-user price offers, invoices, account statements, and contractor certificates.",
+  "author": "HGAD",
   "main": "electron/main.cjs",
   "private": true,
   "scripts": {
@@ -19,22 +20,22 @@
     "package:release": "powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "qrcode-svg": "^1.1.0",
+    "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
     "@capacitor/android": "^7.4.3",
     "@capacitor/core": "^7.4.3",
     "@capacitor/filesystem": "^7.1.8",
     "@capacitor/share": "^7.0.4",
     "@vitejs/plugin-react": "^5.1.1",
-    "cors": "^2.8.5",
-    "exceljs": "^4.4.0",
-    "express": "^5.2.1",
     "lucide-react": "^0.561.0",
-    "qrcode-svg": "^1.1.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "sql.js": "^1.13.0",
-    "vite": "^7.2.7"
-  },
-  "devDependencies": {
+    "vite": "^7.2.7",
     "@capacitor/cli": "^7.4.3",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
@@ -45,7 +46,11 @@
   "build": {
     "appId": "com.sherifalihassan.priceoffer",
     "productName": "Accounting Management",
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "data/price_offer.db",
+      "node_modules/sql.js/dist/*.wasm"
+    ],
     "directories": {
       "output": "dist-installer"
     },
@@ -55,11 +60,13 @@
       "server/**/*",
       "tools/print_pdf.cjs",
       "data/price_offer.db",
-      "node_modules/**/*",
+      "src/assets/sticker logo s.png",
+      "src/assets/export_logo.png",
+      "build/**/*",
       "package.json"
     ],
     "win": {
-      "icon": "build/icon.ico",
+      "icon": "build/variants/main.ico",
       "requestedExecutionLevel": "asInvoker",
       "target": [
         {

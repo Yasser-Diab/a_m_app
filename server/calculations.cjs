@@ -38,9 +38,34 @@ function formatOperationNo(serial) {
 
 function normalizeUnitCode(value) {
   const text = String(value || '').trim().toLowerCase();
-  if (['sqm', 'm2', 'meter2', '\u0645\u00b2', '\u0645\u0662'].includes(text)) return 'sqm';
-  if (['lm', 'linear', 'long', '\u0645.\u0637', '\u0645\u0637', '\u0645\u062a\u0631 \u0637\u0648\u0644\u064a'].includes(text)) return 'lm';
-  if (['count', 'number', 'no', '\u0639\u062f\u062f'].includes(text)) return 'count';
+  if ([
+    'sqm',
+    'm2',
+    'm^2',
+    'meter2',
+    'square meter',
+    'square meters',
+    'square metre',
+    'square metres',
+    '\u0645\u00b2',
+    '\u0645\u0662',
+    '\u0645\u062a\u0631 \u0645\u0631\u0628\u0639',
+  ].includes(text)) return 'sqm';
+  if ([
+    'lm',
+    'linear',
+    'linear meter',
+    'linear meters',
+    'linear metre',
+    'linear metres',
+    'long',
+    'long meter',
+    'long meters',
+    '\u0645.\u0637',
+    '\u0645\u0637',
+    '\u0645\u062a\u0631 \u0637\u0648\u0644\u064a',
+  ].includes(text)) return 'lm';
+  if (['count', 'number', 'no', 'nos', 'pcs', 'piece', 'pieces', '\u0639\u062f\u062f'].includes(text)) return 'count';
   return 'sqm';
 }
 

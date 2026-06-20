@@ -112,6 +112,8 @@ function ensureRuntimeMigrations(database) {
   addColumn('document_id', 'INTEGER');
   addColumn('party_role', "TEXT DEFAULT 'customer'");
   addColumn('party_category', 'TEXT');
+  addColumn('source_customer_id', 'INTEGER');
+  addColumn('source_customer_name', 'TEXT');
   addColumn('base_party_name', 'TEXT');
   addColumn('search_party_name', 'TEXT');
   addColumn('statement_text', 'TEXT');
