@@ -1,8 +1,8 @@
 {
   "name": "accounting-management",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "Local multi-user price offers, invoices, account statements, and contractor certificates.",
-  "author": "HGAD",
+  "author": "Yasser Diab",
   "main": "electron/main.cjs",
   "private": true,
   "scripts": {

@@ -10,10 +10,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-RELEASE_DATA_DIR = Path(r"D:\releases\AccountingManagement_V1.3.3\price_offer\data")
 DATA_DIR = os.environ.get(
     "PRICE_OFFER_DATA_DIR",
-    str(RELEASE_DATA_DIR if RELEASE_DATA_DIR.exists() else ROOT / "data"),
+    str(ROOT / "data"),
 )
 DEFAULT_PORT_NUMBER = 4181
 DEFAULT_PORT = str(DEFAULT_PORT_NUMBER)
