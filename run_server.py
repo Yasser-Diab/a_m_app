@@ -10,10 +10,15 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DATA_DIR = os.environ.get("PRICE_OFFER_DATA_DIR", str(ROOT / "data"))
+RELEASE_DATA_DIR = Path(r"D:\releases\AccountingManagement_V1.3.3\price_offer\data")
+DATA_DIR = os.environ.get(
+    "PRICE_OFFER_DATA_DIR",
+    str(RELEASE_DATA_DIR if RELEASE_DATA_DIR.exists() else ROOT / "data"),
+)
 DEFAULT_PORT_NUMBER = 4181
 DEFAULT_PORT = str(DEFAULT_PORT_NUMBER)
 LEGACY_PORT = str(DEFAULT_PORT_NUMBER - 1)
+DEFAULT_LAN_HOST = os.environ.get("PRICE_OFFER_DEFAULT_HOST", "192.168.137.1")
 
 
 def npm_command() -> str:
@@ -30,7 +35,11 @@ def lan_ips() -> list[str]:
                 ips.add(ip)
     except OSError:
         pass
-    return sorted(ips)
+    return sorted(ips, key=lambda ip: (ip != DEFAULT_LAN_HOST, ip))
+
+
+def default_server_url(port: str) -> str:
+    return f"http://{DEFAULT_LAN_HOST}:{port}"
 
 
 def port_is_free(port: int) -> bool:
@@ -87,6 +96,7 @@ def main() -> int:
     env = os.environ.copy()
     env["PRICE_OFFER_DATA_DIR"] = DATA_DIR
     env["PRICE_OFFER_PORT"] = port
+    env["PRICE_OFFER_DEFAULT_HOST"] = DEFAULT_LAN_HOST
 
     print("Accounting Management web server")
     print(f"Folder: {ROOT}")
@@ -101,7 +111,7 @@ def main() -> int:
         print(error)
         return 1
 
-    print(f"\nLocal review URL: http://127.0.0.1:{port}")
+    print(f"\nServer URL: {default_server_url(port)}")
     for ip in lan_ips():
         print(f"LAN URL: http://{ip}:{port}")
     print("\nFor access from outside this network, forward this port on the router")
@@ -115,7 +125,7 @@ def main() -> int:
         return 1
 
     time.sleep(1.5)
-    webbrowser.open(f"http://127.0.0.1:{port}")
+    webbrowser.open(default_server_url(port))
 
     try:
         return process.wait()

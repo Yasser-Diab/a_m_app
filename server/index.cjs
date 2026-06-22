@@ -39,6 +39,8 @@ const REPORT_LOGO_PATH = path.join(
   "export_logo.png",
 );
 const DEFAULT_PORT = Number(process.env.PRICE_OFFER_PORT || 4181);
+const DEFAULT_LAN_HOST = process.env.PRICE_OFFER_DEFAULT_HOST || "192.168.137.1";
+const RELEASE_DATA_DIR = "D:\\releases\\AccountingManagement_V1.3.3\\price_offer\\data";
 const APP_VERSION = (() => {
   try {
     return require(path.join(ROOT_DIR, "package.json")).version || "0.0.0";
@@ -127,6 +129,7 @@ const ENTRY_COLUMNS = [
 function getDataDir() {
   const configured = process.env.PRICE_OFFER_DATA_DIR;
   if (configured) return path.resolve(configured);
+  if (fs.existsSync(RELEASE_DATA_DIR)) return RELEASE_DATA_DIR;
   return path.join(ROOT_DIR, "data");
 }
 
@@ -144,7 +147,16 @@ function getLanIps() {
     .flat()
     .filter(Boolean)
     .filter((address) => address.family === "IPv4" && !address.internal)
-    .map((address) => address.address);
+    .map((address) => address.address)
+    .sort((left, right) => {
+      if (left === DEFAULT_LAN_HOST) return -1;
+      if (right === DEFAULT_LAN_HOST) return 1;
+      return left.localeCompare(right);
+    });
+}
+
+function defaultServerUrl(port = DEFAULT_PORT) {
+  return `http://${DEFAULT_LAN_HOST}:${port}`;
 }
 
 function normalizeText(value) {
@@ -443,12 +455,246 @@ function addPaymentPartyLikeClauses(parts, params, like) {
   params.push(like, like, like, like, like);
 }
 
-function nextDocumentNo(database, type) {
+const PAYMENT_AMOUNT_SQL = "ABS(COALESCE(wi.collection_amount, 0))";
+const VALID_PAYMENT_ROW_SQL = `${PAYMENT_AMOUNT_SQL} > 0`;
+
+function cleanupEmptyPaymentDocuments(database) {
+  const emptyPaymentRowPredicate = `
+    COALESCE(wi.collection_amount, 0) = 0
+    AND COALESCE(wi.gross_total, 0) = 0
+    AND COALESCE(wi.net_total, 0) = 0
+    AND COALESCE(wi.total_quantity, 0) = 0
+    AND COALESCE(wi.item_count, 0) = 0
+    AND COALESCE(wi.width_cm, 0) = 0
+    AND COALESCE(wi.height_cm, 0) = 0
+    AND COALESCE(wi.rate, 0) = 0
+    AND COALESCE(wi.building_unit_price, 0) = 0
+    AND TRIM(COALESCE(wi.description, '')) = ''
+    AND TRIM(COALESCE(wi.statement_text, '')) = ''
+    AND TRIM(COALESCE(wi.glass_spec, '')) = ''
+    AND TRIM(COALESCE(wi.profile_spec, '')) = ''
+    AND TRIM(COALESCE(wi.color, '')) = ''
+    AND TRIM(COALESCE(wi.collection_note, '')) = ''
+    AND TRIM(COALESCE(wi.certificate_no, '')) = ''
+  `;
+  database.run(
+    `DELETE FROM work_items
+     WHERE deleted_at IS NULL
+       AND id IN (
+         SELECT wi.id
+         FROM work_items wi
+         JOIN documents d ON d.id = wi.document_id
+         WHERE d.document_type IN ('payment', 'ledger')
+           AND ${emptyPaymentRowPredicate}
+       )`,
+  );
+  database.run(
+    `DELETE FROM work_items
+     WHERE deleted_at IS NOT NULL
+       AND (
+         ABS(COALESCE(collection_amount, 0)) > 0
+         OR id IN (
+           SELECT wi.id
+           FROM work_items wi
+           JOIN documents d ON d.id = wi.document_id
+           WHERE d.document_type = 'payment'
+             AND ${emptyPaymentRowPredicate}
+         )
+       )`,
+  );
+  database.run(
+    `DELETE FROM documents
+     WHERE document_type IN ('payment', 'ledger')
+       AND deleted_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM work_items wi
+         WHERE wi.document_id = documents.id
+           AND wi.deleted_at IS NULL
+       )`,
+  );
+}
+
+function cleanupEmptyPaymentDocument(database, documentId) {
+  if (!documentId) return;
+  const document = database.get(
+    "SELECT document_type FROM documents WHERE id = ? AND deleted_at IS NULL",
+    [documentId],
+  );
+  if (!["payment", "ledger"].includes(document?.document_type)) return;
+  const remaining = database.get(
+    "SELECT COUNT(*) AS count FROM work_items WHERE document_id = ? AND deleted_at IS NULL",
+    [documentId],
+  );
+  if (!Number(remaining?.count || 0)) {
+    database.run("DELETE FROM documents WHERE id = ?", [documentId]);
+  }
+}
+
+function isPaymentEntryRow(row = {}) {
+  if (numberOrZero(row.collection_amount) !== 0) return true;
+  if (row.current_document_type !== "payment") return false;
+  return (
+    numberOrZero(row.gross_total) === 0 &&
+    numberOrZero(row.net_total) === 0 &&
+    numberOrZero(row.total_quantity) === 0 &&
+    numberOrZero(row.rate) === 0 &&
+    numberOrZero(row.building_unit_price) === 0
+  );
+}
+
+function nextDocumentNo(database) {
   const row = database.get(
-    "SELECT COALESCE(MAX(document_no), 0) + 1 AS next_no FROM documents WHERE document_type = ? AND document_no < 1000000",
-    [type],
+    "SELECT COALESCE(MAX(document_no), 0) + 1 AS next_no FROM documents WHERE document_no < 1000000",
   );
   return row.next_no || 1;
+}
+
+function normalizeApprovedOffers(database) {
+  const approvedOffers = database.all(
+    `SELECT id, document_no FROM documents
+     WHERE document_type = 'price_offer' AND status = 'approved' AND deleted_at IS NULL`,
+  );
+  for (const document of approvedOffers) {
+    const collision = database.get(
+      "SELECT id FROM documents WHERE document_type = 'invoice' AND document_no = ? AND id <> ? AND deleted_at IS NULL",
+      [document.document_no, document.id],
+    );
+    if (collision) continue;
+    database.run(
+      "UPDATE documents SET document_type = 'invoice', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [document.id],
+    );
+    database.run(
+      `UPDATE work_items
+       SET accounting_status = ?, document_status = 'approved', updated_at = CURRENT_TIMESTAMP
+       WHERE document_id = ? AND deleted_at IS NULL`,
+      [STATUS.INVOICE, document.id],
+    );
+  }
+}
+
+function repairMisfiledContractorItems(database) {
+  const rows = database.all(
+    `SELECT wi.*, d.party_id AS document_party_id, d.document_type AS parent_type,
+            p.base_name AS contractor_base_name, p.display_name AS contractor_display_name,
+            p.search_name AS contractor_search_name, p.category AS contractor_category
+     FROM work_items wi
+     JOIN documents d ON d.id = wi.document_id
+     LEFT JOIN parties p ON p.id = wi.party_id
+     WHERE wi.deleted_at IS NULL
+       AND d.deleted_at IS NULL
+       AND d.document_type <> 'contractor_certificate'
+       AND COALESCE(wi.party_id, 0) <> COALESCE(d.party_id, 0)
+       AND TRIM(COALESCE(wi.source_customer_name, '')) <> ''`,
+  );
+  if (!rows.length) return;
+  const groups = new Map();
+  for (const row of rows) {
+    const day = normalizeText(row.entry_date).slice(0, 10);
+    const key = [
+      row.document_id,
+      row.party_id,
+      normalizeText(row.project),
+      day,
+      normalizeText(row.source_customer_name),
+    ].join("|");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  for (const groupRows of groups.values()) {
+    const first = groupRows[0];
+    const contractorParty = getOrCreateParty(database, {
+      party_role: "contractor",
+      party_category: first.contractor_category || first.party_category || "corporate",
+      base_party_name:
+        first.contractor_base_name || first.base_party_name || first.customer_name,
+      customer_name:
+        first.contractor_base_name || first.base_party_name || first.customer_name,
+    });
+    if (!contractorParty?.id) continue;
+    const documentNo = nextDocumentNo(database);
+    const operationNo = formatOperationNo(documentNo);
+    const maxCertificate = database.get(
+      `SELECT COALESCE(MAX(CASE
+          WHEN TRIM(COALESCE(certificate_no, '')) GLOB '[0-9]*'
+          THEN CAST(certificate_no AS INTEGER) ELSE 0 END), 0) AS value
+       FROM work_items
+       WHERE deleted_at IS NULL AND party_id = ? AND COALESCE(project, '') = ?`,
+      [contractorParty.id, normalizeText(first.project)],
+    );
+    const certificateNo = Number(maxCertificate?.value || 0) + 1;
+    const inserted = database.run(
+      `INSERT INTO documents
+       (document_type, document_no, operation_no, status, party_id, party_role,
+        party_category, customer_name, search_party_name, project, building_unit, entry_date)
+       VALUES ('contractor_certificate', ?, ?, 'approved', ?, 'contractor', ?, ?, ?, ?, ?, ?)`,
+      [
+        documentNo,
+        operationNo,
+        contractorParty.id,
+        contractorParty.category || "corporate",
+        contractorParty.display_name || first.customer_name,
+        contractorParty.search_name || normalizeArabic(first.customer_name),
+        normalizeText(first.project),
+        normalizeText(first.building_unit),
+        normalizeEntryDateTime(first.entry_date),
+      ],
+    );
+    const newDocumentId = inserted.lastInsertRowid;
+    for (const row of groupRows) {
+      database.run(
+        `UPDATE work_items
+         SET document_id = ?, serial = ?, operation_no = ?, party_id = ?, party_role = 'contractor',
+             party_category = ?, base_party_name = ?, search_party_name = ?,
+             customer_name = ?, customer_display_name = ?, accounting_status = ?,
+             document_status = 'approved', certificate_no = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          newDocumentId,
+          documentNo,
+          operationNo,
+          contractorParty.id,
+          contractorParty.category || "corporate",
+          contractorParty.base_name || first.customer_name,
+          contractorParty.search_name || normalizeArabic(first.customer_name),
+          contractorParty.display_name || first.customer_name,
+          contractorParty.display_name || first.customer_name,
+          STATUS.CONTRACTOR,
+          String(certificateNo),
+          row.id,
+        ],
+      );
+    }
+    const remaining = database.get(
+      `SELECT wi.* FROM work_items wi
+       JOIN documents d ON d.id = wi.document_id
+       WHERE wi.document_id = ? AND wi.deleted_at IS NULL
+         AND COALESCE(wi.party_id, 0) = COALESCE(d.party_id, 0)
+       ORDER BY wi.id LIMIT 1`,
+      [first.document_id],
+    );
+    if (remaining) {
+      database.run(
+        `UPDATE documents
+         SET project = ?, building_unit = ?, entry_date = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          normalizeText(remaining.project),
+          normalizeText(remaining.building_unit),
+          normalizeEntryDateTime(remaining.entry_date),
+          remaining.document_status || "draft",
+          first.document_id,
+        ],
+      );
+    } else {
+      database.run(
+        `UPDATE documents
+         SET status = 'draft', project = '', building_unit = '', updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [first.document_id],
+      );
+    }
+  }
 }
 
 function getOrCreateParty(database, input) {
@@ -477,21 +723,34 @@ function getOrCreateParty(database, input) {
 }
 
 function getOrCreateDocument(database, input, party) {
+  const requestedType =
+    input.document_type ||
+    (normalizeText(input.accounting_status) === "تحصيل"
+      ? "payment"
+      : documentTypeForStatus(
+          normalizeText(input.accounting_status) || STATUS.OFFER,
+        ));
   const incomingIdentity =
     normalizeText(input.document_id) || normalizeText(input.operation_no);
   const existingByIdentity = getDocumentByIdentity(database, incomingIdentity);
-  if (existingByIdentity) return existingByIdentity;
+  if (
+    existingByIdentity &&
+    (!requestedType || existingByIdentity.document_type === requestedType)
+  )
+    return existingByIdentity;
   const status = normalizeText(input.accounting_status) || STATUS.OFFER;
-  const documentType = input.document_type || documentTypeForStatus(status);
-  const documentNo =
-    normalizeNumber(input.serial) || nextDocumentNo(database, documentType);
+  const documentType = requestedType || documentTypeForStatus(status);
+  const requestedNo = normalizeNumber(input.serial);
+  const requestedNoExists = requestedNo
+    ? database.get("SELECT id FROM documents WHERE document_no = ?", [requestedNo])
+    : null;
+  const documentNo = requestedNo && !requestedNoExists ? requestedNo : nextDocumentNo(database);
   const existing = database.get(
     "SELECT * FROM documents WHERE document_type = ? AND document_no = ?",
     [documentType, documentNo],
   );
   if (existing) return existing;
-  const operationNo =
-    normalizeText(input.operation_no) || formatOperationNo(documentNo);
+  const operationNo = formatOperationNo(documentNo);
   const result = database.run(
     `INSERT INTO documents
       (document_type, document_no, operation_no, status, party_id, party_role, party_category,
@@ -1302,8 +1561,7 @@ function accountStatementData(database, query, type) {
       });
     }
   }
-  const paymentAmountSql =
-    "ABS(CASE WHEN COALESCE(wi.collection_amount, 0) <> 0 THEN wi.collection_amount WHEN COALESCE(d.document_type, '') IN ('payment', 'ledger') THEN COALESCE(NULLIF(wi.net_total, 0), NULLIF(wi.gross_total, 0), 0) ELSE 0 END)";
+  const paymentAmountSql = PAYMENT_AMOUNT_SQL;
   const paymentClauses = [
     "wi.deleted_at IS NULL",
     "(d.deleted_at IS NULL OR d.id IS NULL)",
@@ -1904,14 +2162,23 @@ function getReportRows(database, query, type) {
 }
 
 function getReportPaymentRows(database, query, type) {
-  const options = { ...documentOptions(type), rowKind: "payment" };
+  let options = { ...documentOptions(type), rowKind: "payment" };
   const paymentQuery = { ...query };
   if (type === "contractor") {
+    options = { rowKind: "payment" };
     delete paymentQuery.certificate_no;
     delete paymentQuery.work_type;
+    delete paymentQuery.document_id;
+    delete paymentQuery.serial;
+    delete paymentQuery.operation_no;
+    delete paymentQuery.building_unit;
   }
   const { where, params } = whereFromQuery(paymentQuery, options);
-  const dateLimit = normalizeText(query.payment_until_date);
+  const rawDateLimit = normalizeText(query.payment_until_date);
+  const dateLimit =
+    rawDateLimit && rawDateLimit.length === 10
+      ? `${rawDateLimit}T23:59:59+03:00`
+      : rawDateLimit;
   return database.all(
     `SELECT wi.*, d.discount_type, d.discount_value, d.status AS real_document_status
      FROM work_items wi
@@ -2421,7 +2688,7 @@ function reportDateBlock(data) {
     ? ""
     : `
       <div class="issue-line"><span>Entry date:</span><strong>${reportDateTime(entry, "Africa/Cairo")} Cairo</strong></div>
-      <div class="issue-line"><span></span><strong>${reportDateTime(entry, "UTC")} UTC</strong></div>`;
+      ${entry && entry.includes("T") ? `<div class="issue-line"><span></span><strong>${reportDateTime(entry, "UTC")} UTC</strong></div>` : ""}`;
   return `
     <div class="issue-dates">
       <div class="issue-line"><span>Issue date:</span><strong>${reportDateTime(generated, "Africa/Cairo")} Cairo</strong></div>
@@ -2695,7 +2962,7 @@ function contractorPaymentTableHtml(data) {
   if (data.type !== "contractor" || !rows.length) return "";
   return `
     <table class="report-table payment-table">
-      <thead><tr><th>\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062f\u0641\u0639\u0629</th><th>\u0628\u064a\u0627\u0646 \u0627\u0644\u062f\u0641\u0639\u0629</th><th>\u0645\u0644\u0627\u062d\u0638\u0629</th><th>\u0627\u0644\u0645\u0628\u0644\u063a</th></tr></thead>
+      <thead><tr><th>\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062f\u0641\u0639\u0629</th><th>\u0628\u064a\u0627\u0646 \u0627\u0644\u0623\u0639\u0645\u0627\u0644</th><th>\u0628\u064a\u0627\u0646 \u0627\u0644\u062f\u0641\u0639\u0629</th><th>\u0627\u0644\u0645\u0628\u0644\u063a</th></tr></thead>
       <tbody>${rows
         .map(
           (row) => `
@@ -3571,8 +3838,8 @@ async function writeCleanXlsx(data, outputPath) {
     sheet.addRow([]);
     const paymentHeader = sheet.addRow([
       "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062f\u0641\u0639\u0629",
+      "\u0628\u064a\u0627\u0646 \u0627\u0644\u0623\u0639\u0645\u0627\u0644",
       "\u0628\u064a\u0627\u0646 \u0627\u0644\u062f\u0641\u0639\u0629",
-      "\u0645\u0644\u0627\u062d\u0638\u0629",
       "\u0627\u0644\u0645\u0628\u0644\u063a",
     ]);
     paymentHeader.font = { bold: true, color: { argb: "FFD6A84F" } };
@@ -4315,7 +4582,10 @@ async function createServer(options = {}) {
   );
   await database.open();
   ensureRuntimeMigrations(database);
+  repairMisfiledContractorItems(database);
+  normalizeApprovedOffers(database);
   recalculateAllItems(database);
+  cleanupEmptyPaymentDocuments(database);
   ensureRichTerms(database);
   ensureDefaultUsers(database);
   fs.mkdirSync(chatUploadDir, { recursive: true });
@@ -4343,6 +4613,7 @@ async function createServer(options = {}) {
       version: APP_VERSION,
       dataDir,
       dbPath,
+      serverUrl: defaultServerUrl(activePort),
       lanIps: getLanIps(),
       port: activePort,
     });
@@ -4422,12 +4693,11 @@ async function createServer(options = {}) {
     const summary = database.get(
       `
       SELECT COUNT(*) AS rows, COUNT(DISTINCT document_id) AS documents, COUNT(DISTINCT party_id) AS customers,
-             ROUND(SUM(CASE WHEN accounting_status = ? THEN net_total ELSE 0 END), 2) AS offers_total,
-             ROUND(SUM(CASE WHEN accounting_status = ? THEN net_total ELSE 0 END), 2) AS invoices_total,
-             ROUND(SUM(CASE WHEN accounting_status = ? THEN net_total ELSE 0 END), 2) AS contractor_total,
-             ROUND(SUM(net_total), 2) AS net_total
-      FROM active_work_items`,
-      [STATUS.OFFER, STATUS.INVOICE, STATUS.CONTRACTOR],
+             ROUND(SUM(CASE WHEN accounting_status = 'عرض سعر' THEN net_total ELSE 0 END), 2) AS offers_total,
+             ROUND(SUM(CASE WHEN accounting_status = 'فاتورة' OR accounting_status = 'تحصيل' THEN net_total ELSE 0 END), 2) AS invoices_total,
+             ROUND(SUM(CASE WHEN accounting_status = 'مستخلص مقاول' THEN net_total WHEN accounting_status = 'خصم' THEN -net_total ELSE 0 END), 2) AS contractor_total,
+             ROUND(SUM(CASE WHEN accounting_status = 'خصم' THEN -net_total ELSE net_total END), 2) AS net_total
+      FROM active_work_items`
     );
     const docs = database.all(`
       SELECT d.document_type, d.status, COUNT(*) AS count
@@ -4817,7 +5087,9 @@ async function createServer(options = {}) {
               d.project, d.building_unit, d.title,
               ROUND(SUM(CASE WHEN COALESCE(wi.collection_amount, 0) = 0 THEN wi.gross_total ELSE 0 END), 2) AS gross_total,
               ROUND(SUM(CASE WHEN COALESCE(wi.collection_amount, 0) = 0 THEN wi.net_total ELSE 0 END), 2) AS net_total,
-              ROUND(SUM(CASE WHEN COALESCE(wi.collection_amount, 0) <> 0 THEN ABS(wi.collection_amount) ELSE 0 END), 2) AS paid_total,
+              ROUND(SUM(CASE WHEN ${VALID_PAYMENT_ROW_SQL} THEN ABS(wi.collection_amount) ELSE 0 END), 2) AS paid_total,
+              SUM(CASE WHEN wi.id IS NOT NULL AND COALESCE(wi.collection_amount, 0) = 0 THEN 1 ELSE 0 END) AS work_rows_count,
+              SUM(CASE WHEN wi.id IS NOT NULL AND ${VALID_PAYMENT_ROW_SQL} THEN 1 ELSE 0 END) AS payment_rows_count,
               COUNT(wi.id) AS rows_count
        FROM documents d
        LEFT JOIN work_items wi ON wi.document_id = d.id AND wi.deleted_at IS NULL
@@ -4826,29 +5098,47 @@ async function createServer(options = {}) {
        ORDER BY COALESCE(d.entry_date, '') DESC, d.document_no DESC`,
       [party.id],
     );
-    const payments = docs.filter(
-      (doc) => doc.document_type === "payment" && doc.status === "approved",
+    const docsWithRows = docs.filter(
+      (doc) =>
+        numberOrZero(doc.work_rows_count) > 0 ||
+        numberOrZero(doc.payment_rows_count) > 0,
     );
-    const priceOffers = docs.filter(
+    const workDocs = docsWithRows.filter(
+      (doc) =>
+        numberOrZero(doc.work_rows_count) > 0 &&
+        (numberOrZero(doc.gross_total) !== 0 ||
+          numberOrZero(doc.net_total) !== 0),
+    );
+    const payments = docs.filter(
+      (doc) =>
+        numberOrZero(doc.payment_rows_count) > 0 &&
+        doc.status === "approved",
+    ).map((doc) => ({
+      ...doc,
+      document_type: "payment",
+      net_total: 0,
+      gross_total: 0,
+    }));
+    const priceOffers = workDocs.filter(
       (doc) => doc.document_type === "price_offer" && doc.status !== "approved",
     );
-    const invoices = docs.filter(
+    const invoices = workDocs.filter(
       (doc) =>
         doc.status === "approved" &&
         (doc.document_type === "invoice" ||
           doc.document_type === "price_offer"),
     );
-    const statementDocs = docs.filter(
-      (doc) =>
-        doc.status === "approved" &&
-        (doc.document_type === "invoice" || doc.document_type === "payment"),
-    );
-    const projectNames = uniqueStrings(docs.map((doc) => doc.project));
+    const statementDocs = [
+      ...new Map([...invoices, ...payments].map((doc) => [doc.id, doc])).values(),
+    ];
+    const projectNames = uniqueStrings(workDocs.map((doc) => doc.project));
     const statementProjectNames = uniqueStrings(
       statementDocs.map((doc) => doc.project),
     );
     const projects = projectNames.map((project) => {
-      const projectDocs = docs.filter((doc) => (doc.project || "") === project);
+      const projectDocs = workDocs.filter(
+        (doc) => (doc.project || "") === project,
+      );
       return {
         name: project,
         documents: projectDocs,
@@ -4970,7 +5260,7 @@ async function createServer(options = {}) {
 
   app.get("/api/next-document-no", (req, res) => {
     const type = req.query.type || "price_offer";
-    const nextNo = nextDocumentNo(database, type);
+    const nextNo = nextDocumentNo(database);
     res.json({
       type,
       next_no: nextNo,
@@ -4978,12 +5268,71 @@ async function createServer(options = {}) {
     });
   });
 
+  app.get("/api/next-certificate-no", (req, res) => {
+    const partyId = Number(req.query.party_id || 0);
+    const project = normalizeText(req.query.project);
+    if (!partyId)
+      return res.status(400).json({ error: "party_id is required" });
+    const params = [partyId];
+    let projectClause = "";
+    if (project) {
+      projectClause = "AND COALESCE(wi.project, '') = ?";
+      params.push(project);
+    }
+    const row = database.get(
+      `SELECT COALESCE(MAX(CASE
+          WHEN TRIM(COALESCE(wi.certificate_no, '')) GLOB '[0-9]*'
+          THEN CAST(wi.certificate_no AS INTEGER)
+          ELSE 0 END), 0) AS last_no
+       FROM work_items wi
+       JOIN documents d ON d.id = wi.document_id
+       WHERE wi.deleted_at IS NULL
+         AND d.deleted_at IS NULL
+         AND d.document_type = 'contractor_certificate'
+         AND COALESCE(wi.party_id, d.party_id) = ?
+         ${projectClause}`,
+      params,
+    );
+    const lastNo = Number(row?.last_no || 0);
+    res.json({ party_id: partyId, project, last_no: lastNo, next_no: lastNo + 1 });
+  });
+
   app.put("/api/documents/:id", (req, res) => {
+    const documentId = Number(req.params.id);
+    const current = database.get("SELECT * FROM documents WHERE id = ?", [
+      documentId,
+    ]);
+    if (!current) return res.status(404).json({ error: "Document not found" });
+    const requestedStatus = Object.prototype.hasOwnProperty.call(req.body, "status")
+      ? normalizeText(req.body.status)
+      : current.status;
+    let requestedType = Object.prototype.hasOwnProperty.call(req.body, "document_type")
+      ? normalizeText(req.body.document_type)
+      : current.document_type;
+    if (current.document_type === "price_offer" && requestedStatus === "approved")
+      requestedType = "invoice";
+    if (!["price_offer", "invoice", "contractor_certificate", "payment", "ledger"].includes(requestedType))
+      requestedType = current.document_type;
+    if (requestedType !== current.document_type) {
+      const collision = database.get(
+        "SELECT id FROM documents WHERE document_type = ? AND document_no = ? AND id <> ? AND deleted_at IS NULL",
+        [requestedType, current.document_no, documentId],
+      );
+      if (collision)
+        return res.status(409).json({ error: "Document number already exists for the target type" });
+    }
     const allowed = [
       "status",
+      "document_type",
       "project",
       "building_unit",
       "title",
+      "entry_date",
+      "party_id",
+      "party_role",
+      "party_category",
+      "customer_name",
+      "search_party_name",
       "discount_type",
       "discount_value",
       "notes",
@@ -4991,34 +5340,69 @@ async function createServer(options = {}) {
     const sets = [];
     const params = [];
     for (const key of allowed) {
-      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+      if (key === "document_type") {
+        if (requestedType !== current.document_type) {
+          sets.push("document_type = ?");
+          params.push(requestedType);
+        }
+      } else if (Object.prototype.hasOwnProperty.call(req.body, key)) {
         sets.push(`${key} = ?`);
-        params.push(req.body[key]);
+        params.push(
+          key === "entry_date"
+            ? normalizeEntryDateTime(req.body[key], current.entry_date)
+            : req.body[key],
+        );
       }
     }
     if (!sets.length) return res.status(400).json({ error: "No changes" });
-    params.push(Number(req.params.id));
+    params.push(documentId);
     database.run(
       `UPDATE documents SET ${sets.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       params,
     );
-    res.json(
-      database.get("SELECT * FROM documents WHERE id = ?", [
-        Number(req.params.id),
-      ]),
+    const updated = database.get("SELECT * FROM documents WHERE id = ?", [
+      documentId,
+    ]);
+    database.run(
+      `UPDATE work_items
+       SET serial = ?, operation_no = ?, accounting_status = ?, document_status = ?,
+           party_id = ?, party_role = ?, party_category = ?, customer_name = ?,
+           customer_display_name = ?, search_party_name = ?, project = ?,
+           building_unit = ?, entry_date = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE document_id = ? AND deleted_at IS NULL`,
+      [
+        updated.document_no,
+        updated.operation_no,
+        statusForDocumentType(updated.document_type) || STATUS.OFFER,
+        updated.status,
+        updated.party_id,
+        updated.party_role,
+        updated.party_category,
+        updated.customer_name,
+        updated.customer_name,
+        updated.search_party_name,
+        updated.project,
+        updated.building_unit,
+        updated.entry_date,
+        documentId,
+      ],
     );
+    res.json(updated);
   });
 
   app.get("/api/payment-customers", (req, res) => {
-    const paymentAmountExpr =
-      "ABS(CASE WHEN COALESCE(wi.collection_amount, 0) <> 0 THEN wi.collection_amount WHEN COALESCE(d.document_type, '') IN ('payment', 'ledger') THEN COALESCE(NULLIF(wi.net_total, 0), NULLIF(wi.gross_total, 0), 0) ELSE 0 END)";
+    const paymentAmountExpr = PAYMENT_AMOUNT_SQL;
     const clauses = [
       "wi.deleted_at IS NULL",
       "d.deleted_at IS NULL",
-      `${paymentAmountExpr} > 0`,
+      VALID_PAYMENT_ROW_SQL,
       "d.status = 'approved'",
     ];
     const params = [];
+    if (req.query.role) {
+      clauses.push("COALESCE(p.role, wi.party_role) = ?");
+      params.push(req.query.role);
+    }
     const q = normalizeText(req.query.q);
     const search = sqlLikeNormalized(q);
     if (search) {
@@ -5049,12 +5433,11 @@ async function createServer(options = {}) {
 
   app.get("/api/payments", (req, res) => {
     const limit = Math.min(Number(req.query.limit || 100), 2000);
-    const paymentAmountExpr =
-      "ABS(CASE WHEN COALESCE(wi.collection_amount, 0) <> 0 THEN wi.collection_amount WHEN COALESCE(d.document_type, '') IN ('payment', 'ledger') THEN COALESCE(NULLIF(wi.net_total, 0), NULLIF(wi.gross_total, 0), 0) ELSE 0 END)";
+    const paymentAmountExpr = PAYMENT_AMOUNT_SQL;
     const clauses = [
       "wi.deleted_at IS NULL",
       "d.deleted_at IS NULL",
-      `${paymentAmountExpr} > 0`,
+      VALID_PAYMENT_ROW_SQL,
     ];
     const params = [];
     if (req.query.party_id) {
@@ -5128,20 +5511,24 @@ async function createServer(options = {}) {
       return res
         .status(400)
         .json({ error: "Payment amount must be greater than zero" });
+    const isOut = req.body.payment_type === "out" || req.body.party_role === "contractor";
     const paymentBody = {
       ...req.body,
-      party_role: "customer",
+      party_role: isOut ? "contractor" : "customer",
       document_type: "payment",
       document_status: "approved",
-      accounting_status: "تحصيل",
+      accounting_status: isOut ? "خصم" : "تحصيل",
       unit_code: "count",
       item_count: 0,
       total_quantity: 0,
       rate: 0,
-      work_type: normalizeText(req.body.work_type) || "تحصيل",
-      description: normalizeText(req.body.description) || "تحصيل",
+      work_type: normalizeText(req.body.work_type) || (isOut ? "خصم" : "تحصيل"),
+      description:
+        normalizeText(req.body.description) ||
+        normalizeText(req.body.work_type) ||
+        (isOut ? "خصم" : "تحصيل"),
       collection_note:
-        normalizeText(req.body.note || req.body.collection_note) || "تحصيل",
+        normalizeText(req.body.note || req.body.collection_note) || (isOut ? "خصم" : "تحصيل"),
       collection_amount: amount,
     };
     const entry = normalizeInput(database, paymentBody);
@@ -5224,10 +5611,25 @@ async function createServer(options = {}) {
   });
 
   app.delete("/api/entries/:id", (req, res) => {
-    database.run(
-      "UPDATE work_items SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
-      [Number(req.params.id)],
+    const id = Number(req.params.id);
+    const existing = database.get(
+      `SELECT wi.*, d.document_type AS current_document_type
+       FROM work_items wi
+       LEFT JOIN documents d ON d.id = wi.document_id
+       WHERE wi.id = ? AND wi.deleted_at IS NULL`,
+      [id],
     );
+    if (!existing) return res.status(404).json({ error: "Entry not found" });
+    const documentId = Number(existing.document_id || 0);
+    if (isPaymentEntryRow(existing)) {
+      database.run("DELETE FROM work_items WHERE id = ?", [id]);
+    } else {
+      database.run(
+        "UPDATE work_items SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [id],
+      );
+    }
+    cleanupEmptyPaymentDocument(database, documentId);
     res.json({ ok: true });
   });
 
@@ -5401,12 +5803,14 @@ async function createServer(options = {}) {
       return res.status(403).json({ error: "Wrong password" });
     const port = options.port || DEFAULT_PORT;
     const lanIps = getLanIps();
+    const serverUrl = defaultServerUrl(port);
     res.json({
       ok: true,
       hosting: true,
       message:
         "Server is running. Keep this PC awake and this server process open.",
-      localUrl: `http://127.0.0.1:${port}`,
+      serverUrl,
+      localUrl: serverUrl,
       lanUrls: lanIps.map((ip) => `http://${ip}:${port}`),
       dataDir,
       dbPath,
@@ -5583,7 +5987,7 @@ if (require.main === module) {
     .then((server) => {
       server.listen(DEFAULT_PORT).then(() => {
         console.log(
-          `Accounting Management server: http://127.0.0.1:${DEFAULT_PORT}`,
+          `Accounting Management server: ${defaultServerUrl(DEFAULT_PORT)}`,
         );
         console.log(`Database: ${server.dbPath}`);
         for (const ip of getLanIps())

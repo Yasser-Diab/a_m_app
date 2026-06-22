@@ -149,7 +149,7 @@ function calculateItem(input = {}) {
     : 0;
 
   const netTotal = collectionAmount
-    ? -Math.abs(collectionAmount)
+    ? (input.party_role === 'contractor' ? Math.abs(collectionAmount) : -Math.abs(collectionAmount))
     : postVatBase
       - socialInsuranceAmount
       - stampAmount
