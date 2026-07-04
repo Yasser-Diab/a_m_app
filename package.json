@@ -1,6 +1,6 @@
 {
   "name": "accounting-management",
-  "version": "1.3.5",
+  "version": "1.3.9",
   "description": "Local multi-user price offers, invoices, account statements, and contractor certificates.",
   "author": "Yasser Diab",
   "main": "electron/main.cjs",
@@ -11,15 +11,18 @@
     "dev:electron": "wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "api": "node server/index.cjs",
     "import:excel": "python tools/import_excel.py QID-YD.xlsm data/price_offer.db",
-    "build:web": "rimraf dist && vite build --emptyOutDir",
+    "prepare:database": "node scripts/create_empty_database.cjs",
+    "build:web": "rimraf dist && vite build --emptyOutDir && node scripts/verify_built_assets.cjs dist",
     "build:web:raw": "rimraf dist && vite build --emptyOutDir",
+    "verify:assets": "node scripts/verify_built_assets.cjs",
     "dist:win": "powershell -ExecutionPolicy Bypass -File scripts/build_win_variants.ps1",
-    "cap:sync": "npm run build:web && cap sync android",
+    "cap:sync": "npm run build:web && node scripts/clean_android_assets.cjs && cap sync android && node scripts/verify_built_assets.cjs android",
     "android:add": "cap add android",
     "android:debug": "powershell -ExecutionPolicy Bypass -File scripts/build_android_variants.ps1",
     "package:release": "powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1"
   },
   "dependencies": {
+    "@capacitor/local-notifications": "^7.0.6",
     "cors": "^2.8.5",
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
@@ -28,19 +31,19 @@
   },
   "devDependencies": {
     "@capacitor/android": "^7.4.3",
+    "@capacitor/cli": "^7.4.3",
     "@capacitor/core": "^7.4.3",
     "@capacitor/filesystem": "^7.1.8",
     "@capacitor/share": "^7.0.4",
     "@vitejs/plugin-react": "^5.1.1",
-    "lucide-react": "^0.561.0",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3",
-    "vite": "^7.2.7",
-    "@capacitor/cli": "^7.4.3",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^39.2.7",
     "electron-builder": "^26.1.0",
+    "lucide-react": "^0.561.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "vite": "^7.2.7",
     "wait-on": "^9.0.3"
   },
   "build": {
@@ -48,7 +51,7 @@
     "productName": "Accounting Management",
     "asar": true,
     "asarUnpack": [
-      "data/price_offer.db",
+      "data/price_offer.empty.db",
       "node_modules/sql.js/dist/*.wasm"
     ],
     "directories": {
@@ -59,7 +62,7 @@
       "electron/**/*",
       "server/**/*",
       "tools/print_pdf.cjs",
-      "data/price_offer.db",
+      "data/price_offer.empty.db",
       "src/assets/sticker logo s.png",
       "src/assets/export_logo.png",
       "build/**/*",

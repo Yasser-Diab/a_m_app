@@ -10,6 +10,10 @@ const ExcelJS = require("exceljs");
 const QRCodeSvg = require("qrcode-svg");
 const { AppDatabase } = require("./db.cjs");
 const {
+  registerManagerGatewayRoutes,
+  syncAccountToManager,
+} = require("./manager_gateway.cjs");
+const {
   boolValue,
   calculateItem,
   excelSerialToIso,
@@ -40,7 +44,7 @@ const REPORT_LOGO_PATH = path.join(
 );
 const DEFAULT_PORT = Number(process.env.PRICE_OFFER_PORT || 4181);
 const DEFAULT_LAN_HOST = process.env.PRICE_OFFER_DEFAULT_HOST || "192.168.137.1";
-const RELEASE_DATA_DIR = "D:\\releases\\AccountingManagement_V1.3.3\\price_offer\\data";
+const WINDOWS_EXTERNAL_DATA_DIR = "D:\\AM_Data";
 const APP_VERSION = (() => {
   try {
     return require(path.join(ROOT_DIR, "package.json")).version || "0.0.0";
@@ -48,8 +52,107 @@ const APP_VERSION = (() => {
     return "0.0.0";
   }
 })();
+const RELEASE_DATA_DIR =
+  process.env.AM_RELEASE_DATA_DIR ||
+  path.join("D:\\releases", `AccountingManagement_V${APP_VERSION}`, "price_offer", "data");
 const UPDATE_REPOSITORY =
   process.env.AM_UPDATE_REPOSITORY || "Yasser-Diab/a_m_app";
+const APP_NAME = "Accounting Management";
+const TRIAL_DAYS = 7;
+const SUBSCRIPTION_REMINDER_HOURS = 8;
+const COMPANY_SERVER_INSTANCES = new Map();
+
+const DEFAULT_REPORT_BRANDING = Object.freeze({
+  companyNameEn: APP_NAME,
+  companyNameAr: APP_NAME,
+  companyAbbreviation: "A.M",
+  website: "",
+  companyAddress: "Cairo, Egypt",
+  companyPhone: "",
+  footerContactMode: "website",
+  companyNameColor: "#146b5c",
+  lineColor: "#89d8ce",
+  tableHeaderBg: "#1a2d31",
+  tableHeaderText: "#d9f7f2",
+  tableBodyText: "#1b1b1b",
+  tableOddBg: "#faf8f2",
+  tableEvenBg: "#ffffff",
+  qrColor: "#111111",
+  qrBackground: "#ffffff",
+  showAddressInDateBlock: false,
+  headingFontFamily: "georgia",
+  bodyFontFamily: "arial",
+  logoDataUri: "",
+});
+
+const REPORT_FONT_STACKS = Object.freeze({
+  arial: 'Arial,"Segoe UI",Tahoma,sans-serif',
+  tahoma: 'Tahoma,Arial,"Segoe UI",sans-serif',
+  segoe: '"Segoe UI",Tahoma,Arial,sans-serif',
+  cairo: 'Cairo,Arial,"Segoe UI",Tahoma,sans-serif',
+  georgia: 'Georgia,"Times New Roman",serif',
+  times: '"Times New Roman",Georgia,serif',
+});
+
+const DEFAULT_SUBSCRIPTION_PLANS = Object.freeze([
+  {
+    id: "starter",
+    name: "Starter",
+    users: 4,
+    monthly: 15,
+    annually: 110,
+    currency: "USD",
+    active: true,
+  },
+  {
+    id: "team",
+    name: "Team",
+    users: 10,
+    monthly: 35,
+    annually: 300,
+    currency: "USD",
+    active: true,
+  },
+  {
+    id: "company",
+    name: "Company",
+    users: 25,
+    monthly: 75,
+    annually: 700,
+    currency: "USD",
+    active: true,
+  },
+]);
+
+const DEFAULT_MANAGER_SETTINGS = Object.freeze({
+  publicUrl: "https://offers.yasserdiab.site/manager",
+  businessName: "Accounting Management",
+  sellerName: "Eng. Yasser Diab",
+  ownerLoginName: "Yasser",
+  ownerLoginEmail: "",
+  ownerPassword: "23320001",
+  supportEmail: "",
+  supportPhone: "",
+  headline: "Subscribe to Accounting Management",
+  tagline:
+    "Choose a plan, pay online, and your subscription is activated after payment confirmation.",
+  paymentMethods: [
+    {
+      id: "paypal",
+      label: "PayPal",
+      type: "paypal",
+      enabled: true,
+      instructions: "Pay with PayPal. Card checkout is available when enabled by the PayPal account.",
+    },
+    {
+      id: "card",
+      label: "Credit / Debit Card through PayPal",
+      type: "paypal",
+      enabled: true,
+      instructions: "Card payments are handled by PayPal checkout when the account supports them.",
+    },
+  ],
+});
 
 const ENTRY_COLUMNS = [
   "source_row",
@@ -129,13 +232,18 @@ const ENTRY_COLUMNS = [
 function getDataDir() {
   const configured = process.env.PRICE_OFFER_DATA_DIR;
   if (configured) return path.resolve(configured);
+  if (process.platform === "win32" && fs.existsSync(WINDOWS_EXTERNAL_DATA_DIR)) {
+    return WINDOWS_EXTERNAL_DATA_DIR;
+  }
   if (fs.existsSync(RELEASE_DATA_DIR)) return RELEASE_DATA_DIR;
   return path.join(ROOT_DIR, "data");
 }
 
 function seedDatabaseIfNeeded(dbPath) {
   if (fs.existsSync(dbPath)) return;
-  const seed = path.join(ROOT_DIR, "data", "price_offer.db");
+  const cleanSeed = path.join(ROOT_DIR, "data", "price_offer.empty.db");
+  const liveSeed = path.join(ROOT_DIR, "data", "price_offer.db");
+  const seed = fs.existsSync(cleanSeed) ? cleanSeed : liveSeed;
   if (seed !== dbPath && fs.existsSync(seed)) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     fs.copyFileSync(seed, dbPath);
@@ -162,6 +270,36 @@ function defaultServerUrl(port = DEFAULT_PORT) {
 function normalizeText(value) {
   const text = String(value ?? "").trim();
   return text || null;
+}
+
+function serverConfigFilePath(baseDataDir = getDataDir()) {
+  return path.join(baseDataDir, "server_config.json");
+}
+
+function readBootstrapServerConfig() {
+  try {
+    const filePath = serverConfigFilePath(getDataDir());
+    if (!fs.existsSync(filePath)) return {};
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function writeBootstrapServerConfig(config = {}, baseDataDir = getDataDir()) {
+  const clean = {
+    dataDir: normalizeText(config.dataDir),
+    dbPath: normalizeText(config.dbPath),
+    databaseProvider: normalizeText(config.databaseProvider),
+    remoteDatabaseUrl: normalizeText(config.remoteDatabaseUrl),
+    updatedAt: new Date().toISOString(),
+  };
+  fs.mkdirSync(baseDataDir, { recursive: true });
+  fs.writeFileSync(serverConfigFilePath(baseDataDir), JSON.stringify(clean, null, 2));
+  return clean;
 }
 
 const UNASSIGNED_PROJECT_FILTER = "__unassigned__";
@@ -549,6 +687,28 @@ function nextDocumentNo(database) {
   return row.next_no || 1;
 }
 
+function documentNumberInUse(database, documentNo, excludeDocumentId = 0) {
+  const normalizedNo = normalizeNumber(documentNo);
+  if (!normalizedNo) return false;
+  const row = database.get(
+    "SELECT id FROM documents WHERE document_no = ? AND id <> ? LIMIT 1",
+    [normalizedNo, Number(excludeDocumentId || 0)],
+  );
+  return !!row;
+}
+
+function nextAvailableDocumentNo(database, minimumNo = 1, excludeDocumentId = 0) {
+  let candidate = Math.max(
+    1,
+    Math.trunc(Number(minimumNo || 0)),
+    Math.trunc(Number(nextDocumentNo(database) || 0)),
+  );
+  while (documentNumberInUse(database, candidate, excludeDocumentId)) {
+    candidate += 1;
+  }
+  return candidate;
+}
+
 function normalizeApprovedOffers(database) {
   const approvedOffers = database.all(
     `SELECT id, document_no FROM documents
@@ -704,7 +864,34 @@ function getOrCreateParty(database, input) {
     "SELECT * FROM parties WHERE role = ? AND search_name = ?",
     [party.role, party.searchName],
   );
-  if (existing) return existing;
+  if (existing) {
+    const category = storedPartyCategory(party.category);
+    const baseName = party.baseName || existing.base_name || "";
+    const displayName =
+      displayPartyName(baseName, party.category) ||
+      party.displayName ||
+      existing.display_name ||
+      baseName;
+    const searchName = party.searchName || existing.search_name;
+    const shouldUpdate =
+      (existing.category || null) !== (category || null) ||
+      normalizeText(existing.base_name) !== normalizeText(baseName) ||
+      normalizeText(existing.display_name) !== normalizeText(displayName) ||
+      normalizeText(existing.search_name) !== normalizeText(searchName);
+    if (shouldUpdate) {
+      database.run(
+        `UPDATE parties
+         SET category = ?, base_name = ?, display_name = ?, search_name = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [category, baseName, displayName, searchName, existing.id],
+      );
+      existing = database.get("SELECT * FROM parties WHERE id = ?", [
+        existing.id,
+      ]);
+    }
+    return existing?.category ? existing : { ...existing, category: party.category };
+  }
   const result = database.run(
     `INSERT INTO parties (role, category, base_name, display_name, search_name)
      VALUES (?, ?, ?, ?, ?)`,
@@ -722,7 +909,7 @@ function getOrCreateParty(database, input) {
   return created?.category ? created : { ...created, category: party.category };
 }
 
-function getOrCreateDocument(database, input, party) {
+function getOrCreateDocument(database, input, party, existing = {}) {
   const requestedType =
     input.document_type ||
     (normalizeText(input.accounting_status) === "تحصيل"
@@ -730,64 +917,72 @@ function getOrCreateDocument(database, input, party) {
       : documentTypeForStatus(
           normalizeText(input.accounting_status) || STATUS.OFFER,
         ));
-  const incomingIdentity =
-    normalizeText(input.document_id) || normalizeText(input.operation_no);
-  const existingByIdentity = getDocumentByIdentity(database, incomingIdentity);
-  if (
-    existingByIdentity &&
-    (!requestedType || existingByIdentity.document_type === requestedType)
-  )
-    return existingByIdentity;
+  const explicitDocumentId =
+    normalizeNumber(input.document_id) || normalizeNumber(existing.document_id);
+  if (explicitDocumentId) {
+    const existingById = database.get("SELECT * FROM documents WHERE id = ?", [
+      explicitDocumentId,
+    ]);
+    if (existingById) return existingById;
+  }
+  if (existing.id && (existing.operation_no || existing.serial)) {
+    const existingByLegacyIdentity = getDocumentByIdentity(
+      database,
+      existing.operation_no || existing.serial,
+    );
+    if (existingByLegacyIdentity) return existingByLegacyIdentity;
+  }
   const status = normalizeText(input.accounting_status) || STATUS.OFFER;
-  const documentType = requestedType || documentTypeForStatus(status);
-  const requestedNo = normalizeNumber(input.serial);
-  const requestedNoExists = requestedNo
-    ? database.get("SELECT id FROM documents WHERE document_no = ?", [requestedNo])
-    : null;
-  const documentNo = requestedNo && !requestedNoExists ? requestedNo : nextDocumentNo(database);
-  const existing = database.get(
-    "SELECT * FROM documents WHERE document_type = ? AND document_no = ?",
-    [documentType, documentNo],
-  );
-  if (existing) return existing;
-  const operationNo = formatOperationNo(documentNo);
-  const result = database.run(
-    `INSERT INTO documents
-      (document_type, document_no, operation_no, status, party_id, party_role, party_category,
-       customer_name, search_party_name, project, building_unit, entry_date, discount_type, discount_value)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      documentType,
-      documentNo,
-      operationNo,
-      input.document_status ||
-        (documentType === "price_offer" ? "draft" : "approved"),
-      party?.id || null,
-      party?.role || "customer",
-      party?.category || null,
-      party?.display_name ||
-        input.customer_display_name ||
-        input.customer_name ||
-        null,
-      party?.search_name || normalizeArabic(input.customer_name),
-      normalizeText(input.project),
-      normalizeText(input.building_unit),
-      normalizeEntryDateTime(input.entry_date),
-      ["rate", "amount"].includes(input.discount_type)
-        ? input.discount_type
-        : "none",
-      numberOrZero(input.discount_value),
-    ],
-  );
-  return database.get("SELECT * FROM documents WHERE id = ?", [
-    result.lastInsertRowid,
-  ]);
+  const documentType = requestedType || documentTypeForStatus(status) || "price_offer";
+  let minimumNo = nextDocumentNo(database);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const documentNo = nextAvailableDocumentNo(database, minimumNo);
+    const operationNo = formatOperationNo(documentNo);
+    try {
+      const result = database.run(
+        `INSERT INTO documents
+          (document_type, document_no, operation_no, status, party_id, party_role, party_category,
+           customer_name, search_party_name, project, building_unit, entry_date, discount_type, discount_value)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          documentType,
+          documentNo,
+          operationNo,
+          input.document_status ||
+            (documentType === "price_offer" ? "draft" : "approved"),
+          party?.id || null,
+          party?.role || "customer",
+          party?.category || null,
+          party?.display_name ||
+            input.customer_display_name ||
+            input.customer_name ||
+            null,
+          party?.search_name || normalizeArabic(input.customer_name),
+          normalizeText(input.project),
+          normalizeText(input.building_unit),
+          normalizeEntryDateTime(input.entry_date),
+          ["rate", "amount"].includes(input.discount_type)
+            ? input.discount_type
+            : "none",
+          numberOrZero(input.discount_value),
+        ],
+      );
+      return database.get("SELECT * FROM documents WHERE id = ?", [
+        result.lastInsertRowid,
+      ]);
+    } catch (error) {
+      if (!/constraint|unique/i.test(String(error?.message || error)))
+        throw error;
+      minimumNo = documentNo + 1;
+    }
+  }
+  throw new Error("Could not allocate a unique document number. Please retry.");
 }
 
 function normalizeInput(database, body, existing = {}) {
   const item = { ...existing, ...body };
   const party = getOrCreateParty(database, item);
-  const document = getOrCreateDocument(database, item, party);
+  const document = getOrCreateDocument(database, item, party, existing);
   const status =
     statusForDocumentType(document?.document_type) ||
     normalizeText(item.accounting_status) ||
@@ -1928,6 +2123,1282 @@ function adminPassword(database) {
   );
 }
 
+function readSetting(database, key, fallback = "") {
+  const row = database.get("SELECT value FROM app_settings WHERE key = ?", [key]);
+  return row?.value ?? fallback;
+}
+
+function readJsonSetting(database, key, fallback) {
+  try {
+    const raw = readSetting(database, key, "");
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeSetting(database, key, value) {
+  database.run(
+    "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+    [key, String(value ?? "")],
+  );
+}
+
+function writeJsonSetting(database, key, value) {
+  writeSetting(database, key, JSON.stringify(value));
+}
+
+function safeCssColor(value, fallback) {
+  const text = String(value || "").trim();
+  if (/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(text)) return text;
+  return fallback;
+}
+
+function safeFontKey(value, fallback) {
+  const key = String(value || "").trim().toLowerCase();
+  return REPORT_FONT_STACKS[key] ? key : fallback;
+}
+
+function safeImageDataUri(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (!/^data:image\/[-+.\w]+;base64,[a-z0-9+/=\s]+$/i.test(text)) return "";
+  return text.length <= 12 * 1024 * 1024 ? text : "";
+}
+
+function looksCorruptDisplayText(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  const questionMarks = (text.match(/\?/g) || []).length;
+  return questionMarks >= 3 || text.includes("\ufffd") || /[ØÙÃÂ]/.test(text);
+}
+
+function normalizeReportBranding(input = {}) {
+  const fallback = DEFAULT_REPORT_BRANDING;
+  const companyNameEn =
+    normalizeText(input.companyNameEn || input.company_name_en) ||
+    fallback.companyNameEn;
+  const rawCompanyNameAr = normalizeText(
+    input.companyNameAr || input.company_name_ar,
+  );
+  const companyNameArFallback = /(?:EL\s+HANDASIA|HGAD)/i.test(companyNameEn)
+    ? fallback.companyNameAr
+    : companyNameEn || fallback.companyNameAr;
+  const abbreviation =
+    normalizeText(input.companyAbbreviation || input.abbreviation) ||
+    fallback.companyAbbreviation;
+  return {
+    companyNameEn,
+    companyNameAr:
+      rawCompanyNameAr && !looksCorruptDisplayText(rawCompanyNameAr)
+        ? rawCompanyNameAr
+        : companyNameArFallback,
+    companyAbbreviation: abbreviation.slice(0, 24),
+    website: normalizeText(input.website) || fallback.website,
+    companyAddress:
+      normalizeText(input.companyAddress || input.company_address || input.address) ||
+      fallback.companyAddress,
+    companyPhone:
+      normalizeText(input.companyPhone || input.company_phone || input.phone) ||
+      fallback.companyPhone,
+    footerContactMode: ["website", "address", "both"].includes(
+      String(input.footerContactMode || input.footer_contact_mode || "").trim(),
+    )
+      ? String(input.footerContactMode || input.footer_contact_mode).trim()
+      : fallback.footerContactMode,
+    companyNameColor: safeCssColor(input.companyNameColor, fallback.companyNameColor),
+    lineColor: safeCssColor(input.lineColor, fallback.lineColor),
+    tableHeaderBg: safeCssColor(input.tableHeaderBg, fallback.tableHeaderBg),
+    tableHeaderText: safeCssColor(input.tableHeaderText, fallback.tableHeaderText),
+    tableBodyText: safeCssColor(input.tableBodyText, fallback.tableBodyText),
+    tableOddBg: safeCssColor(input.tableOddBg, fallback.tableOddBg),
+    tableEvenBg: safeCssColor(input.tableEvenBg, fallback.tableEvenBg),
+    qrColor: safeCssColor(input.qrColor, fallback.qrColor),
+    qrBackground: safeCssColor(input.qrBackground, fallback.qrBackground),
+    showAddressInDateBlock: normalizeBool(input.showAddressInDateBlock),
+    headingFontFamily: safeFontKey(input.headingFontFamily, fallback.headingFontFamily),
+    bodyFontFamily: safeFontKey(input.bodyFontFamily, fallback.bodyFontFamily),
+    logoDataUri: safeImageDataUri(input.logoDataUri),
+  };
+}
+
+function reportBranding(database) {
+  const stored = readJsonSetting(database, "report_branding", {});
+  const legacy = {
+    companyNameAr: readSetting(database, "company_name_ar", ""),
+    companyNameEn: readSetting(database, "company_name_en", ""),
+    companyAddress: readSetting(database, "company_address", ""),
+  };
+  const branding = normalizeReportBranding({
+    ...DEFAULT_REPORT_BRANDING,
+    ...legacy,
+    ...stored,
+  });
+  return {
+    ...branding,
+    headingFontStack:
+      REPORT_FONT_STACKS[branding.headingFontFamily] ||
+      REPORT_FONT_STACKS[DEFAULT_REPORT_BRANDING.headingFontFamily],
+    bodyFontStack:
+      REPORT_FONT_STACKS[branding.bodyFontFamily] ||
+      REPORT_FONT_STACKS[DEFAULT_REPORT_BRANDING.bodyFontFamily],
+  };
+}
+
+function reportBrandingFallback() {
+  const branding = normalizeReportBranding(DEFAULT_REPORT_BRANDING);
+  return {
+    ...branding,
+    headingFontStack: REPORT_FONT_STACKS[branding.headingFontFamily],
+    bodyFontStack: REPORT_FONT_STACKS[branding.bodyFontFamily],
+  };
+}
+
+function brandingFooterContact(branding = {}) {
+  const website = normalizeText(branding.website);
+  const address = normalizeText(branding.companyAddress);
+  if (branding.footerContactMode === "address") return address || website || "";
+  if (branding.footerContactMode === "both")
+    return [website, address].filter(Boolean).join(" | ");
+  return website || address || "";
+}
+
+function normalizeSubscriptionPlans(plans = []) {
+  const rows = Array.isArray(plans) ? plans : [];
+  return rows
+    .map((plan, index) => {
+      const name = normalizeText(plan.name) || `Plan ${index + 1}`;
+      const id =
+        normalizeText(plan.id) ||
+        name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "") ||
+        `plan-${index + 1}`;
+      return {
+        id,
+        name,
+        users: Math.max(1, Math.floor(numberOrZero(plan.users))),
+        monthly: roundMoney(plan.monthly),
+        annually: roundMoney(plan.annually),
+        currency: "USD",
+        active: normalizeBool(plan.active ?? 1),
+      };
+    })
+    .filter((plan) => plan.id && plan.name);
+}
+
+function subscriptionPlans(database) {
+  const stored = readJsonSetting(database, "subscription_plans", null);
+  const plans = normalizeSubscriptionPlans(stored || DEFAULT_SUBSCRIPTION_PLANS);
+  return plans.length ? plans : normalizeSubscriptionPlans(DEFAULT_SUBSCRIPTION_PLANS);
+}
+
+function normalizeManagerSettings(input = {}) {
+  const merged = { ...DEFAULT_MANAGER_SETTINGS, ...(input || {}) };
+  const paymentMethods = (
+    Array.isArray(merged.paymentMethods)
+      ? merged.paymentMethods
+      : DEFAULT_MANAGER_SETTINGS.paymentMethods
+  )
+    .map((method, index) => ({
+      id: normalizeText(method.id) || `method-${index + 1}`,
+      label: normalizeText(method.label) || `Payment method ${index + 1}`,
+      type: "paypal",
+      enabled: normalizeBool(method.enabled ?? true),
+      instructions: normalizeText(method.instructions) || "",
+    }))
+    .filter((method) =>
+      ["paypal", "card"].includes(method.id) ||
+      /paypal|card|credit|debit/i.test(`${method.label} ${method.instructions}`),
+    );
+  return {
+    publicUrl: normalizeText(merged.publicUrl) || DEFAULT_MANAGER_SETTINGS.publicUrl,
+    businessName:
+      normalizeText(merged.businessName) || DEFAULT_MANAGER_SETTINGS.businessName,
+    sellerName:
+      normalizeText(merged.sellerName) || DEFAULT_MANAGER_SETTINGS.sellerName,
+    ownerLoginName:
+      normalizeText(merged.ownerLoginName) || DEFAULT_MANAGER_SETTINGS.ownerLoginName,
+    ownerLoginEmail: normalizeText(merged.ownerLoginEmail) || "",
+    ownerPassword:
+      normalizeText(merged.ownerPassword) || DEFAULT_MANAGER_SETTINGS.ownerPassword,
+    supportEmail: normalizeText(merged.supportEmail) || "",
+    supportPhone: normalizeText(merged.supportPhone) || "",
+    headline: normalizeText(merged.headline) || DEFAULT_MANAGER_SETTINGS.headline,
+    tagline: normalizeText(merged.tagline) || DEFAULT_MANAGER_SETTINGS.tagline,
+    paymentMethods: paymentMethods.length
+      ? paymentMethods
+      : DEFAULT_MANAGER_SETTINGS.paymentMethods,
+  };
+}
+
+function managerSettings(database, includePrivate = false) {
+  const stored = readJsonSetting(database, "manager_settings", {});
+  const settings = normalizeManagerSettings(stored || {});
+  if (includePrivate) return settings;
+  return {
+    ...settings,
+    ownerLoginName: "",
+    ownerLoginEmail: "",
+    ownerPassword: "",
+    paymentMethods: settings.paymentMethods.filter((method) => method.enabled),
+  };
+}
+
+function managerOwnerAuthorized(database, login, password) {
+  const settings = managerSettings(database, true);
+  const enteredLogin = normalizeText(login).toLowerCase();
+  const validLogins = [
+    settings.ownerLoginName,
+    settings.ownerLoginEmail,
+  ]
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter(Boolean);
+  return (
+    normalizeText(password) === normalizeText(settings.ownerPassword) &&
+    validLogins.includes(enteredLogin)
+  );
+}
+
+function managerRequestAuthorized(database, source = {}) {
+  return (
+    source.password === adminPassword(database) ||
+    managerOwnerAuthorized(
+      database,
+      source.login || source.ownerLogin || source.email || source.name,
+      source.password,
+    )
+  );
+}
+
+function companyAdminAuthorized(database, source = {}) {
+  if (
+    source.admin_password === adminPassword(database) ||
+    source.management_password === adminPassword(database)
+  )
+    return true;
+  const userId = Number(source.requester_user_id || source.user_id || 0);
+  if (!userId) return false;
+  const user = database.get("SELECT role, is_active FROM users WHERE id = ?", [
+    userId,
+  ]);
+  return (
+    normalizeBool(user?.is_active) &&
+    ["admin", "manager"].includes(String(user?.role || "").toLowerCase())
+  );
+}
+
+function planForRequest(plans, requestedPlanId, requestedUsers = 1) {
+  const activePlans = (plans || []).filter((plan) => normalizeBool(plan.active ?? 1));
+  const selected =
+    activePlans.find((plan) => plan.id === requestedPlanId) ||
+    activePlans.find((plan) => Number(plan.users || 0) >= requestedUsers) ||
+    activePlans[activePlans.length - 1] ||
+    activePlans[0];
+  return selected || null;
+}
+
+function priceForPlan(plan, billingCycle = "monthly") {
+  if (!plan) return { amount: 0, currency: "USD" };
+  const cycle = billingCycle === "annually" ? "annually" : "monthly";
+  return {
+    amount: roundMoney(Number(plan[cycle] || plan.monthly || 0)),
+    currency: "USD",
+  };
+}
+
+const PAYPAL_MASK_SECRET = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+const PAYPAL_MASK_PASSWORD = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+
+function paymentEncryptionKey() {
+  return crypto
+    .createHash("sha256")
+    .update(
+      process.env.AM_PAYMENT_SECRET_KEY ||
+        `AccountingManagement:${os.hostname()}:${ROOT_DIR}`,
+    )
+    .digest();
+}
+
+function encryptPaymentSecret(value) {
+  const clean = String(value || "");
+  if (!clean) return "";
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", paymentEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(clean, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [
+    "v1",
+    iv.toString("base64"),
+    tag.toString("base64"),
+    encrypted.toString("base64"),
+  ].join(":");
+}
+
+function decryptPaymentSecret(value) {
+  const stored = String(value || "");
+  if (!stored) return "";
+  try {
+    const [version, iv64, tag64, encrypted64] = stored.split(":");
+    if (version !== "v1" || !iv64 || !tag64 || !encrypted64) return "";
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      paymentEncryptionKey(),
+      Buffer.from(iv64, "base64"),
+    );
+    decipher.setAuthTag(Buffer.from(tag64, "base64"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(encrypted64, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function normalizePayPalMode(value) {
+  return String(value || "").trim().toLowerCase() === "live" ? "live" : "sandbox";
+}
+
+function paypalApiBase(mode) {
+  return normalizePayPalMode(mode) === "live"
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
+}
+
+function paypalCheckoutHost(mode) {
+  return normalizePayPalMode(mode) === "live"
+    ? "https://www.paypal.com"
+    : "https://www.sandbox.paypal.com";
+}
+
+function publicPaymentSettings(row) {
+  return {
+    mode: normalizePayPalMode(row?.mode),
+    currency: "USD",
+    paypal: {
+      client_id: normalizeText(row?.paypal_client_id),
+      secret_masked: row?.paypal_secret_encrypted ? PAYPAL_MASK_SECRET : "",
+      username: normalizeText(row?.paypal_username),
+      password_masked: row?.paypal_password_encrypted ? PAYPAL_MASK_PASSWORD : "",
+    },
+  };
+}
+
+function activePaymentSettings(database, includeSecrets = false) {
+  const row =
+    database.get("SELECT * FROM payment_settings WHERE id = 1") ||
+    database.get("SELECT * FROM payment_settings ORDER BY id LIMIT 1");
+  if (!includeSecrets) return publicPaymentSettings(row);
+  return {
+    ...publicPaymentSettings(row),
+    paypal: {
+      ...publicPaymentSettings(row).paypal,
+      secret: decryptPaymentSecret(row?.paypal_secret_encrypted),
+      password: decryptPaymentSecret(row?.paypal_password_encrypted),
+    },
+  };
+}
+
+async function paypalAccessToken(settings) {
+  const clientId = normalizeText(settings?.paypal?.client_id);
+  const secret = String(settings?.paypal?.secret || "");
+  if (!clientId || !secret) throw new Error("PayPal Client ID and Secret are required.");
+  const response = await fetch(`${paypalApiBase(settings.mode)}/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${clientId}:${secret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.access_token) {
+    throw new Error(data.error_description || data.error || "PayPal credentials are invalid.");
+  }
+  return data.access_token;
+}
+
+async function createPaypalOrder(settings, payment, returnBase = "") {
+  const accessToken = await paypalAccessToken(settings);
+  const cleanReturnBase =
+    cleanServerBase(returnBase) ||
+    normalizeText(process.env.AM_PUBLIC_RETURN_URL) ||
+    "https://offers.yasserdiab.site/main";
+  const returnUrl = cleanReturnBase.includes("/main")
+    ? cleanReturnBase
+    : `${cleanReturnBase}/main`;
+  const response = await fetch(`${paypalApiBase(settings.mode)}/v2/checkout/orders`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      intent: "CAPTURE",
+      purchase_units: [
+        {
+          reference_id: payment.id,
+          amount: {
+            currency_code: "USD",
+            value: Number(payment.amount || 0).toFixed(2),
+          },
+          description: `${payment.plan_id || "subscription"} ${payment.billing_cycle || "monthly"} subscription`,
+        },
+      ],
+      application_context: {
+        brand_name: "Accounting Management",
+        shipping_preference: "NO_SHIPPING",
+        user_action: "PAY_NOW",
+        return_url: `${returnUrl}?payment_id=${encodeURIComponent(payment.id)}`,
+        cancel_url: `${returnUrl}?payment_id=${encodeURIComponent(payment.id)}&payment_status=cancelled`,
+      },
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.id) {
+    throw new Error(data.message || data.name || "Could not create PayPal order.");
+  }
+  const checkoutUrl =
+    (data.links || []).find((link) => link.rel === "approve")?.href ||
+    `${paypalCheckoutHost(settings.mode)}/checkoutnow?token=${encodeURIComponent(data.id)}`;
+  return { order: data, checkoutUrl };
+}
+
+async function capturePaypalOrder(settings, orderId) {
+  const accessToken = await paypalAccessToken(settings);
+  const response = await fetch(
+    `${paypalApiBase(settings.mode)}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+      },
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || data.name || "Could not capture PayPal payment.");
+  }
+  return data;
+}
+
+function paypalCaptureAmount(captureResponse = {}) {
+  const capture =
+    captureResponse.purchase_units
+      ?.flatMap((unit) => unit.payments?.captures || [])
+      ?.find((item) => item.status === "COMPLETED") ||
+    captureResponse.purchase_units?.[0]?.payments?.captures?.[0];
+  return {
+    captureId: normalizeText(capture?.id),
+    status: normalizeText(capture?.status),
+    amount: roundMoney(capture?.amount?.value),
+    currency: normalizeText(capture?.amount?.currency_code),
+  };
+}
+
+function paymentId() {
+  return `pay_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+}
+
+function subscriptionConflict(database, input = {}) {
+  const checks = [
+    ["company_name", normalizeText(input.company_name), "company name"],
+    ["contact_name", normalizeText(input.contact_name || input.name), "contact name"],
+    ["email", normalizeText(input.email), "email"],
+    ["phone", normalizeText(input.phone), "phone"],
+    [
+      "manager_user_name",
+      normalizeText(input.manager_user_name || input.user_name || input.username),
+      "login name",
+    ],
+  ].filter(([, value]) => value);
+  for (const [column, value, label] of checks) {
+    const row = database.get(
+      `SELECT id, company_name FROM subscription_accounts WHERE LOWER(${column}) = LOWER(?) LIMIT 1`,
+      [value],
+    );
+    if (row) {
+      return {
+        field: column,
+        label,
+        message: `An account already exists for this ${label}. Ask the company manager to log in or update the existing account.`,
+        row,
+      };
+    }
+  }
+  const loginName = normalizeText(input.user_name || input.username);
+  if (loginName) {
+    const user = database.get(
+      "SELECT id, username, display_name FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?) LIMIT 1",
+      [loginName, loginName],
+    );
+    if (user) {
+      return {
+        field: "user_name",
+        label: "login name",
+        message: "This login name is already used. Ask the company manager to log in or change the existing user account.",
+        row: user,
+      };
+    }
+  }
+  return null;
+}
+
+function upsertSubscriptionLead(database, input = {}) {
+  const companyName = normalizeText(input.company_name);
+  if (!companyName) throw new Error("Company name is required");
+  const conflict = subscriptionConflict(database, input);
+  if (conflict) return { conflict };
+  const trialStartedAt = normalizeText(input.trial_started_at) || new Date().toISOString();
+  const trialExpiresAt =
+    normalizeText(input.trial_expires_at) || addDaysIso(trialStartedAt, TRIAL_DAYS);
+  const result = database.run(
+    `INSERT INTO subscription_accounts
+      (company_name, contact_name, manager_user_name, email, phone, company_website,
+       company_address, requested_users, billing_cycle, selected_plan_id,
+       local_host, tunnel_provider, tunnel_url, payment_status,
+       subscription_status, trial_started_at, trial_expires_at,
+       notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending',
+       'trial', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    [
+      companyName,
+      normalizeText(input.contact_name),
+      normalizeText(input.manager_user_name || input.user_name || input.username),
+      normalizeText(input.email),
+      normalizeText(input.phone),
+      normalizeText(input.company_website || input.website),
+      normalizeText(input.company_address || input.address),
+      Math.max(1, Math.floor(numberOrZero(input.requested_users) || 1)),
+      input.billing_cycle === "annually" ? "annually" : "monthly",
+      normalizeText(input.selected_plan_id),
+      normalizeText(input.local_host),
+      normalizeText(input.tunnel_provider || input.database_provider),
+      normalizeText(input.tunnel_url || input.remote_database_url),
+      trialStartedAt,
+      trialExpiresAt,
+      normalizeText(input.notes),
+    ],
+  );
+  return {
+    subscription: database.get("SELECT * FROM subscription_accounts WHERE id = ?", [
+      result.lastInsertRowid,
+    ]),
+  };
+}
+
+function cleanServerBase(value) {
+  return normalizeText(value).replace(/\/+$/, "").replace(/\/manager$/i, "");
+}
+
+async function remoteSubscriptionCheck(base, input = {}) {
+  const clean = cleanServerBase(base);
+  if (!clean) return null;
+  const params = new URLSearchParams();
+  for (const key of ["company_name", "email", "phone", "user_name"]) {
+    if (input[key]) params.set(key, input[key]);
+  }
+  try {
+    const response = await fetch(`${clean}/api/subscriptions/check?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.exists ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function remoteSubscriptionRegister(base, payload = {}) {
+  const clean = cleanServerBase(base);
+  if (!clean) return null;
+  try {
+    const response = await fetch(`${clean}/api/subscriptions/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, data: { error: error.message } };
+  }
+}
+
+function subscriptionUntilFromCycle(billingCycle = "monthly", paidAt = new Date()) {
+  const date = new Date(paidAt);
+  if (billingCycle === "annually") date.setFullYear(date.getFullYear() + 1);
+  else date.setMonth(date.getMonth() + 1);
+  return date.toISOString();
+}
+
+function addDaysIso(value, days) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString();
+  date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
+function timestampMs(value) {
+  const time = new Date(value || "").getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function activeCompanySubscriptionAccount(database) {
+  const profile = readJsonSetting(database, "company_profile", {});
+  const companyName = normalizeText(profile.company_name);
+  let account = companyName
+    ? database.get(
+        `SELECT * FROM subscription_accounts
+         WHERE LOWER(company_name) = LOWER(?)
+         ORDER BY updated_at DESC, created_at DESC
+         LIMIT 1`,
+        [companyName],
+      )
+    : null;
+  if (!account) {
+    account = database.get(
+      `SELECT * FROM subscription_accounts
+       ORDER BY updated_at DESC, created_at DESC
+       LIMIT 1`,
+    );
+  }
+  return { profile, account };
+}
+
+function cachedManagerSubscriptionAccess(database, now = Date.now()) {
+  const cached = readJsonSetting(database, "manager_subscription_status", null);
+  const status =
+    cached?.status && typeof cached.status === "object"
+      ? cached.status
+      : cached && typeof cached === "object"
+        ? cached
+        : null;
+  if (!status) return null;
+  const access = status.access && typeof status.access === "object"
+    ? status.access
+    : {};
+  const subscription =
+    status.subscription && typeof status.subscription === "object"
+      ? status.subscription
+      : {};
+  const trial = status.trial && typeof status.trial === "object" ? status.trial : {};
+  const hasAccess =
+    status.has_access === true ||
+    access.allowed === true ||
+    normalizeText(access.status) === "allowed";
+  if (!hasAccess) return null;
+  const paidUntil = normalizeText(
+    status.paid_through_at ||
+      status.subscription_expires_at ||
+      status.free_access_until ||
+      subscription.renews_at ||
+      subscription.expires_at ||
+      subscription.ends_at ||
+      trial.ends_at,
+  );
+  const fetchedAt = normalizeText(cached?.fetched_at);
+  const cacheIsFresh =
+    !fetchedAt ||
+    now - timestampMs(fetchedAt) <= SUBSCRIPTION_REMINDER_HOURS * 60 * 60 * 1000;
+  if (paidUntil && timestampMs(paidUntil) <= now) return null;
+  if (!paidUntil && !cacheIsFresh) return null;
+  const isTrial =
+    String(normalizeText(subscription.status) || "").includes("trial") ||
+    trial.active === true;
+  return {
+    can_use_app: true,
+    status: isTrial ? "trial" : "active",
+    subscription_expires_at: paidUntil || "",
+    trial_expires_at: isTrial ? paidUntil || "" : "",
+    message: paidUntil
+      ? `Manager granted access until ${paidUntil.slice(0, 10)}`
+      : "Manager granted access.",
+    reminder_interval_hours: SUBSCRIPTION_REMINDER_HOURS,
+    manager_status: status,
+  };
+}
+
+function subscriptionStatus(database) {
+  const { profile, account } = activeCompanySubscriptionAccount(database);
+  const now = Date.now();
+  const managerAccess = cachedManagerSubscriptionAccess(database, now);
+  if (managerAccess) {
+    return {
+      ...managerAccess,
+      account,
+    };
+  }
+  if (!normalizeText(profile.company_name) && !account) {
+    return {
+      can_use_app: true,
+      status: "owner-local",
+      message: "Local owner database has no company profile.",
+      reminder_interval_hours: SUBSCRIPTION_REMINDER_HOURS,
+    };
+  }
+  const freeUntil = normalizeText(account?.free_access_until || profile.free_access_until);
+  if (timestampMs(freeUntil) > now) {
+    return {
+      can_use_app: true,
+      status: "free-access",
+      free_access_until: freeUntil,
+      message: `You are offered a free trial until ${freeUntil.slice(0, 10)}`,
+      reminder_interval_hours: SUBSCRIPTION_REMINDER_HOURS,
+      account,
+    };
+  }
+  const activeSubscription = database.get(
+    `SELECT * FROM subscriptions
+     WHERE status = 'active'
+       AND (subscription_account_id = ? OR ? IS NULL)
+     ORDER BY expires_at DESC
+     LIMIT 1`,
+    [account?.id || null, account?.id || null],
+  );
+  const paidUntil =
+    normalizeText(activeSubscription?.expires_at) ||
+    normalizeText(account?.subscription_expires_at);
+  if (timestampMs(paidUntil) > now) {
+    return {
+      can_use_app: true,
+      status: "active",
+      subscription_expires_at: paidUntil,
+      message: `Subscription active until ${paidUntil.slice(0, 10)}`,
+      reminder_interval_hours: SUBSCRIPTION_REMINDER_HOURS,
+      account,
+    };
+  }
+  const trialUntil = normalizeText(account?.trial_expires_at || profile.trial_expires_at);
+  if (timestampMs(trialUntil) > now) {
+    return {
+      can_use_app: true,
+      status: "trial",
+      trial_expires_at: trialUntil,
+      message: `Trial time left until ${trialUntil.slice(0, 10)}. Subscribe to keep using the app.`,
+      reminder_interval_hours: SUBSCRIPTION_REMINDER_HOURS,
+      account,
+    };
+  }
+  const expiredAt = paidUntil || trialUntil || account?.free_access_until || profile.free_access_until || "";
+  return {
+    can_use_app: false,
+    status: paidUntil ? "subscription-expired" : "trial-expired",
+    expired_at: expiredAt,
+    message: "Trial or subscription ended. Payment is required before Accounting Management can be used again.",
+    reminder_interval_hours: SUBSCRIPTION_REMINDER_HOURS,
+    account,
+  };
+}
+
+function subscriptionAccessBypass(req) {
+  if (req.method === "OPTIONS") return true;
+  const apiPath = String(req.path || "");
+  const method = String(req.method || "GET").toUpperCase();
+  if (
+    [
+      "/health",
+      "/update/latest",
+      "/auth/login",
+      "/auth/logout",
+      "/company/register",
+      "/subscription/status",
+      "/subscription/plans",
+      "/subscription/config",
+      "/subscription/cancel",
+      "/subscriptions/check",
+      "/subscriptions/register",
+      "/manager-sync",
+      "/manager-payments",
+      "/manager-subscription/status",
+      "/manager/public",
+    ].includes(apiPath)
+  ) {
+    return true;
+  }
+  if (apiPath === "/company-account" && method === "DELETE") return true;
+  if (apiPath.startsWith("/paypal/")) return true;
+  if (apiPath === "/payments/create-checkout") return true;
+  if (apiPath === "/payments/paypal/capture") return true;
+  if (apiPath.startsWith("/payments/status/")) return true;
+  return false;
+}
+
+function resetLocalCompanyAccount(database, { dataDir, dbPath, chatUploadDir } = {}) {
+  const archiveDir = path.join(dataDir || path.dirname(dbPath || database.dbPath), "deleted_company_archives");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const archivePath = path.join(archiveDir, `price_offer_before_delete_${stamp}.db`);
+  fs.mkdirSync(archiveDir, { recursive: true });
+  try {
+    database.save?.();
+  } catch {
+    // The next copy still uses the last persisted database file.
+  }
+  if (fs.existsSync(dbPath || database.dbPath)) {
+    fs.copyFileSync(dbPath || database.dbPath, archivePath);
+  }
+  database.exec(`
+    PRAGMA foreign_keys = OFF;
+    BEGIN TRANSACTION;
+    DELETE FROM chat_message_reads;
+    DELETE FROM chat_messages;
+    DELETE FROM work_items;
+    DELETE FROM documents;
+    DELETE FROM parties;
+    DELETE FROM payments;
+    DELETE FROM subscriptions;
+    DELETE FROM subscription_payments;
+    DELETE FROM subscription_accounts;
+    DELETE FROM client_devices;
+    DELETE FROM payment_settings;
+    DELETE FROM users;
+    DELETE FROM app_settings;
+    DELETE FROM sqlite_sequence
+      WHERE name IN (
+        'chat_message_reads',
+        'chat_messages',
+        'work_items',
+        'documents',
+        'parties',
+        'payments',
+        'subscriptions',
+        'subscription_payments',
+        'subscription_accounts',
+        'client_devices',
+        'payment_settings',
+        'users'
+      );
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+  `);
+  if (chatUploadDir) {
+    fs.rmSync(chatUploadDir, { recursive: true, force: true });
+    fs.mkdirSync(chatUploadDir, { recursive: true });
+  }
+  ensureDefaultUsers(database);
+  ensureRichTerms(database);
+  ensureControllerTables(database);
+  ensureCommercialSettings(database);
+  const neutralProfile = {
+    company_name: APP_NAME,
+    contact_name: "",
+    email: "yasserdiabhassan@gmail.com",
+    phone: "",
+    address: "Cairo, Egypt",
+    website: "",
+  };
+  writeSetting(database, "company_name_ar", APP_NAME);
+  writeSetting(database, "company_name_en", APP_NAME);
+  writeJsonSetting(database, "company_profile", neutralProfile);
+  writeJsonSetting(database, "report_branding", DEFAULT_REPORT_BRANDING);
+  writeJsonSetting(database, "deleted_company_archive", {
+    archivePath,
+    archiveDir,
+    deleted_at: new Date().toISOString(),
+  });
+  return { archivePath, archiveDir };
+}
+
+function activateSubscriptionFromPayment(database, payment, rawPayload = {}) {
+  if (!payment?.id || !payment.subscription_id) return null;
+  const paidAt = new Date().toISOString();
+  const activeUntil = subscriptionUntilFromCycle(payment.billing_cycle, paidAt);
+  database.run(
+    `UPDATE subscription_payments
+     SET status = 'paid', paid_at = ?, raw_payload = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [paidAt, JSON.stringify(rawPayload || {}), payment.id],
+  );
+  database.run(
+    `UPDATE subscription_accounts
+     SET payment_status = 'paid',
+         subscription_status = 'active',
+         selected_plan_id = ?,
+         billing_cycle = ?,
+         requested_users = ?,
+         subscription_expires_at = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [
+      payment.plan_id || "",
+      payment.billing_cycle || "monthly",
+      Math.max(1, Math.floor(numberOrZero(payment.requested_users) || 1)),
+      activeUntil,
+      payment.subscription_id,
+    ],
+  );
+  return {
+    payment: database.get("SELECT * FROM subscription_payments WHERE id = ?", [
+      payment.id,
+    ]),
+    subscription: database.get("SELECT * FROM subscription_accounts WHERE id = ?", [
+      payment.subscription_id,
+    ]),
+    active_until: activeUntil,
+  };
+}
+
+function ensureControllerTables(database) {
+  database.exec(`CREATE TABLE IF NOT EXISTS client_devices (
+    fingerprint TEXT PRIMARY KEY,
+    user_id INTEGER,
+    user_name TEXT,
+    ip_address TEXT,
+    forwarded_for TEXT,
+    user_agent TEXT,
+    first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  database.exec(`CREATE TABLE IF NOT EXISTS subscription_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name TEXT NOT NULL,
+    contact_name TEXT,
+    manager_user_name TEXT,
+    email TEXT,
+    phone TEXT,
+    company_website TEXT,
+    company_address TEXT,
+    region TEXT,
+    country TEXT,
+    city TEXT,
+    requested_users INTEGER NOT NULL DEFAULT 1,
+    billing_cycle TEXT NOT NULL DEFAULT 'monthly',
+    selected_plan_id TEXT,
+    local_host TEXT,
+    tunnel_provider TEXT,
+    tunnel_url TEXT,
+    payment_status TEXT NOT NULL DEFAULT 'pending',
+    subscription_status TEXT NOT NULL DEFAULT 'lead',
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  const subscriptionColumns = new Set(
+    database.all("PRAGMA table_info(subscription_accounts)").map((row) => row.name),
+  );
+  for (const [column, type] of [
+    ["company_website", "TEXT"],
+    ["company_address", "TEXT"],
+    ["manager_user_name", "TEXT"],
+    ["region", "TEXT"],
+    ["trial_started_at", "TEXT"],
+    ["trial_expires_at", "TEXT"],
+    ["free_access_until", "TEXT"],
+    ["subscription_expires_at", "TEXT"],
+    ["subscription_note", "TEXT"],
+  ]) {
+    if (!subscriptionColumns.has(column)) {
+      database.exec(`ALTER TABLE subscription_accounts ADD COLUMN ${column} ${type}`);
+    }
+  }
+  database.exec(`CREATE TABLE IF NOT EXISTS subscription_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id INTEGER,
+    reference TEXT NOT NULL UNIQUE,
+    provider TEXT,
+    method TEXT,
+    plan_id TEXT,
+    billing_cycle TEXT NOT NULL DEFAULT 'monthly',
+    requested_users INTEGER NOT NULL DEFAULT 1,
+    amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    status TEXT NOT NULL DEFAULT 'pending',
+    checkout_url TEXT,
+    external_payment_id TEXT,
+    payer_email TEXT,
+    paid_at TEXT,
+    raw_payload TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (subscription_id) REFERENCES subscription_accounts(id)
+  )`);
+  database.exec(`CREATE TABLE IF NOT EXISTS payment_settings (
+    id INTEGER PRIMARY KEY,
+    mode TEXT NOT NULL DEFAULT 'sandbox',
+    currency TEXT NOT NULL DEFAULT 'USD',
+    paypal_client_id TEXT,
+    paypal_secret_encrypted TEXT,
+    paypal_username TEXT,
+    paypal_password_encrypted TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT
+  )`);
+  database.exec(`CREATE TABLE IF NOT EXISTS payments (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER,
+    subscription_id INTEGER,
+    subscription_payment_id INTEGER,
+    plan_id TEXT,
+    billing_cycle TEXT NOT NULL DEFAULT 'monthly',
+    amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    provider TEXT NOT NULL DEFAULT 'paypal',
+    paypal_order_id TEXT,
+    paypal_capture_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    checkout_url TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    paid_at TEXT,
+    failed_at TEXT,
+    raw_provider_response TEXT
+  )`);
+  database.exec(`CREATE TABLE IF NOT EXISTS subscriptions (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER,
+    subscription_account_id INTEGER,
+    plan_id TEXT,
+    status TEXT NOT NULL DEFAULT 'inactive',
+    billing_cycle TEXT NOT NULL DEFAULT 'monthly',
+    starts_at TEXT,
+    expires_at TEXT,
+    last_payment_id TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  const paymentColumns = new Set(
+    database.all("PRAGMA table_info(payments)").map((row) => row.name),
+  );
+  for (const [column, type] of [
+    ["subscription_id", "INTEGER"],
+    ["subscription_payment_id", "INTEGER"],
+  ]) {
+    if (!paymentColumns.has(column)) {
+      database.exec(`ALTER TABLE payments ADD COLUMN ${column} ${type}`);
+    }
+  }
+}
+
+function ensureCommercialSettings(database) {
+  if (!readSetting(database, "report_branding", "")) {
+    writeJsonSetting(database, "report_branding", DEFAULT_REPORT_BRANDING);
+  }
+  const storedPlans = readJsonSetting(database, "subscription_plans", null);
+  const looksLikeOldEgpDefaults =
+    Array.isArray(storedPlans) &&
+    storedPlans.length === 3 &&
+    storedPlans.every((plan) => normalizeText(plan.currency).toUpperCase() === "EGP") &&
+    storedPlans.some((plan) => Number(plan.monthly) >= 400);
+  if (!storedPlans || looksLikeOldEgpDefaults) {
+    writeJsonSetting(database, "subscription_plans", DEFAULT_SUBSCRIPTION_PLANS);
+  }
+  if (!readSetting(database, "controller_settings", "")) {
+    writeJsonSetting(database, "controller_settings", {
+      publicControllerUrl: "",
+      supportEmail: "",
+      defaultTunnelProvider: "Cloudflare Tunnel",
+    });
+  }
+  if (!readSetting(database, "manager_settings", "")) {
+    writeJsonSetting(database, "manager_settings", DEFAULT_MANAGER_SETTINGS);
+  }
+  database.run(
+    `INSERT OR IGNORE INTO payment_settings
+      (id, mode, currency, paypal_client_id, paypal_username, created_at, updated_at)
+     VALUES (1, 'sandbox', 'USD', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+  );
+}
+
+function safeCompanyFolderName(value) {
+  return (
+    normalizeText(value)
+      ?.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80) || "company"
+  );
+}
+
+function companyAbbreviation(value) {
+  const parts = String(value || "")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const latin = parts
+    .filter((part) => /^[a-z0-9]/i.test(part))
+    .map((part) => part[0].toUpperCase())
+    .join("");
+  if (latin) return latin.slice(0, 8);
+  return "A.M";
+}
+
+function appBrandingForCompany(profile = {}) {
+  return normalizeReportBranding({
+    companyNameEn: APP_NAME,
+    companyNameAr: APP_NAME,
+    companyAbbreviation: "A.M",
+    website: normalizeText(profile.website) || "",
+    companyAddress: normalizeText(profile.address) || "Cairo, Egypt",
+    companyPhone: normalizeText(profile.phone) || "",
+    footerContactMode: "address",
+    companyNameColor: "#146b5c",
+    lineColor: "#d6c08d",
+    tableHeaderBg: "#202020",
+    tableHeaderText: "#d6a84f",
+    tableBodyText: "#1b1b1b",
+    tableOddBg: "#faf8f2",
+    tableEvenBg: "#ffffff",
+    qrColor: "#111111",
+    qrBackground: "#ffffff",
+    showAddressInDateBlock: false,
+    headingFontFamily: "georgia",
+    bodyFontFamily: "arial",
+    logoDataUri: imageDataUri(path.join(ROOT_DIR, "src", "assets", "sticker.png")),
+  });
+}
+
+function upsertManagerUser(database, manager = {}) {
+  const username = normalizeText(manager.user_name || manager.contact_name);
+  const displayName = normalizeText(manager.contact_name || manager.user_name);
+  const password = String(manager.password || "");
+  if (!username || !displayName || !password)
+    throw new Error("Login name, contact name and password are required");
+  const existing = database.get(
+    "SELECT id FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1",
+    [username],
+  );
+  if (existing?.id) {
+    database.run(
+      `UPDATE users
+       SET display_name = ?, role = 'manager', pin_hash = ?,
+           can_create_invoices = 1, can_create_payments = 1,
+           can_change_status = 1, is_active = 1
+       WHERE id = ?`,
+      [displayName, hashPassword(password), existing.id],
+    );
+    return database.get("SELECT * FROM users WHERE id = ?", [existing.id]);
+  }
+  const result = database.run(
+    `INSERT INTO users
+      (username, display_name, role, pin_hash, can_create_invoices,
+       can_create_payments, can_change_status, is_active)
+     VALUES (?, ?, 'manager', ?, 1, 1, 1, 1)`,
+    [username, displayName, hashPassword(password)],
+  );
+  return database.get("SELECT * FROM users WHERE id = ?", [
+    result.lastInsertRowid,
+  ]);
+}
+
+async function createCompanyDatabase(dbPath, profile, manager) {
+  const companyDb = new AppDatabase(
+    dbPath,
+    path.join(ROOT_DIR, "server", "schema.sql"),
+  );
+  await companyDb.open();
+  ensureRuntimeMigrations(companyDb);
+  ensureRichTerms(companyDb);
+  ensureControllerTables(companyDb);
+  ensureCommercialSettings(companyDb);
+  writeJsonSetting(companyDb, "company_profile", profile);
+  writeJsonSetting(companyDb, "report_branding", appBrandingForCompany(profile));
+  companyDb.run(
+    `INSERT INTO subscription_accounts
+      (company_name, contact_name, manager_user_name, email, phone, company_website, company_address,
+       requested_users, billing_cycle, selected_plan_id, payment_status,
+       subscription_status, trial_started_at, trial_expires_at, notes,
+       created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'monthly', '', 'pending', 'trial',
+       ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    [
+      profile.company_name,
+      profile.contact_name,
+      normalizeText(manager.user_name || manager.contact_name),
+      profile.email,
+      profile.phone,
+      profile.website,
+      profile.address,
+      profile.trial_started_at,
+      profile.trial_expires_at,
+      JSON.stringify({ source: "company_signup", db_path: profile.db_path }),
+    ],
+  );
+  upsertManagerUser(companyDb, manager);
+  companyDb.save();
+  companyDb.db?.close?.();
+}
+
+async function startCompanyServer(dbPath, requestedPort) {
+  const port = Math.floor(Number(requestedPort || 0));
+  if (!Number.isFinite(port) || port < 1024 || port > 65535) {
+    throw new Error("Choose a valid local server port between 1024 and 65535.");
+  }
+  const key = `${port}`;
+  const existing = COMPANY_SERVER_INSTANCES.get(key);
+  if (existing) {
+    if (path.resolve(existing.dbPath) !== path.resolve(dbPath)) {
+      throw new Error(`Port ${port} is already running another company database.`);
+    }
+    return {
+      port,
+      serverUrl: defaultServerUrl(port),
+      localUrl: `http://127.0.0.1:${port}`,
+      lanUrls: getLanIps().map((ip) => `http://${ip}:${port}`),
+      alreadyRunning: true,
+    };
+  }
+  const companyServer = await createServer({
+    port,
+    dbPath,
+    dataDir: path.dirname(dbPath),
+  });
+  const httpServer = await companyServer.listen(port, "0.0.0.0");
+  const actualPort = Number(httpServer.address()?.port || port);
+  COMPANY_SERVER_INSTANCES.set(`${actualPort}`, {
+    httpServer,
+    dbPath,
+    startedAt: new Date().toISOString(),
+  });
+  return {
+    port: actualPort,
+    serverUrl: defaultServerUrl(actualPort),
+    localUrl: `http://127.0.0.1:${actualPort}`,
+    lanUrls: getLanIps().map((ip) => `http://${ip}:${actualPort}`),
+    alreadyRunning: false,
+  };
+}
+
+function requestIp(req) {
+  return (
+    normalizeText(req.headers["x-forwarded-for"]) ||
+    normalizeText(req.socket?.remoteAddress) ||
+    ""
+  );
+}
+
+function trackClientDevice(database, req, user = {}) {
+  const userAgent = normalizeText(req.headers["user-agent"]) || "";
+  const forwardedFor = normalizeText(req.headers["x-forwarded-for"]) || "";
+  const ip = requestIp(req);
+  const userName =
+    normalizeText(user.display_name || user.username || user.user_name) || "";
+  const userId = Number(user.id || user.user_id || 0) || null;
+  const fingerprint = crypto
+    .createHash("sha1")
+    .update([userId || userName || "guest", ip, userAgent].join("|"))
+    .digest("hex");
+  database.run(
+    `INSERT INTO client_devices
+      (fingerprint, user_id, user_name, ip_address, forwarded_for, user_agent, first_seen_at, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(fingerprint) DO UPDATE SET
+       user_id = excluded.user_id,
+       user_name = excluded.user_name,
+       ip_address = excluded.ip_address,
+       forwarded_for = excluded.forwarded_for,
+       user_agent = excluded.user_agent,
+       last_seen_at = CURRENT_TIMESTAMP`,
+    [fingerprint, userId, userName, ip, forwardedFor, userAgent],
+  );
+}
+
 function ensureDefaultUsers(database) {
   database.run(
     `INSERT OR IGNORE INTO users (username, display_name, role, pin_hash, can_create_invoices, can_create_payments, can_change_status, is_active)
@@ -1955,13 +3426,13 @@ function publicUser(row) {
     display_name: row.display_name,
     role: row.role,
     can_create_invoices: normalizeBool(
-      row.can_create_invoices || row.role === "admin",
+      row.can_create_invoices || row.role === "admin" || row.role === "manager",
     ),
     can_create_payments: normalizeBool(
-      row.can_create_payments || row.role === "admin",
+      row.can_create_payments || row.role === "admin" || row.role === "manager",
     ),
     can_change_status: normalizeBool(
-      row.can_change_status || row.role === "admin",
+      row.can_change_status || row.role === "admin" || row.role === "manager",
     ),
     is_active: row.is_active,
     last_login_at: row.last_login_at || null,
@@ -2643,7 +4114,17 @@ function imageDataUri(filePath) {
   try {
     const bytes = fs.readFileSync(filePath);
     const ext = path.extname(filePath).toLowerCase().replace(".", "") || "png";
-    const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png";
+    const mime =
+      {
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        png: "image/png",
+        webp: "image/webp",
+        gif: "image/gif",
+        svg: "image/svg+xml",
+        bmp: "image/bmp",
+        ico: "image/x-icon",
+      }[ext] || "image/png";
     return `data:${mime};base64,${bytes.toString("base64")}`;
   } catch {
     return "";
@@ -2680,24 +4161,35 @@ function reportDateTime(value, timeZone = "Africa/Cairo") {
   return `${latinNumber(parts.year, 4)}/${latinNumber(parts.month)}/${latinNumber(parts.day)} ${latinNumber(parts.hour)}:${latinNumber(parts.minute)}:${latinNumber(parts.second)}`;
 }
 
-function reportDateBlock(data) {
+function reportDateBlock(data, branding = {}) {
   const generated = data.generated_at || new Date().toISOString();
   const entry = data.entry_date || generated;
   const isStatement = data.is_statement || ["statement", "taxStatement", "nonTaxStatement"].includes(data.type);
+  const addressLine =
+    branding.showAddressInDateBlock && branding.companyAddress
+      ? `<div class="issue-address-block"><strong>${escapeHtml(branding.companyAddress)}</strong></div>`
+      : "";
   const entryLines = isStatement
     ? ""
     : `
       <div class="issue-line"><span>Entry date:</span><strong>${reportDateTime(entry, "Africa/Cairo")} Cairo</strong></div>
       ${entry && entry.includes("T") ? `<div class="issue-line"><span></span><strong>${reportDateTime(entry, "UTC")} UTC</strong></div>` : ""}`;
   return `
-    <div class="issue-dates">
-      <div class="issue-line"><span>Issue date:</span><strong>${reportDateTime(generated, "Africa/Cairo")} Cairo</strong></div>
-      <div class="issue-line"><span></span><strong>${reportDateTime(generated, "UTC")} UTC</strong></div>
-      ${entryLines}
+    <div class="issue-stack">
+      <div class="issue-dates">
+        <div class="issue-line"><span>Issue date:</span><strong>${reportDateTime(generated, "Africa/Cairo")} Cairo</strong></div>
+        <div class="issue-line"><span></span><strong>${reportDateTime(generated, "UTC")} UTC</strong></div>
+        ${entryLines}
+      </div>
+      ${addressLine}
     </div>`;
 }
 
 function qrDataUri(data) {
+  const branding = {
+    ...reportBrandingFallback(),
+    ...(data.branding || {}),
+  };
   const reportName = englishReportTitle(data.type);
   const id = data.operation_no || data.serial || "";
   const totalQuantity =
@@ -2710,20 +4202,26 @@ function qrDataUri(data) {
     );
   const totalAmount = data.totals?.net_total || data.totals?.gross_total || 0;
   const content = [
-    "HGAD",
+    branding.companyAbbreviation,
+    `Company: ${branding.companyAbbreviation}`,
+    branding.companyPhone ? `Phone: ${branding.companyPhone}` : "",
     `${reportName} number ${id}`,
+    data.party ? `Client: ${data.party}` : "",
+    projectLocationLabel(data) ? `Project: ${projectLocationLabel(data)}` : "",
     `Total quantity: ${totalQuantity}`,
     `Total amount: ${englishMoney(totalAmount)} EGP`,
-    `Provided and approved by Handasia group for architectural designs and provided in the date ${englishDate(data.generated_at)}`,
-    "https://hgad-eg.com",
-  ].join("\n");
+    `Approved by ${branding.companyAbbreviation} on ${englishDate(data.generated_at)}`,
+    brandingFooterContact(branding),
+  ]
+    .filter(Boolean)
+    .join("\n");
   const svg = new QRCodeSvg({
     content,
     padding: 1,
     width: 96,
     height: 96,
-    color: "#111111",
-    background: "#ffffff",
+    color: branding.qrColor || "#111111",
+    background: branding.qrBackground || "#ffffff",
     ecl: "M",
   }).svg();
   return `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
@@ -2951,10 +4449,84 @@ function uniqueRowValues(rows, key) {
 }
 
 function locationText(row = {}) {
-  return [row.building_unit, row.floor_apartment]
-    .map((part) => String(part || "").trim())
-    .filter(Boolean)
-    .join(" / ");
+  const parts = [];
+  for (const source of [row.building_unit, row.floor_apartment]) {
+    for (const rawPart of String(source || "").split("/")) {
+      const part = rawPart.trim();
+      if (!part) continue;
+      const normalized = normalizeText(part).toLowerCase();
+      if (parts.some((item) => item.normalized === normalized)) continue;
+      parts.push({ value: part, normalized });
+    }
+  }
+  return parts.map((part) => part.value).join(" / ");
+}
+
+function locationPartValues(rows = [], key) {
+  const parts = [];
+  for (const row of rows || []) {
+    for (const rawPart of String(row?.[key] || "").split("/")) {
+      const part = rawPart.trim();
+      if (!part) continue;
+      const normalized = normalizeText(part).toLowerCase();
+      if (parts.some((item) => item.normalized === normalized)) continue;
+      parts.push({ value: part, normalized });
+    }
+  }
+  return parts.map((part) => part.value).sort(naturalLocationCompare);
+}
+
+function naturalLocationCompare(left, right) {
+  return String(left || "").localeCompare(String(right || ""), "ar", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function uniqueLocationValues(rows = []) {
+  return [
+    ...new Set(
+      (rows || [])
+        .map(locationText)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ].sort(naturalLocationCompare);
+}
+
+function singleLocationSummary(rows = [], fallback = "") {
+  const realRows = (rows || []).filter((row) => locationText(row));
+  if (realRows.length) {
+    const buildings = locationPartValues(realRows, "building_unit");
+    const units = locationPartValues(realRows, "floor_apartment");
+    if (buildings.length === 1) {
+      return [buildings[0], units.length === 1 ? units[0] : ""]
+        .filter(Boolean)
+        .join(" / ");
+    }
+    if (!buildings.length && units.length === 1) return units[0];
+    return "";
+  }
+  return locationText({ building_unit: fallback });
+}
+
+function projectLocationLabel(data = {}) {
+  const rows = data.rows || [];
+  const projectValues = uniqueRowValues(rows, "project").filter(
+    (project) => project !== LEGACY_ALL_PROJECTS,
+  );
+  const projectValue =
+    projectValues.length === 1
+      ? projectValues[0]
+      : projectValues.length > 1
+        ? ""
+        : data.project || "";
+  const locationValue =
+    data.type === "contractor"
+      ? ""
+      : singleLocationSummary(rows, data.building_unit);
+  const combined = [projectValue, locationValue].filter(Boolean).join(" - ");
+  return combined || projectValue || data.project || "-";
 }
 
 function contractorPaymentTableHtml(data) {
@@ -2975,6 +4547,19 @@ function contractorPaymentTableHtml(data) {
         )
         .join("")}</tbody>
     </table>`;
+}
+
+function lineItemColgroup(showDimensions, showCompletionColumn) {
+  const widths = showCompletionColumn
+    ? showDimensions
+      ? [30, 12, 7, 7, 9, 8, 9, 9, 9]
+      : [36, 8, 8, 11, 9, 10, 9, 9]
+    : showDimensions
+      ? [36, 14, 7, 7, 10, 12, 14]
+      : [42, 9, 9, 12, 14, 14];
+  return `<colgroup>${widths
+    .map((width) => `<col style="width:${width}%">`)
+    .join("")}</colgroup>`;
 }
 
 function detailReportTableHtml(data, showDimensions, dimensionUnit) {
@@ -3035,13 +4620,12 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
   const subtotalMode = data.subtotal_mode || "none";
   const enableBuildingSubtotal = ["building", "unit"].includes(subtotalMode);
   const enableUnitSubtotal = subtotalMode === "unit";
-  const locations = uniqueRowValues(rows, "building_unit");
-  const showLocation =
-    locations.length > 1 || rows.some((row) => row.floor_apartment);
+  const locations = uniqueLocationValues(rows);
+  const showLocation = locations.length > 1;
   const orderedRows = showLocation
-    ? [...rows].sort(
-        (a, b) =>
-          locationText(a).localeCompare(locationText(b), "ar") ||
+      ? [...rows].sort(
+          (a, b) =>
+          naturalLocationCompare(locationText(a), locationText(b)) ||
           Number(a.id || 0) - Number(b.id || 0),
       )
     : rows;
@@ -3138,6 +4722,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
   });
   return `
     <table class="report-table line-items">
+      ${lineItemColgroup(showDimensions, showCompletionColumn)}
       <thead><tr><th>البيان</th>${showDimensions ? "<th>المقاس</th>" : ""}<th>الوحدة</th><th>العدد</th><th>الكمية</th>${showCompletionColumn ? "<th>نسبة العمل</th>" : ""}<th>الفئة</th><th>الإجمالي</th>${showCompletionColumn ? "<th>بعد النسبة</th>" : ""}</tr></thead>
       <tbody>${body.join("")}</tbody>
     </table>`;
@@ -3278,8 +4863,16 @@ function totalsHtml(data) {
 function renderReportHtmlV2(data) {
   const showDimensions = !!data.show_dimensions;
   const dimensionUnit = data.dimension_unit || "cm";
-  const logoData = imageDataUri(REPORT_LOGO_PATH);
+  const branding = {
+    ...reportBrandingFallback(),
+    ...(data.branding || {}),
+  };
+  const logoData = branding.logoDataUri || imageDataUri(REPORT_LOGO_PATH);
   const qrData = qrDataUri(data);
+  const footerContact = brandingFooterContact(branding);
+  const footerPhone =
+    normalizeText(branding.companyPhone) || branding.companyAbbreviation;
+  const footerCenterContact = footerContact || branding.companyAbbreviation;
   const titleLine = data.operation_no
     ? `${data.title} رقم ${data.operation_no}`
     : data.title;
@@ -3322,7 +4915,7 @@ function renderReportHtmlV2(data) {
       "المشروع",
       data.type === "contractor"
         ? selectedProject
-        : [projectValue, buildingValue].filter(Boolean).join(" - ") || "-",
+        : projectLocationLabel(data),
     ]);
   }
   const statementRows = data.statementRows || [];
@@ -3363,34 +4956,39 @@ function renderReportHtmlV2(data) {
   return `<!doctype html>
   <html lang="ar" dir="rtl"><head><meta charset="utf-8" />
   <style>
+    :root{--brand-name:${branding.companyNameColor};--report-line:${branding.lineColor};--table-head-bg:${branding.tableHeaderBg};--table-head-text:${branding.tableHeaderText};--table-body-text:${branding.tableBodyText};--table-odd-bg:${branding.tableOddBg};--table-even-bg:${branding.tableEvenBg}}
     @page{size:A4 portrait;margin:10mm 9mm 20mm}
     *{box-sizing:border-box}
-    body{font-family:Arial,"Segoe UI",Tahoma,sans-serif;margin:0;color:#1b1b1b;background:#fff;font-size:12px}
+    body{font-family:${branding.bodyFontStack};margin:0;color:#1b1b1b;background:#fff;font-size:12px}
     .page{padding:10px 12px 24px}
     .brand-head{position:relative;min-height:190px;margin-bottom:8px;padding-top:2px;text-align:center}
     .brand-center{width:min(620px,100%);margin:0 auto;text-align:center}
     .logo,.qr{width:94px;height:94px;object-fit:contain}
     .qr{position:absolute;right:0;top:4px;border:1px solid #d7c08a;padding:4px;background:#fff}
-    .brand-en,.brand-ar,h1,.terms h2,.term-block h3{font-family:Georgia,"Times New Roman",serif}
-    .brand-en{color:#a87921;font-weight:700;font-size:16px;letter-spacing:.5px;text-transform:uppercase;text-shadow:0 1px 0 #f5eee0}
-    .brand-ar{color:#a87921;font-weight:700;font-size:16px;margin-top:2px;text-shadow:0 1px 0 #f5eee0}
+    .brand-en,.brand-ar,.brand-address,h1,.terms h2,.term-block h3{font-family:${branding.headingFontStack}}
+    .brand-en{color:var(--brand-name);font-weight:700;font-size:16px;letter-spacing:.5px;text-transform:uppercase;text-shadow:0 1px 0 #f5eee0}
+    .brand-ar{color:var(--brand-name);font-weight:700;font-size:16px;margin-top:2px;text-shadow:0 1px 0 #f5eee0}
+    .brand-address{color:#4b5563;font-size:10.5px;margin-top:3px;line-height:1.35}
     h1{font-size:21px;margin:12px 0 4px;font-weight:700}
     .subtitle{font-size:15px;margin:0 0 8px;color:#111}
-    .issue-dates{position:absolute;left:4px;top:8px;width:310px;direction:ltr;text-align:left;color:#1f2933;font-size:9.8px;line-height:1.55;border-left:3px solid #a87921;padding-left:8px;white-space:normal}
+    .issue-stack{position:absolute;left:4px;top:8px;width:310px;direction:ltr;text-align:left;color:#1f2933;font-size:9.8px;line-height:1.55;white-space:normal}
+    .issue-dates,.issue-address-block{border-left:3px solid var(--brand-name);padding-left:8px}
+    .issue-address-block{margin-top:10px;padding-top:2px;line-height:1.35}
+    .issue-address-block strong{font-weight:500}
     .issue-line{display:grid;grid-template-columns:58px 1fr;gap:4px;align-items:baseline}.issue-line span{font-weight:500}.issue-line strong{font-weight:500}
     .info-band{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0;background:#f3f0e8;border:1px solid #d9cfb8;margin:8px 0 10px}
     .info-item{display:grid;grid-template-columns:auto 1fr;gap:10px;padding:9px 12px;align-items:center;min-height:38px;font-size:13px;font-weight:700}
     .info-item span{font-weight:800;color:#111}
     .info-item strong{min-width:0;font-weight:800;text-align:right;overflow-wrap:anywhere;word-break:normal}
     .report-table{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:10px;font-size:10px;page-break-inside:auto}
-    .report-table.line-items{table-layout:auto}
+    .report-table.line-items{table-layout:fixed}
     .report-table thead{display:table-header-group}
     .report-table tfoot{display:table-footer-group}
     .report-table tr,.report-table th,.report-table td{break-inside:avoid!important;break-inside:avoid-page!important;page-break-inside:avoid!important}
     .report-table tbody{break-inside:auto!important;page-break-inside:auto!important}
-    th,td{border:1px solid #d6d0c3;padding:4px 4px;vertical-align:top;overflow-wrap:break-word}
-    th{background:#202020;color:#d6a84f;font-weight:700;text-align:center}
-    td{text-align:center}
+    th,td{border:1px solid #d6d0c3;padding:4px 4px;vertical-align:middle;overflow-wrap:break-word}
+    th{background:var(--table-head-bg);color:var(--table-head-text);font-weight:700;text-align:center}
+    td{text-align:center;color:var(--table-body-text);background:var(--table-even-bg)}
     .nowrap,.date-cell,.id-cell,.number-cell,.dimension-cell,.unit-cell,.work-rate-cell{white-space:nowrap;word-break:keep-all;overflow-wrap:normal}
     .date-cell,.id-cell,.number-cell,.dimension-cell{direction:ltr;unicode-bidi:isolate}
     .date-cell{width:72px}
@@ -3405,16 +5003,16 @@ function renderReportHtmlV2(data) {
     .statement-table .date-cell,.statement-table .id-cell,.statement-table .number-cell,.statement-table .work-rate-cell{width:auto;min-width:0}
     .statement-table .statement-doc,.statement-table .project-column,.statement-table .details-column{white-space:normal;word-break:normal;overflow-wrap:anywhere;line-height:1.35}
     .statement-table .number-cell,.statement-table .work-rate-cell{font-size:8.9px}
-    .line-items .desc{width:100%;min-width:220px;max-width:none}
-    .line-items .number-cell,.line-items .unit-cell,.line-items .dimension-cell,.line-items .work-rate-cell{width:1%;min-width:max-content}
+    .line-items .desc{width:auto;min-width:0;max-width:none}
+    .line-items .number-cell,.line-items .unit-cell,.line-items .dimension-cell,.line-items .work-rate-cell{width:auto;min-width:0;text-align:center;vertical-align:middle}
     .contractor-detail .desc{width:27%}.contractor-detail .project-cell{width:16%;white-space:normal}
     .location-cell{white-space:pre-line;line-height:1.45}
-    tbody tr:nth-child(odd):not(.group-row):not(.subtotal){background:#faf8f2}
-    .desc{text-align:right;width:auto;max-width:0;line-height:1.45;white-space:normal;word-break:normal;word-wrap:break-word;overflow-wrap:anywhere;unicode-bidi:plaintext}
+    tbody tr:nth-child(odd):not(.group-row):not(.subtotal) td{background:var(--table-odd-bg)}
+    .desc{text-align:right;width:auto;max-width:100%;line-height:1.45;white-space:normal;word-break:normal;word-wrap:break-word;overflow-wrap:anywhere;unicode-bidi:plaintext;vertical-align:top}
     .desc-line{display:block;unicode-bidi:plaintext}
     .totals{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0}
-    .box{border:1px solid #d6c08d;background:#fbfaf6;padding:8px 10px;display:flex;gap:8px;justify-content:space-between;align-items:center;min-height:40px}
-    .box span{font-weight:700;display:flex;flex-direction:column;gap:2px}.box strong{font-size:13px}.box.emphasis{background:#efe3c6;border-color:#a87921}
+    .box{border:1px solid var(--report-line);background:#fbfaf6;padding:8px 10px;display:flex;gap:8px;justify-content:space-between;align-items:center;min-height:40px}
+    .box span{font-weight:700;display:flex;flex-direction:column;gap:2px}.box strong{font-size:13px}.box.emphasis{background:#efe3c6;border-color:var(--brand-name)}
     .sub-label{font-size:10px;font-weight:normal;opacity:0.93;display:block}
     .box.words{grid-column:1/-1;justify-content:flex-start;gap:18px;text-align:right}
     .box.discount span,.box.discount strong{color:#c00000}
@@ -3423,15 +5021,15 @@ function renderReportHtmlV2(data) {
     .payment-row td:last-child{text-decoration:none}.negative-balance{color:#1769aa!important;text-decoration:none!important}
     .group-row td{background:#ece6d7;color:#111;font-weight:700;text-align:right}
     .subtotal td{background:#f0f0f0;font-weight:700;color:#111}
-    .terms{page-break-inside:avoid;margin-top:14px;border:1px solid #d6c08d;background:#fff}
-    .terms h2{font-size:14px;margin:0;text-align:center;background:#202020;color:#d6a84f;padding:8px}
+    .terms{page-break-inside:avoid;margin-top:14px;border:1px solid var(--report-line);background:#fff}
+    .terms h2{font-size:14px;margin:0;text-align:center;background:var(--table-head-bg);color:var(--table-head-text);padding:8px}
     .term-block{padding:8px 12px;border-top:1px solid #e6ddc9}
-    .term-block h3{font-size:12px;margin:0 0 5px;color:#9a6b16}
+    .term-block h3{font-size:12px;margin:0 0 5px;color:var(--brand-name)}
     .term-block ul{list-style:none;margin:0;padding:0;display:grid;gap:3px}
     .term-block li{position:relative;margin:0;padding-right:14px;line-height:1.55;text-align:right;color:#202020}
-    .term-block li::before{content:"-";position:absolute;right:0;color:#a87921;font-weight:700}
+    .term-block li::before{content:"-";position:absolute;right:0;color:var(--brand-name);font-weight:700}
     .term-block li.important span{color:#c00000;font-weight:700}
-    .footer{margin-top:12px;padding-top:7px;border-top:1px solid #d6c08d;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;color:#9a6b16;font-size:11px;direction:ltr;line-height:1.45;align-items:center}
+    .footer{margin-top:12px;padding-top:7px;border-top:1px solid var(--report-line);display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;color:var(--brand-name);font-size:11px;direction:ltr;line-height:1.45;align-items:center}
     .footer .left,.footer .center,.footer .right{text-align:center}.footer span{display:grid;min-height:42px;place-content:center;gap:2px}.footer em{font-style:normal}
     @media print{.footer{display:none}}
   </style></head><body><div class="page">
@@ -3439,12 +5037,12 @@ function renderReportHtmlV2(data) {
       <img class="qr" src="${qrData}" />
       <div class="brand-center">
         <img class="logo" src="${logoData}" />
-        <div class="brand-en">EL HANDASIA GROUP FOR ARCHITECTURAL DESIGNS</div>
-        <div class="brand-ar">المجموعة الهندسية للتصميمات المعمارية</div>
+        <div class="brand-en">${escapeHtml(branding.companyNameEn)}</div>
+        <div class="brand-ar">${escapeHtml(branding.companyNameAr)}</div>
         <h1>${escapeHtml(titleLine)}</h1>
         ${workLine ? `<p class="subtitle">${escapeHtml(workLine)}</p>` : ""}
       </div>
-      ${reportDateBlock(data)}
+      ${reportDateBlock(data, branding)}
     </header>
     <section class="info-band">
       ${headerInfo.map(([label, value]) => `<div class="info-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
@@ -3453,14 +5051,16 @@ function renderReportHtmlV2(data) {
     ${totalsHtml(data)}
     ${termsHtml(data)}
     <footer class="footer">
-      <span class="left"><strong>${escapeHtml(reportDate(data.generated_at))}</strong><em>المجموعة الهندسية للتصميمات المعمارية</em></span>
-      <span class="center"><strong>HGAD</strong><em>https://hgad-eg.com</em></span>
+      <span class="left"><strong>${escapeHtml(reportDate(data.generated_at))}</strong><em>${escapeHtml(footerPhone)}</em></span>
+      <span class="center"><strong>${escapeHtml(branding.companyAbbreviation)}</strong><em>${escapeHtml(footerCenterContact)}</em></span>
       <span class="right"><strong>Page preview</strong><em>By ${escapeHtml(data.prepared_by || "Eng. Yasser")}</em></span>
     </footer>
   </div></body></html>`;
 }
 
 async function writeXlsx(data, outputPath) {
+  const branding = normalizeReportBranding(data.branding || DEFAULT_REPORT_BRANDING);
+  const brandColor = hexToArgb(branding.companyNameColor, "FF146B5C");
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Accounting Management";
   workbook.created = new Date();
@@ -3481,19 +5081,21 @@ async function writeXlsx(data, outputPath) {
     { key: "net", width: 14 },
   ];
   sheet.mergeCells("A1:J1");
-  sheet.getCell("A1").value = "EL HANDASIA GROUP FOR ARCHITECTURAL DESIGNS";
+  sheet.getCell("A1").value = branding.companyNameEn;
   sheet.getCell("A1").font = {
     bold: true,
     size: 16,
-    color: { argb: "B9852F" },
+    color: { argb: brandColor },
   };
   sheet.getCell("A1").alignment = { horizontal: "center" };
   sheet.mergeCells("A2:J2");
+  sheet.getCell("A2").value = branding.companyNameAr;
   sheet.getCell("A2").value = "المجموعة الهندسية للتصميمات المعمارية";
+  sheet.getCell("A2").value = branding.companyNameAr;
   sheet.getCell("A2").font = {
     bold: true,
     size: 14,
-    color: { argb: "B9852F" },
+    color: { argb: brandColor },
   };
   sheet.getCell("A2").alignment = { horizontal: "center" };
   sheet.mergeCells("A3:J3");
@@ -3649,6 +5251,10 @@ async function writeCleanXlsx(data, outputPath) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Accounting Management";
   workbook.created = new Date();
+  const branding = {
+    ...reportBrandingFallback(),
+    ...(data.branding || {}),
+  };
   const statementRows = data.statementRows || [];
   const rows = data.rows || [];
   const showDimensions = !!data.show_dimensions;
@@ -3708,15 +5314,15 @@ async function writeCleanXlsx(data, outputPath) {
       wrapText: true,
     };
   };
-  mergeRow(1, "EL HANDASIA GROUP FOR ARCHITECTURAL DESIGNS", {
+  mergeRow(1, branding.companyNameEn, {
     bold: true,
     size: 16,
-    color: { argb: "FFB9852F" },
+    color: { argb: hexToArgb(branding.companyNameColor, "FFB9852F") },
   });
-  mergeRow(2, "المجموعة الهندسية للتصميمات المعمارية", {
+  mergeRow(2, branding.companyNameAr, {
     bold: true,
     size: 14,
-    color: { argb: "FFB9852F" },
+    color: { argb: hexToArgb(branding.companyNameColor, "FFB9852F") },
   });
   mergeRow(
     3,
@@ -3735,7 +5341,7 @@ async function writeCleanXlsx(data, outputPath) {
     "العميل",
     data.party || "",
     "المشروع",
-    [data.project, data.building_unit].filter(Boolean).join(" - "),
+    projectLocationLabel(data),
     "By",
     data.prepared_by || "",
   ]);
@@ -3746,11 +5352,14 @@ async function writeCleanXlsx(data, outputPath) {
     fgColor: { argb: "FFF3F0E8" },
   };
   const header = sheet.addRow(columns.map((column) => column.header));
-  header.font = { bold: true, color: { argb: "FFD6A84F" } };
+  header.font = {
+    bold: true,
+    color: { argb: hexToArgb(branding.tableHeaderText, "FFD6A84F") },
+  };
   header.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FF202020" },
+    fgColor: { argb: hexToArgb(branding.tableHeaderBg, "FF202020") },
   };
   header.alignment = {
     horizontal: "center",
@@ -3793,12 +5402,11 @@ async function writeCleanXlsx(data, outputPath) {
     }
   } else {
     const showGroups =
-      uniqueRowValues(rows, "building_unit").length > 1 ||
-      rows.some((row) => row.floor_apartment);
+      uniqueLocationValues(rows).length > 1;
     const orderedRows = showGroups
       ? [...rows].sort(
           (a, b) =>
-            locationText(a).localeCompare(locationText(b), "ar") ||
+            naturalLocationCompare(locationText(a), locationText(b)) ||
             Number(a.id || 0) - Number(b.id || 0),
         )
       : rows;
@@ -3966,6 +5574,13 @@ function buildReportData(database, query, type) {
       ? selectedSingleProject ||
         (query.document_id ? normalizedProject(document?.project) : "")
       : document?.project || (projects.length === 1 ? normalizedProject(projects[0]) : "");
+  const displayLocation =
+    type === "contractor"
+      ? document?.building_unit || first.building_unit || query.building_unit || ""
+      : singleLocationSummary(
+          rows,
+          document?.building_unit || first.building_unit || query.building_unit || "",
+        );
   const rowDates = rows
     .map((row) => normalizeText(row.entry_date))
     .filter(Boolean)
@@ -4005,6 +5620,7 @@ function buildReportData(database, query, type) {
     filters: query,
     selected_projects: selectedProjects,
     project_selection_count: selectedProjects.length,
+    branding: reportBranding(database),
     show_dimensions: hasReportDimensions(rows),
     dimension_unit: dimensionUnit,
     subtotal_mode: ["building", "unit"].includes(query.subtotal_mode)
@@ -4018,11 +5634,7 @@ function buildReportData(database, query, type) {
       query.customer ||
       "",
     project: displayProject,
-    building_unit:
-      document?.building_unit ||
-      first.building_unit ||
-      query.building_unit ||
-      "",
+    building_unit: displayLocation,
     operation_no:
       contractorCertificateNo ||
       document?.operation_no ||
@@ -4087,6 +5699,19 @@ function escapeHtml(value) {
 
 function xmlEscape(value) {
   return escapeHtml(value).replace(/'/g, "&apos;");
+}
+
+function hexToArgb(value, fallback = "FF000000") {
+  const color = safeCssColor(value, "").replace("#", "");
+  if (color.length === 3) {
+    return `FF${color
+      .split("")
+      .map((part) => `${part}${part}`)
+      .join("")
+      .toUpperCase()}`;
+  }
+  if (color.length === 6) return `FF${color.toUpperCase()}`;
+  return fallback;
 }
 
 function safeFilePart(value) {
@@ -4201,6 +5826,14 @@ function writePdf(html, outputPath, data = {}) {
   fs.mkdirSync(tmpDir, { recursive: true });
   const htmlPath = path.join(tmpDir, `report_${Date.now()}.html`);
   fs.writeFileSync(htmlPath, html, "utf8");
+  const branding = {
+    ...reportBrandingFallback(),
+    ...(data.branding || {}),
+  };
+  const footerContact = brandingFooterContact(branding);
+  const footerPhone =
+    normalizeText(branding.companyPhone) || branding.companyAbbreviation;
+  const footerCenterContact = footerContact || branding.companyAbbreviation;
   if (
     electronRuntime &&
     typeof electronRuntime === "object" &&
@@ -4217,12 +5850,13 @@ function writePdf(html, outputPath, data = {}) {
         await win.loadFile(htmlPath);
         await new Promise((resolve) => setTimeout(resolve, 450));
         const preparedBy = escapeHtml(data.prepared_by || "Eng. Yasser");
+        const pdfFontStack = branding.bodyFontStack.replace(/"/g, "'");
         const pdf = await win.webContents.printToPDF({
           landscape: false,
           printBackground: true,
           displayHeaderFooter: true,
           headerTemplate: "<div></div>",
-          footerTemplate: `<div style="width:100%;font-size:9.5px;color:#9a6b16;padding:4px 28px 0;font-family:Arial,Tahoma,sans-serif;background:white"><div style="display:flex;align-items:center;justify-content:space-between;width:100%;min-height:42px"><div style="min-width:220px;text-align:left">${escapeHtml(reportDate(data.generated_at))}<br>المجموعة الهندسية للتصميمات المعمارية</div><div style="min-width:220px;text-align:center">HGAD<br>https://hgad-eg.com</div><div style="min-width:220px;text-align:right">Page <span class="pageNumber"></span> of <span class="totalPages"></span><br>By ${preparedBy}</div></div></div>`,
+          footerTemplate: `<div style="width:100%;font-size:9.5px;color:${branding.companyNameColor};padding:4px 28px 0;font-family:${pdfFontStack};background:white"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;width:100%;min-height:42px;border-top:1px solid ${branding.lineColor}"><div style="text-align:left;line-height:1.45;min-width:0">${escapeHtml(reportDate(data.generated_at))}<br>${escapeHtml(footerPhone)}</div><div style="text-align:center;line-height:1.45;min-width:0">${escapeHtml(branding.companyAbbreviation)}<br>${escapeHtml(footerCenterContact)}</div><div style="text-align:right;line-height:1.45;min-width:0">Page <span class="pageNumber"></span> of <span class="totalPages"></span><br>By ${preparedBy}</div></div></div>`,
           pageSize: "A4",
           margins: {
             marginType: "custom",
@@ -4246,8 +5880,13 @@ function writePdf(html, outputPath, data = {}) {
     const footerMeta = Buffer.from(
       JSON.stringify({
         date: reportDate(data.generated_at),
-        companyAr: "المجموعة الهندسية للتصميمات المعمارية",
-        website: "https://hgad-eg.com",
+        companyAbbreviation: branding.companyAbbreviation,
+        companyNameColor: branding.companyNameColor,
+        lineColor: branding.lineColor,
+        bodyFontStack: branding.bodyFontStack,
+        website: branding.website,
+        footerContact,
+        footerPhone,
         preparedBy: data.prepared_by || "Eng. Yasser",
       }),
       "utf8",
@@ -4372,6 +6011,7 @@ function buildProductiveQuantitiesData(database, query = {}) {
     month: period === "month" ? month : "",
     work_types: workTypes,
     generated_at: new Date().toISOString(),
+    branding: reportBranding(database),
     rows: rows.map((row) => {
       const isContractor = row.source_type === "contractor_certificate";
       const workRatio = completionPercent(row.completion_ratio);
@@ -4416,6 +6056,15 @@ function productiveQuantitiesSummary(rows) {
 }
 
 function renderProductiveQuantitiesHtml(data) {
+  const branding = {
+    ...reportBrandingFallback(),
+    ...(data.branding || {}),
+  };
+  const footerContact = brandingFooterContact(branding);
+  const footerPhone =
+    normalizeText(branding.companyPhone) || branding.companyAbbreviation;
+  const footerCenterContact = footerContact || branding.companyAbbreviation;
+  const logoData = branding.logoDataUri || imageDataUri(REPORT_LOGO_PATH);
   const periodText =
     data.period === "year" ? `سنوي ${data.year}` : `شهري ${data.year}/${data.month}`;
   const filterText = data.work_types?.length
@@ -4448,23 +6097,29 @@ function renderProductiveQuantitiesHtml(data) {
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
   <title>تقرير الكميات المنتجة</title>
   <style>
-    @page{size:A4 landscape;margin:12mm}
+    @page{size:A4 landscape;margin:12mm 12mm 18mm}
     *{box-sizing:border-box}
-    body{margin:0;background:#fff;color:#202020;font-family:"Arial","Tahoma",sans-serif;font-size:10.5px}
+    body{margin:0;background:#fff;color:#202020;font-family:${branding.bodyFontStack};font-size:10.5px}
     .page{width:100%;min-height:100%;padding:8px}
-    header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border-bottom:3px solid #b7872e;padding-bottom:10px;margin-bottom:12px}
-    h1{margin:0 0 6px;font-size:22px;color:#171717;font-family:Georgia,"Times New Roman",serif}
+    header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border-bottom:3px solid ${branding.companyNameColor};padding-bottom:10px;margin-bottom:12px}
+    h1{margin:0 0 6px;font-size:22px;color:#171717;font-family:${branding.headingFontStack}}
     .meta{display:grid;gap:4px;color:#5f5139;text-align:left;direction:ltr}
-    .subtitle{margin:0;color:#8d651f;font-size:13px}
+    .meta img{width:54px;height:54px;object-fit:contain;justify-self:end}
+    .subtitle{margin:0;color:${branding.companyNameColor};font-size:13px}
     .chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 12px}
     .summary-card{display:flex;gap:10px;align-items:center;justify-content:space-between;min-width:130px;padding:8px 10px;border:1px solid #d8bd7d;background:#f8f1df;border-radius:8px}
     .summary-card span{font-weight:700;color:#6d4f1f}.summary-card strong{font-size:13px}
-    table{width:100%;border-collapse:collapse;table-layout:fixed}
+    table{width:100%;border-collapse:collapse;table-layout:fixed;page-break-inside:auto}
+    thead{display:table-header-group}
+    tfoot{display:table-footer-group}
+    tr,th,td{break-inside:avoid!important;page-break-inside:avoid!important}
     th,td{border:1px solid #d7cfbf;padding:5px 6px;text-align:center;vertical-align:top;overflow-wrap:anywhere}
-    th{background:#202020;color:#d6a84f;font-weight:700}
+    th{background:${branding.tableHeaderBg};color:${branding.tableHeaderText};font-weight:700}
     tbody tr:nth-child(odd){background:#faf8f2}
     .text{text-align:right;line-height:1.45}.number,.ltr{direction:ltr;unicode-bidi:isolate;white-space:nowrap}
-    .footer{margin-top:12px;color:#8d651f;display:flex;justify-content:space-between;border-top:1px solid #d8bd7d;padding-top:8px}
+    .footer{margin-top:12px;color:${branding.companyNameColor};display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;border-top:1px solid ${branding.lineColor};padding-top:8px;direction:ltr;align-items:center}
+    .footer span{display:grid;gap:2px;text-align:center}.footer .left{text-align:left}.footer .right{text-align:right}
+    @media print{.footer{display:none}}
   </style></head><body><div class="page">
     <header>
       <div>
@@ -4472,7 +6127,9 @@ function renderProductiveQuantitiesHtml(data) {
         <p class="subtitle">${escapeHtml(periodText)} — ${escapeHtml(filterText)}</p>
       </div>
       <div class="meta">
-        <strong>Accounting Management</strong>
+        <img src="${logoData}" alt="">
+        <strong>${escapeHtml(branding.companyAbbreviation)}</strong>
+        <span>${escapeHtml(footerContact)}</span>
         <span>${escapeHtml(reportDate(data.generated_at))}</span>
         <span>${escapeHtml(String(data.rows.length))} بند</span>
       </div>
@@ -4485,7 +6142,7 @@ function renderProductiveQuantitiesHtml(data) {
       </tr></thead>
       <tbody>${rowsHtml}</tbody>
     </table>
-    <footer class="footer"><span>HGAD</span><span>By Eng. Yasser Diab</span></footer>
+    <footer class="footer"><span class="left"><strong>${escapeHtml(reportDate(data.generated_at))}</strong><em>${escapeHtml(footerPhone)}</em></span><span class="center"><strong>${escapeHtml(branding.companyAbbreviation)}</strong><em>${escapeHtml(footerCenterContact)}</em></span><span class="right"><strong>Page preview</strong><em>By ${escapeHtml(data.prepared_by || "Eng. Yasser")}</em></span></footer>
   </div></body></html>`;
 }
 
@@ -4569,8 +6226,14 @@ async function writeProductiveQuantitiesXlsx(data, outputPath) {
 }
 
 async function createServer(options = {}) {
-  const dataDir = options.dataDir || getDataDir();
-  const dbPath = options.dbPath || path.join(dataDir, "price_offer.db");
+  const bootstrapServerConfig =
+    options.dataDir || options.dbPath ? {} : readBootstrapServerConfig();
+  const dataDir =
+    options.dataDir || normalizeText(bootstrapServerConfig.dataDir) || getDataDir();
+  const dbPath =
+    options.dbPath ||
+    normalizeText(bootstrapServerConfig.dbPath) ||
+    path.join(dataDir, "price_offer.db");
   const chatUploadDir = path.join(dataDir, "chat_uploads");
   let activePort = Number.isFinite(Number(options.port))
     ? Number(options.port)
@@ -4588,6 +6251,8 @@ async function createServer(options = {}) {
   cleanupEmptyPaymentDocuments(database);
   ensureRichTerms(database);
   ensureDefaultUsers(database);
+  ensureControllerTables(database);
+  ensureCommercialSettings(database);
   fs.mkdirSync(chatUploadDir, { recursive: true });
   database.run(`CREATE TABLE IF NOT EXISTS chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4605,6 +6270,25 @@ async function createServer(options = {}) {
   const app = express();
   app.use(cors({ exposedHeaders: ["Content-Disposition"] }));
   app.use(express.json({ limit: "32mb" }));
+
+  registerManagerGatewayRoutes(app, database, {
+    appVersion: APP_VERSION,
+    defaultPort: () => activePort || DEFAULT_PORT,
+  });
+
+  let managerSyncTimer = null;
+  function scheduleManagerSync(reason = "account update") {
+    clearTimeout(managerSyncTimer);
+    managerSyncTimer = setTimeout(() => {
+      syncAccountToManager(database, {
+        appVersion: APP_VERSION,
+        defaultPort: () => activePort || DEFAULT_PORT,
+        reason,
+      }).catch((error) => {
+        console.warn(`Manager sync skipped: ${error.message}`);
+      });
+    }, 900);
+  }
 
   app.get("/api/health", (req, res) => {
     res.json({
@@ -4689,13 +6373,30 @@ async function createServer(options = {}) {
     }
   });
 
+  app.use("/api", (req, res, next) => {
+    if (subscriptionAccessBypass(req)) {
+      next();
+      return;
+    }
+    const status = subscriptionStatus(database);
+    if (status.can_use_app === false) {
+      res.status(402).json({
+        ...status,
+        error: status.message,
+        payment_required: true,
+      });
+      return;
+    }
+    next();
+  });
+
   app.get("/api/bootstrap", (req, res) => {
     const summary = database.get(
       `
       SELECT COUNT(*) AS rows, COUNT(DISTINCT document_id) AS documents, COUNT(DISTINCT party_id) AS customers,
              ROUND(SUM(CASE WHEN accounting_status = 'عرض سعر' THEN net_total ELSE 0 END), 2) AS offers_total,
              ROUND(SUM(CASE WHEN accounting_status = 'فاتورة' OR accounting_status = 'تحصيل' THEN net_total ELSE 0 END), 2) AS invoices_total,
-             ROUND(SUM(CASE WHEN accounting_status = 'مستخلص مقاول' THEN net_total WHEN accounting_status = 'خصم' THEN -net_total ELSE 0 END), 2) AS contractor_total,
+             ROUND(ABS(SUM(CASE WHEN accounting_status = 'مستخلص مقاول' THEN net_total WHEN accounting_status = 'خصم' THEN -net_total ELSE 0 END)), 2) AS contractor_total,
              ROUND(SUM(CASE WHEN accounting_status = 'خصم' THEN -net_total ELSE net_total END), 2) AS net_total
       FROM active_work_items`
     );
@@ -4712,6 +6413,7 @@ async function createServer(options = {}) {
       summary,
       docs,
       byStatus,
+      company: readJsonSetting(database, "company_profile", {}),
       dataDir,
       dbPath,
       lanIps: getLanIps(),
@@ -4758,11 +6460,171 @@ async function createServer(options = {}) {
     });
   });
 
+  app.post("/api/company/register", async (req, res) => {
+    try {
+      const companyName = normalizeText(req.body.company_name);
+      const contactName = normalizeText(req.body.contact_name);
+      const userName = normalizeText(req.body.user_name || req.body.username);
+      const password = String(req.body.password || "");
+      const dataFolderRaw = normalizeText(req.body.data_folder || req.body.dataDir);
+      const requestedPort = Math.floor(
+        numberOrZero(req.body.local_port || req.body.port),
+      );
+      if (!companyName || !contactName || !userName || !password)
+        return res.status(400).json({
+          error: "Company, contact, login name and password are required",
+        });
+      if (!dataFolderRaw)
+        return res.status(400).json({ error: "Company database folder is required" });
+      if (!requestedPort || requestedPort < 1024 || requestedPort > 65535) {
+        return res.status(400).json({
+          error: "Choose a valid local server port between 1024 and 65535.",
+        });
+      }
+      const localConflict = subscriptionConflict(database, {
+        company_name: companyName,
+        email: req.body.email,
+        phone: req.body.phone,
+        user_name: userName,
+      });
+      if (localConflict) {
+        return res.status(409).json({
+          error: localConflict.message,
+          conflict: localConflict,
+        });
+      }
+      const managerApiBase = cleanServerBase(
+        req.body.manager_api_base ||
+          req.body.managerUrl ||
+          req.body.manager_url ||
+          DEFAULT_MANAGER_SETTINGS.publicUrl,
+      );
+      const remoteConflict = await remoteSubscriptionCheck(managerApiBase, {
+        company_name: companyName,
+        email: normalizeText(req.body.email),
+        phone: normalizeText(req.body.phone),
+        user_name: userName,
+      });
+      if (remoteConflict) {
+        return res.status(409).json({
+          error: remoteConflict.message || "An account already exists for this company/contact.",
+          conflict: remoteConflict,
+        });
+      }
+      const resolvedInput = path.resolve(dataFolderRaw);
+      const dbPath = /\.db$/i.test(resolvedInput)
+        ? resolvedInput
+        : path.join(resolvedInput, "price_offer.db");
+      if (fs.existsSync(dbPath)) {
+        return res.status(409).json({
+          error:
+            "A database file already exists in this location. Choose an empty folder for a new company database.",
+        });
+      }
+      const trialStartedAt = new Date().toISOString();
+      const trialExpiresAt = addDaysIso(trialStartedAt, TRIAL_DAYS);
+      const profile = {
+        company_name: companyName,
+        contact_name: contactName,
+        email:
+          normalizeText(req.body.email) || "yasserdiabhassan@gmail.com",
+        phone: normalizeText(req.body.phone) || "",
+        address: normalizeText(req.body.address || req.body.company_address) || "Cairo, Egypt",
+        website: normalizeText(req.body.website || req.body.company_website) || "",
+        database_provider:
+          normalizeText(req.body.database_provider || req.body.databaseProvider) ||
+          "local",
+        remote_database_url:
+          normalizeText(req.body.remote_database_url || req.body.remoteDatabaseUrl) ||
+          "",
+        data_folder: path.dirname(dbPath),
+        db_path: dbPath,
+        trial_started_at: trialStartedAt,
+        trial_expires_at: trialExpiresAt,
+        created_at: new Date().toISOString(),
+      };
+      await createCompanyDatabase(dbPath, profile, {
+        user_name: userName,
+        contact_name: contactName,
+        password,
+      });
+      const serverInfo = await startCompanyServer(dbPath, requestedPort);
+      const notes = JSON.stringify({
+        source: "company_signup",
+        data_folder: profile.data_folder,
+        db_path: profile.db_path,
+        database_provider: profile.database_provider,
+        remote_database_url: profile.remote_database_url,
+        local_server: serverInfo.localUrl,
+      });
+      const leadPayload = {
+        company_name: companyName,
+        contact_name: contactName,
+        user_name: userName,
+        manager_user_name: userName,
+        email: profile.email,
+        phone: profile.phone,
+        company_website: profile.website,
+        company_address: profile.address,
+        requested_users: 1,
+        billing_cycle: "monthly",
+        local_host: serverInfo.localUrl,
+        tunnel_provider: profile.database_provider,
+        tunnel_url: profile.remote_database_url,
+        trial_started_at: trialStartedAt,
+        trial_expires_at: trialExpiresAt,
+        notes,
+      };
+      let managerRecord = null;
+      const currentProfile = readJsonSetting(database, "company_profile", {});
+      if (!normalizeText(currentProfile.company_name)) {
+        const localLead = upsertSubscriptionLead(database, leadPayload);
+        if (localLead.conflict) {
+          return res.status(409).json({
+            error: localLead.conflict.message,
+            conflict: localLead.conflict,
+          });
+        }
+        managerRecord = localLead.subscription;
+      }
+      const remoteRecord =
+        managerApiBase && !managerRecord
+          ? await remoteSubscriptionRegister(managerApiBase, leadPayload)
+          : managerApiBase
+            ? await remoteSubscriptionRegister(managerApiBase, leadPayload)
+            : null;
+      res.status(201).json({
+        ok: true,
+        company: profile,
+        dbPath,
+        server: serverInfo,
+        manager_api_base: managerApiBase,
+        manager_record: remoteRecord?.ok ? remoteRecord.data : managerRecord,
+        manager_warning:
+          remoteRecord && !remoteRecord.ok
+            ? remoteRecord.data?.error || "Could not register this company on the manager server."
+            : "",
+      });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   app.post("/api/auth/login", (req, res) => {
     const username = normalizeText(req.body.username || req.body.name);
+    const companyName = normalizeText(req.body.company_name || req.body.company);
     const password = String(req.body.password || "");
     if (!username || !password)
       return res.status(400).json({ error: "Name and password are required" });
+    const companyProfile = readJsonSetting(database, "company_profile", {});
+    const expectedCompany = normalizeText(companyProfile.company_name);
+    if (
+      companyName &&
+      expectedCompany &&
+      normalizeArabic(companyName) !== normalizeArabic(expectedCompany)
+    ) {
+      return res.status(403).json({ error: "Wrong company name" });
+    }
     const user = database.get(
       `SELECT * FROM users
        WHERE is_active = 1
@@ -4776,11 +6638,17 @@ async function createServer(options = {}) {
       "UPDATE users SET last_login_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?",
       [user.id],
     );
+    scheduleManagerSync("user login");
     const fresh = database.get(
       "SELECT *, 1 AS is_online FROM users WHERE id = ?",
       [user.id],
     );
-    res.json({ user: publicUser(fresh) });
+    trackClientDevice(database, req, fresh);
+    res.json({
+      user: publicUser(fresh),
+      company: companyProfile || {},
+      subscription: subscriptionStatus(database),
+    });
   });
 
   app.post("/api/auth/logout", (req, res) => {
@@ -4790,8 +6658,45 @@ async function createServer(options = {}) {
         "UPDATE users SET last_seen_at = datetime('now', '-3 minutes') WHERE id = ?",
         [id],
       );
+      scheduleManagerSync("user logout");
     }
     res.json({ ok: true });
+  });
+
+  app.get("/api/company/profile", (req, res) => {
+    res.json(readJsonSetting(database, "company_profile", {}));
+  });
+
+  app.put("/api/company/profile", (req, res) => {
+    if (!companyAdminAuthorized(database, req.body))
+      return res.status(403).json({ error: "Manager access is required" });
+    const current = readJsonSetting(database, "company_profile", {});
+    const profile = {
+      ...current,
+      company_name:
+        normalizeText(req.body.company_name || req.body.companyName) ||
+        normalizeText(current.company_name),
+      contact_name:
+        normalizeText(req.body.contact_name || req.body.contactName) ||
+        normalizeText(current.contact_name),
+      email:
+        normalizeText(req.body.email) ||
+        normalizeText(current.email) ||
+        "yasserdiabhassan@gmail.com",
+      phone: normalizeText(req.body.phone) || normalizeText(current.phone),
+      address:
+        normalizeText(req.body.address || req.body.company_address) ||
+        normalizeText(current.address) ||
+        "Cairo, Egypt",
+      website:
+        normalizeText(req.body.website || req.body.company_website) ||
+        normalizeText(current.website),
+      updated_at: new Date().toISOString(),
+    };
+    if (!profile.company_name)
+      return res.status(400).json({ error: "Company name is required" });
+    writeJsonSetting(database, "company_profile", profile);
+    res.json(profile);
   });
 
   app.get("/api/users", (req, res) => {
@@ -4821,16 +6726,22 @@ async function createServer(options = {}) {
       "UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ? AND is_active = 1",
       [id],
     );
+    const user = database.get("SELECT * FROM users WHERE id = ?", [id]);
+    trackClientDevice(database, req, user || { id });
     res.json({ ok: true });
   });
 
   app.post("/api/users", (req, res) => {
+    if (!companyAdminAuthorized(database, req.body))
+      return res.status(403).json({ error: "Manager access is required" });
     const username = normalizeText(req.body.username);
     const displayName = normalizeText(
       req.body.display_name || req.body.username,
     );
     const password = String(req.body.password || "");
-    const role = req.body.role === "admin" ? "admin" : "user";
+    const role = ["admin", "manager"].includes(req.body.role)
+      ? req.body.role
+      : "user";
     if (!username || !displayName || !password)
       return res
         .status(400)
@@ -4843,9 +6754,9 @@ async function createServer(options = {}) {
           displayName,
           role,
           hashPassword(password),
-          role === "admin" ? 1 : normalizeBool(req.body.can_create_invoices),
-          role === "admin" ? 1 : normalizeBool(req.body.can_create_payments),
-          role === "admin" ? 1 : normalizeBool(req.body.can_change_status),
+          role === "admin" || role === "manager" ? 1 : normalizeBool(req.body.can_create_invoices),
+          role === "admin" || role === "manager" ? 1 : normalizeBool(req.body.can_create_payments),
+          role === "admin" || role === "manager" ? 1 : normalizeBool(req.body.can_change_status),
         ],
       );
       res
@@ -4857,12 +6768,15 @@ async function createServer(options = {}) {
             ]),
           ),
         );
+      scheduleManagerSync("user created");
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
   });
 
   app.put("/api/users/:id", (req, res) => {
+    if (!companyAdminAuthorized(database, req.body))
+      return res.status(403).json({ error: "Manager access is required" });
     const id = Number(req.params.id);
     const existing = database.get("SELECT * FROM users WHERE id = ?", [id]);
     if (!existing) return res.status(404).json({ error: "User not found" });
@@ -4888,6 +6802,10 @@ async function createServer(options = {}) {
             "can_change_status",
           ].includes(key)
             ? normalizeBool(req.body[key])
+            : key === "role"
+              ? ["admin", "manager"].includes(req.body[key])
+                ? req.body[key]
+                : "user"
             : req.body[key],
         );
       }
@@ -4899,6 +6817,7 @@ async function createServer(options = {}) {
     if (!sets.length) return res.status(400).json({ error: "No changes" });
     params.push(id);
     database.run(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, params);
+    scheduleManagerSync("user updated");
     res.json(
       publicUser(database.get("SELECT * FROM users WHERE id = ?", [id])),
     );
@@ -4908,38 +6827,43 @@ async function createServer(options = {}) {
     const id = Number(req.params.id);
     const existing = database.get("SELECT * FROM users WHERE id = ?", [id]);
     if (!existing) return res.status(404).json({ error: "User not found" });
+    const requesterId = Number(req.body.requester_user_id || req.body.user_id || 0);
+    const isSelfChange = requesterId === id;
+    if (!isSelfChange && !companyAdminAuthorized(database, req.body)) {
+      return res.status(403).json({ error: "Manager access is required" });
+    }
     const newPassword = String(
       req.body.new_password || req.body.password || "",
     );
     if (!newPassword)
       return res.status(400).json({ error: "New password is required" });
-    if (
-      existing.role !== "admin" &&
-      req.body.current_password &&
-      existing.pin_hash !== hashPassword(req.body.current_password)
-    ) {
+    if (isSelfChange && existing.pin_hash !== hashPassword(req.body.current_password || "")) {
       return res.status(403).json({ error: "Current password is wrong" });
     }
     database.run("UPDATE users SET pin_hash = ? WHERE id = ?", [
       hashPassword(newPassword),
       id,
     ]);
+    scheduleManagerSync("user password changed");
     res.json({ ok: true });
   });
 
   app.delete("/api/users/:id", (req, res) => {
+    if (!companyAdminAuthorized(database, req.body))
+      return res.status(403).json({ error: "Manager access is required" });
     const id = Number(req.params.id);
     const existing = database.get("SELECT * FROM users WHERE id = ?", [id]);
     if (!existing) return res.status(404).json({ error: "User not found" });
     const activeAdmins =
       database.get(
-        "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1",
+        "SELECT COUNT(*) AS count FROM users WHERE role IN ('admin', 'manager') AND is_active = 1",
       )?.count || 0;
-    if (existing.role === "admin" && activeAdmins <= 1)
+    if (["admin", "manager"].includes(existing.role) && activeAdmins <= 1)
       return res
         .status(400)
-        .json({ error: "Cannot delete the last active admin" });
-    database.run("UPDATE users SET is_active = 0 WHERE id = ?", [id]);
+        .json({ error: "Cannot delete the last active manager/admin" });
+    database.run("DELETE FROM users WHERE id = ?", [id]);
+    scheduleManagerSync("user deleted");
     res.json({ ok: true });
   });
 
@@ -5313,13 +7237,21 @@ async function createServer(options = {}) {
       requestedType = "invoice";
     if (!["price_offer", "invoice", "contractor_certificate", "payment", "ledger"].includes(requestedType))
       requestedType = current.document_type;
+    let reassignedDocumentNo = null;
+    let reassignedOperationNo = "";
     if (requestedType !== current.document_type) {
       const collision = database.get(
         "SELECT id FROM documents WHERE document_type = ? AND document_no = ? AND id <> ? AND deleted_at IS NULL",
         [requestedType, current.document_no, documentId],
       );
-      if (collision)
-        return res.status(409).json({ error: "Document number already exists for the target type" });
+      if (collision) {
+        reassignedDocumentNo = nextAvailableDocumentNo(
+          database,
+          current.document_no + 1,
+          documentId,
+        );
+        reassignedOperationNo = formatOperationNo(reassignedDocumentNo);
+      }
     }
     const allowed = [
       "status",
@@ -5344,6 +7276,12 @@ async function createServer(options = {}) {
         if (requestedType !== current.document_type) {
           sets.push("document_type = ?");
           params.push(requestedType);
+          if (reassignedDocumentNo) {
+            sets.push("document_no = ?");
+            params.push(reassignedDocumentNo);
+            sets.push("operation_no = ?");
+            params.push(reassignedOperationNo);
+          }
         }
       } else if (Object.prototype.hasOwnProperty.call(req.body, key)) {
         sets.push(`${key} = ?`);
@@ -5363,12 +7301,38 @@ async function createServer(options = {}) {
     const updated = database.get("SELECT * FROM documents WHERE id = ?", [
       documentId,
     ]);
+    if (updated.party_id) {
+      const party = partyFromInput({
+        party_role: updated.party_role,
+        party_category: updated.party_category,
+        base_party_name: stripPartyPrefix(updated.customer_name),
+        customer_name: updated.customer_name,
+        customer_display_name: "",
+      });
+      if (party.searchName) {
+        database.run(
+          `UPDATE parties
+           SET category = ?, base_name = ?, display_name = ?, search_name = ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [
+            storedPartyCategory(party.category),
+            party.baseName,
+            displayPartyName(party.baseName, party.category) ||
+              party.displayName ||
+              party.baseName,
+            party.searchName,
+            updated.party_id,
+          ],
+        );
+      }
+    }
     database.run(
       `UPDATE work_items
        SET serial = ?, operation_no = ?, accounting_status = ?, document_status = ?,
            party_id = ?, party_role = ?, party_category = ?, customer_name = ?,
            customer_display_name = ?, search_party_name = ?, project = ?,
-           building_unit = ?, entry_date = ?, updated_at = CURRENT_TIMESTAMP
+           entry_date = ?, updated_at = CURRENT_TIMESTAMP
        WHERE document_id = ? AND deleted_at IS NULL`,
       [
         updated.document_no,
@@ -5382,7 +7346,6 @@ async function createServer(options = {}) {
         updated.customer_name,
         updated.search_party_name,
         updated.project,
-        updated.building_unit,
         updated.entry_date,
         documentId,
       ],
@@ -5633,6 +7596,534 @@ async function createServer(options = {}) {
     res.json({ ok: true });
   });
 
+  app.get("/api/settings/report-branding", (req, res) => {
+    res.json(reportBranding(database));
+  });
+
+  app.put("/api/settings/report-branding", (req, res) => {
+    if (!companyAdminAuthorized(database, req.body))
+      return res.status(403).json({ error: "Wrong password" });
+    const branding = normalizeReportBranding(req.body.branding || req.body);
+    writeJsonSetting(database, "report_branding", branding);
+    res.json(reportBranding(database));
+  });
+
+  app.put("/api/settings/admin-password", (req, res) => {
+    if (!companyAdminAuthorized(database, req.body))
+      return res.status(403).json({ error: "Wrong password" });
+    const nextPassword = normalizeText(req.body.new_password || req.body.password_new);
+    if (!nextPassword)
+      return res.status(400).json({ error: "New admin password is required" });
+    writeSetting(database, "admin_password", nextPassword);
+    res.json({ ok: true });
+  });
+
+  app.delete("/api/company-account", (req, res) => {
+    if (!companyAdminAuthorized(database, req.body))
+      return res.status(403).json({ error: "Wrong password" });
+    if (normalizeText(req.body.confirmation) !== "DELETE")
+      return res.status(400).json({ error: "Type DELETE to confirm account deletion." });
+    const result = resetLocalCompanyAccount(database, {
+      dataDir,
+      dbPath,
+      chatUploadDir,
+    });
+    res.json({
+      ok: true,
+      ...result,
+      message:
+        "Company account data was deleted from the working database. A database archive was kept before deletion.",
+    });
+  });
+
+  app.get("/api/subscription/plans", (req, res) => {
+    res.json({ plans: subscriptionPlans(database) });
+  });
+
+  app.get("/api/subscription/status", (req, res) => {
+    res.json(subscriptionStatus(database));
+  });
+
+  app.get("/api/subscriptions/check", (req, res) => {
+    const conflict = subscriptionConflict(database, req.query || {});
+    res.json({
+      exists: !!conflict,
+      field: conflict?.field || "",
+      message: conflict?.message || "",
+    });
+  });
+
+  app.put("/api/subscription/plans", (req, res) => {
+    if (!managerRequestAuthorized(database, req.body))
+      return res.status(403).json({ error: "Wrong password" });
+    const plans = normalizeSubscriptionPlans(req.body.plans);
+    if (!plans.length)
+      return res.status(400).json({ error: "At least one plan is required" });
+    writeJsonSetting(database, "subscription_plans", plans);
+    res.json({ plans });
+  });
+
+  app.get("/api/manager/public", (req, res) => {
+    res.json({
+      app: "Accounting Management Manager",
+      version: APP_VERSION,
+      settings: managerSettings(database, false),
+      plans: subscriptionPlans(database).filter((plan) =>
+        normalizeBool(plan.active ?? 1),
+      ),
+    });
+  });
+
+  app.get("/api/manager/admin", (req, res) => {
+    if (!managerRequestAuthorized(database, req.query))
+      return res.status(403).json({ error: "Wrong password" });
+    res.json({
+      settings: managerSettings(database, true),
+      paymentSettings: activePaymentSettings(database, false),
+      plans: subscriptionPlans(database),
+      subscribers: database.all(
+        `SELECT * FROM subscription_accounts
+         ORDER BY updated_at DESC, created_at DESC
+         LIMIT 500`,
+      ),
+      payments: database.all(
+        `SELECT p.*, s.company_name, s.contact_name, s.email, s.phone
+         FROM subscription_payments p
+         LEFT JOIN subscription_accounts s ON s.id = p.subscription_id
+         ORDER BY p.updated_at DESC, p.created_at DESC
+         LIMIT 500`,
+      ),
+    });
+  });
+
+  app.put("/api/manager/settings", (req, res) => {
+    if (!managerRequestAuthorized(database, req.body))
+      return res.status(403).json({ error: "Wrong password" });
+    const settings = normalizeManagerSettings(req.body.settings || req.body);
+    writeJsonSetting(database, "manager_settings", settings);
+    res.json({ settings });
+  });
+
+  app.get("/api/manager/payment-settings", (req, res) => {
+    if (!managerRequestAuthorized(database, req.query))
+      return res.status(403).json({ error: "Wrong password" });
+    res.json(activePaymentSettings(database, false));
+  });
+
+  app.put("/api/manager/payment-settings", (req, res) => {
+    if (!managerRequestAuthorized(database, req.body))
+      return res.status(403).json({ error: "Wrong password" });
+    const existing =
+      database.get("SELECT * FROM payment_settings WHERE id = 1") || {};
+    const paypal = req.body.paypal || {};
+    const submittedSecret = String(paypal.secret || "").trim();
+    const submittedPassword = String(paypal.password || "").trim();
+    const shouldReplaceSecret =
+      submittedSecret && !/^\u2022+$/.test(submittedSecret);
+    const shouldReplacePassword =
+      submittedPassword && !/^\u2022+$/.test(submittedPassword);
+    const secretEncrypted = shouldReplaceSecret
+      ? encryptPaymentSecret(submittedSecret)
+      : existing.paypal_secret_encrypted || "";
+    const passwordEncrypted = shouldReplacePassword
+      ? encryptPaymentSecret(submittedPassword)
+      : existing.paypal_password_encrypted || "";
+    database.run(
+      `INSERT INTO payment_settings
+        (id, mode, currency, paypal_client_id, paypal_secret_encrypted,
+         paypal_username, paypal_password_encrypted, created_at, updated_at, updated_by)
+       VALUES (1, ?, 'USD', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         mode = excluded.mode,
+         currency = 'USD',
+         paypal_client_id = excluded.paypal_client_id,
+         paypal_secret_encrypted = excluded.paypal_secret_encrypted,
+         paypal_username = excluded.paypal_username,
+         paypal_password_encrypted = excluded.paypal_password_encrypted,
+         updated_at = CURRENT_TIMESTAMP,
+         updated_by = excluded.updated_by`,
+      [
+        normalizePayPalMode(req.body.mode),
+        normalizeText(paypal.client_id),
+        secretEncrypted,
+        normalizeText(paypal.username),
+        passwordEncrypted,
+        normalizeText(req.body.login || req.body.ownerLogin || req.body.name),
+      ],
+    );
+    res.json(activePaymentSettings(database, false));
+  });
+
+  app.post("/api/manager/payment-settings/paypal/test", async (req, res) => {
+    if (!managerRequestAuthorized(database, req.body))
+      return res.status(403).json({ success: false, message: "Wrong password" });
+    try {
+      const settings = activePaymentSettings(database, true);
+      settings.mode = normalizePayPalMode(req.body.mode || settings.mode);
+      await paypalAccessToken(settings);
+      res.json({
+        success: true,
+        message: `PayPal ${settings.mode} connection successful.`,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error.message || "PayPal credentials are invalid.",
+      });
+    }
+  });
+
+  app.post("/api/payments/create-checkout", async (req, res) => {
+    const requestedUsers = Math.max(
+      1,
+      Math.floor(numberOrZero(req.body.requested_users) || 1),
+    );
+    const billingCycle =
+      req.body.billing_cycle === "annually" ? "annually" : "monthly";
+    const plan = planForRequest(
+      subscriptionPlans(database),
+      normalizeText(req.body.plan_id || req.body.selected_plan_id),
+      requestedUsers,
+    );
+    if (!plan) return res.status(400).json({ error: "No active plan is available" });
+    const price = priceForPlan(plan, billingCycle);
+    if (price.currency !== "USD")
+      return res.status(400).json({ error: "Only USD PayPal payments are supported" });
+    const id = paymentId();
+    const companyName = normalizeText(req.body.company_name) || "Pending company";
+    const companyProfile = readJsonSetting(database, "company_profile", {});
+    const accountLookupValues = [
+      companyName,
+      normalizeText(req.body.email),
+      normalizeText(req.body.phone),
+      normalizeText(req.body.manager_user_name || req.body.user_name || req.body.username),
+      normalizeText(companyProfile.company_name),
+    ].filter(Boolean);
+    const existingAccount = accountLookupValues.length
+      ? database.get(
+          `SELECT * FROM subscription_accounts
+           WHERE LOWER(company_name) IN (${accountLookupValues.map(() => "LOWER(?)").join(",")})
+              OR LOWER(email) IN (${accountLookupValues.map(() => "LOWER(?)").join(",")})
+              OR LOWER(phone) IN (${accountLookupValues.map(() => "LOWER(?)").join(",")})
+              OR LOWER(manager_user_name) IN (${accountLookupValues.map(() => "LOWER(?)").join(",")})
+           ORDER BY id LIMIT 1`,
+          [
+            ...accountLookupValues,
+            ...accountLookupValues,
+            ...accountLookupValues,
+            ...accountLookupValues,
+          ],
+        )
+      : null;
+    let subscriptionId = existingAccount?.id || null;
+    const accountParams = [
+      companyName,
+      normalizeText(req.body.contact_name) ||
+        normalizeText(companyProfile.contact_name),
+      normalizeText(req.body.manager_user_name || req.body.user_name || req.body.username),
+      normalizeText(req.body.email) || normalizeText(companyProfile.email),
+      normalizeText(req.body.phone) || normalizeText(companyProfile.phone),
+      normalizeText(req.body.company_website) || normalizeText(companyProfile.website),
+      normalizeText(req.body.company_address) || normalizeText(companyProfile.address),
+      normalizeText(req.body.region),
+      normalizeText(req.body.country),
+      normalizeText(req.body.city),
+      Math.max(requestedUsers, Number(plan.users || 1)),
+      billingCycle,
+      plan.id,
+      normalizeText(req.body.local_host),
+      normalizeText(req.body.tunnel_provider),
+      normalizeText(req.body.tunnel_url),
+      normalizeText(req.body.notes),
+    ];
+    if (subscriptionId) {
+      database.run(
+        `UPDATE subscription_accounts
+         SET company_name = COALESCE(NULLIF(?, ''), company_name),
+             contact_name = COALESCE(NULLIF(?, ''), contact_name),
+             manager_user_name = COALESCE(NULLIF(?, ''), manager_user_name),
+             email = COALESCE(NULLIF(?, ''), email),
+             phone = COALESCE(NULLIF(?, ''), phone),
+             company_website = COALESCE(NULLIF(?, ''), company_website),
+             company_address = COALESCE(NULLIF(?, ''), company_address),
+             region = COALESCE(NULLIF(?, ''), region),
+             country = COALESCE(NULLIF(?, ''), country),
+             city = COALESCE(NULLIF(?, ''), city),
+             requested_users = ?,
+             billing_cycle = ?,
+             selected_plan_id = ?,
+             local_host = COALESCE(NULLIF(?, ''), local_host),
+             tunnel_provider = COALESCE(NULLIF(?, ''), tunnel_provider),
+             tunnel_url = COALESCE(NULLIF(?, ''), tunnel_url),
+             payment_status = 'pending',
+             notes = COALESCE(NULLIF(?, ''), notes),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [...accountParams, subscriptionId],
+      );
+    } else {
+      const subscriptionResult = database.run(
+        `INSERT INTO subscription_accounts
+          (company_name, contact_name, manager_user_name, email, phone, company_website, company_address,
+           region, country, city, requested_users,
+           billing_cycle, selected_plan_id, local_host, tunnel_provider, tunnel_url,
+           payment_status, subscription_status, notes, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'lead', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        accountParams,
+      );
+      subscriptionId = subscriptionResult.lastInsertRowid;
+    }
+    const subscriptionPaymentResult = database.run(
+      `INSERT INTO subscription_payments
+        (subscription_id, reference, provider, method, plan_id, billing_cycle,
+         requested_users, amount, currency, status, raw_payload,
+         created_at, updated_at)
+       VALUES (?, ?, 'paypal', 'paypal', ?, ?, ?, ?, 'USD', 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [
+        subscriptionId,
+        id,
+        plan.id,
+        billingCycle,
+        Math.max(requestedUsers, Number(plan.users || 1)),
+        price.amount,
+        JSON.stringify({ source: "paypal_create_checkout" }),
+      ],
+    );
+    database.run(
+      `INSERT INTO payments
+        (id, user_id, subscription_id, subscription_payment_id, plan_id,
+         billing_cycle, amount, currency, provider, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'USD', 'paypal', 'pending', CURRENT_TIMESTAMP)`,
+      [
+        id,
+        Number(req.body.user_id || 0) || null,
+        subscriptionId,
+        subscriptionPaymentResult.lastInsertRowid,
+        plan.id,
+        billingCycle,
+        price.amount,
+      ],
+    );
+    try {
+      const settings = activePaymentSettings(database, true);
+      const { order, checkoutUrl } = await createPaypalOrder(settings, {
+        id,
+        plan_id: plan.id,
+        billing_cycle: billingCycle,
+        amount: price.amount,
+      }, req.headers.origin || defaultServerUrl(activePort));
+      database.run(
+        `UPDATE payments
+         SET paypal_order_id = ?, checkout_url = ?, raw_provider_response = ?
+         WHERE id = ?`,
+        [order.id, checkoutUrl, JSON.stringify(order), id],
+      );
+      database.run(
+        `UPDATE subscription_payments
+         SET checkout_url = ?, external_payment_id = ?, raw_payload = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [checkoutUrl, order.id, JSON.stringify(order), subscriptionPaymentResult.lastInsertRowid],
+      );
+      res.status(201).json({
+        payment_id: id,
+        paypal_order_id: order.id,
+        checkout_url: checkoutUrl,
+      });
+    } catch (error) {
+      database.run(
+        "UPDATE payments SET status = 'failed', failed_at = CURRENT_TIMESTAMP, raw_provider_response = ? WHERE id = ?",
+        [JSON.stringify({ error: error.message }), id],
+      );
+      database.run(
+        "UPDATE subscription_payments SET status = 'failed', raw_payload = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [JSON.stringify({ error: error.message }), subscriptionPaymentResult.lastInsertRowid],
+      );
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/payments/paypal/capture", async (req, res) => {
+    const payment = database.get(
+      "SELECT * FROM payments WHERE id = ? OR paypal_order_id = ?",
+      [normalizeText(req.body.payment_id), normalizeText(req.body.paypal_order_id)],
+    );
+    if (!payment) return res.status(404).json({ error: "Payment not found" });
+    const orderId = normalizeText(req.body.paypal_order_id || payment.paypal_order_id);
+    if (!orderId || orderId !== payment.paypal_order_id)
+      return res.status(400).json({ error: "PayPal order does not match the payment" });
+    if (payment.status === "paid") {
+      return res.json({ ok: true, status: "paid", payment });
+    }
+    try {
+      const captureResponse = await capturePaypalOrder(
+        activePaymentSettings(database, true),
+        orderId,
+      );
+      const capture = paypalCaptureAmount(captureResponse);
+      if (capture.status !== "COMPLETED")
+        throw new Error(`PayPal capture status is ${capture.status || "unknown"}`);
+      if (capture.currency !== "USD")
+        throw new Error("Captured currency is not USD");
+      if (roundMoney(capture.amount) !== roundMoney(payment.amount))
+        throw new Error("Captured amount does not match the selected plan price");
+      const paidAt = new Date().toISOString();
+      database.run(
+        `UPDATE payments
+         SET status = 'paid', paypal_capture_id = ?, paid_at = ?,
+             raw_provider_response = ?
+         WHERE id = ?`,
+        [capture.captureId, paidAt, JSON.stringify(captureResponse), payment.id],
+      );
+      const subscriptionPayment = database.get(
+        "SELECT * FROM subscription_payments WHERE id = ?",
+        [payment.subscription_payment_id],
+      );
+      if (subscriptionPayment) {
+        activateSubscriptionFromPayment(database, subscriptionPayment, captureResponse);
+      }
+      const expiresAt = subscriptionUntilFromCycle(payment.billing_cycle, paidAt);
+      const existingSubscription = database.get(
+        "SELECT * FROM subscriptions WHERE subscription_account_id = ? LIMIT 1",
+        [payment.subscription_id],
+      );
+      if (existingSubscription) {
+        database.run(
+          `UPDATE subscriptions
+           SET plan_id = ?, status = 'active', billing_cycle = ?,
+               starts_at = COALESCE(starts_at, ?), expires_at = ?,
+               last_payment_id = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [
+            payment.plan_id,
+            payment.billing_cycle,
+            paidAt,
+            expiresAt,
+            payment.id,
+            existingSubscription.id,
+          ],
+        );
+      } else {
+        database.run(
+          `INSERT INTO subscriptions
+            (id, user_id, subscription_account_id, plan_id, status, billing_cycle,
+             starts_at, expires_at, last_payment_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [
+            `sub_${crypto.randomBytes(8).toString("hex")}`,
+            payment.user_id || null,
+            payment.subscription_id,
+            payment.plan_id,
+            payment.billing_cycle,
+            paidAt,
+            expiresAt,
+            payment.id,
+          ],
+        );
+      }
+      res.json({
+        ok: true,
+        status: "paid",
+        payment: database.get("SELECT * FROM payments WHERE id = ?", [payment.id]),
+        subscription: database.get(
+          "SELECT * FROM subscriptions WHERE last_payment_id = ?",
+          [payment.id],
+        ),
+      });
+    } catch (error) {
+      database.run(
+        "UPDATE payments SET status = 'failed', failed_at = CURRENT_TIMESTAMP, raw_provider_response = ? WHERE id = ?",
+        [JSON.stringify({ error: error.message }), payment.id],
+      );
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/payments/status/:payment_id", (req, res) => {
+    const payment = database.get("SELECT * FROM payments WHERE id = ?", [
+      normalizeText(req.params.payment_id),
+    ]);
+    if (!payment) return res.status(404).json({ error: "Payment not found" });
+    res.json({
+      payment_id: payment.id,
+      status: payment.status,
+      amount: payment.amount,
+      currency: payment.currency,
+      checkout_url: payment.checkout_url,
+      paypal_order_id: payment.paypal_order_id,
+      paid_at: payment.paid_at,
+      failed_at: payment.failed_at,
+    });
+  });
+
+  app.post("/api/subscriptions/register", (req, res) => {
+    try {
+      const result = upsertSubscriptionLead(database, req.body || {});
+      if (result.conflict) {
+        return res.status(409).json({
+          error: result.conflict.message,
+          conflict: result.conflict,
+        });
+      }
+      res.status(201).json(result.subscription);
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/subscriptions/:id", (req, res) => {
+    if (
+      !companyAdminAuthorized(database, req.body) &&
+      !managerRequestAuthorized(database, req.body)
+    )
+      return res.status(403).json({ error: "Wrong password" });
+    const id = Number(req.params.id);
+    const existing = database.get("SELECT * FROM subscription_accounts WHERE id = ?", [
+      id,
+    ]);
+    if (!existing) return res.status(404).json({ error: "Subscriber not found" });
+    const allowed = [
+      "company_name",
+      "contact_name",
+      "email",
+      "phone",
+      "company_website",
+      "company_address",
+      "region",
+      "country",
+      "city",
+      "requested_users",
+      "billing_cycle",
+      "selected_plan_id",
+      "local_host",
+      "tunnel_provider",
+      "tunnel_url",
+      "payment_status",
+      "subscription_status",
+      "subscription_expires_at",
+      "free_access_until",
+      "subscription_note",
+      "notes",
+    ];
+    const sets = [];
+    const params = [];
+    for (const key of allowed) {
+      if (!Object.prototype.hasOwnProperty.call(req.body, key)) continue;
+      sets.push(`${key} = ?`);
+      params.push(
+        key === "requested_users"
+          ? Math.max(1, Math.floor(numberOrZero(req.body[key]) || 1))
+          : normalizeText(req.body[key]),
+      );
+    }
+    if (!sets.length) return res.status(400).json({ error: "No changes" });
+    params.push(id);
+    database.run(
+      `UPDATE subscription_accounts SET ${sets.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      params,
+    );
+    res.json(database.get("SELECT * FROM subscription_accounts WHERE id = ?", [id]));
+  });
+
   app.get("/api/settings/terms", (req, res) => {
     const rows = database.all(
       "SELECT key, value FROM app_settings WHERE key IN ('terms_retail', 'terms_corporate')",
@@ -5643,7 +8134,7 @@ async function createServer(options = {}) {
   });
 
   app.put("/api/settings/terms/:key", (req, res) => {
-    if (req.body.password !== adminPassword(database))
+    if (!companyAdminAuthorized(database, req.body))
       return res.status(403).json({ error: "Wrong password" });
     const key =
       req.params.key === "corporate" ? "terms_corporate" : "terms_retail";
@@ -5799,7 +8290,7 @@ async function createServer(options = {}) {
   });
 
   app.post("/api/admin/start-hosting", (req, res) => {
-    if (req.body.password !== adminPassword(database))
+    if (!companyAdminAuthorized(database, req.body))
       return res.status(403).json({ error: "Wrong password" });
     const port = options.port || DEFAULT_PORT;
     const lanIps = getLanIps();
@@ -5819,6 +8310,75 @@ async function createServer(options = {}) {
     });
   });
 
+  app.get("/api/admin/server-config", (req, res) => {
+    const preferred = readJsonSetting(database, "server_config", {});
+    res.json({
+      dataDir,
+      dbPath,
+      preferredDataDir: normalizeText(preferred.dataDir) || dataDir,
+      preferredDbPath: normalizeText(preferred.dbPath) || dbPath,
+      databaseProvider: normalizeText(preferred.databaseProvider) || "local",
+      remoteDatabaseUrl: normalizeText(preferred.remoteDatabaseUrl) || "",
+      port: activePort,
+      lanIps: getLanIps(),
+      serverUrl: defaultServerUrl(activePort),
+    });
+  });
+
+  app.put("/api/admin/server-config", (req, res) => {
+    if (!companyAdminAuthorized(database, req.body))
+      return res.status(403).json({ error: "Wrong password" });
+    const preferredDataDir = normalizeText(req.body.dataDir || req.body.data_dir);
+    const preferredDbPath = normalizeText(req.body.dbPath || req.body.db_path);
+    const config = {
+      dataDir: preferredDataDir || dataDir,
+      dbPath: preferredDbPath || dbPath,
+      databaseProvider:
+        normalizeText(req.body.databaseProvider || req.body.database_provider) ||
+        "local",
+      remoteDatabaseUrl:
+        normalizeText(req.body.remoteDatabaseUrl || req.body.remote_database_url) ||
+        "",
+      updatedAt: new Date().toISOString(),
+    };
+    writeJsonSetting(database, "server_config", config);
+    writeBootstrapServerConfig(config, dataDir);
+    if (path.resolve(config.dataDir) !== path.resolve(dataDir)) {
+      writeBootstrapServerConfig(config, config.dataDir);
+    }
+    res.json({
+      ok: true,
+      config,
+      active: { dataDir, dbPath },
+      restartRequired:
+        path.resolve(config.dbPath) !== path.resolve(dbPath) ||
+        path.resolve(config.dataDir) !== path.resolve(dataDir),
+    });
+  });
+
+  app.post("/api/admin/migrate-database", (req, res) => {
+    if (!companyAdminAuthorized(database, req.body))
+      return res.status(403).json({ error: "Wrong password" });
+    const fromPath = normalizeText(req.body.fromDbPath || req.body.from_db_path);
+    const toPath = normalizeText(req.body.toDbPath || req.body.to_db_path);
+    if (!fromPath || !toPath)
+      return res.status(400).json({ error: "Source and target database paths are required" });
+    if (!fs.existsSync(fromPath))
+      return res.status(404).json({ error: "Source database was not found" });
+    fs.mkdirSync(path.dirname(toPath), { recursive: true });
+    if (fs.existsSync(toPath)) {
+      const backupPath = `${toPath}.${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}.bak`;
+      fs.copyFileSync(toPath, backupPath);
+    }
+    fs.copyFileSync(fromPath, toPath);
+    res.json({
+      ok: true,
+      fromPath,
+      toPath,
+      message: "Database copied. Restart or reopen the app using the selected database path.",
+    });
+  });
+
   app.get("/api/documents/:type", (req, res) => {
     const type = req.params.type.replace(/-([a-z])/g, (_, letter) =>
       letter.toUpperCase(),
@@ -5831,7 +8391,7 @@ async function createServer(options = {}) {
       letter.toUpperCase(),
     );
     const data = buildReportData(database, req.query, type);
-    res.type("html").send(renderReportHtmlV2(data));
+    res.set("Content-Type", "text/html; charset=utf-8").send(renderReportHtmlV2(data));
   });
 
   async function sendXlsxReport(req, res) {
@@ -5940,6 +8500,7 @@ async function createServer(options = {}) {
       "invoices",
       "entry",
       "settings",
+      "manager",
       "payment",
       "payments",
       "offer",
@@ -5974,6 +8535,7 @@ async function createServer(options = {}) {
       return new Promise((resolve, reject) => {
         const server = app.listen(port, host, () => {
           activePort = Number(server.address()?.port || port || DEFAULT_PORT);
+          scheduleManagerSync("server started");
           resolve(server);
         });
         server.once("error", reject);
@@ -5982,10 +8544,17 @@ async function createServer(options = {}) {
   };
 }
 
+let standaloneHttpServer = null;
+let standaloneKeepAlive = null;
+
 if (require.main === module) {
   createServer({ port: DEFAULT_PORT })
     .then((server) => {
-      server.listen(DEFAULT_PORT).then(() => {
+      server.listen(DEFAULT_PORT).then((httpServer) => {
+        standaloneHttpServer = httpServer;
+        standaloneHttpServer.ref?.();
+        standaloneKeepAlive =
+          standaloneKeepAlive || setInterval(() => {}, 60 * 60 * 1000);
         console.log(
           `Accounting Management server: ${defaultServerUrl(DEFAULT_PORT)}`,
         );

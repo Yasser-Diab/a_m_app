@@ -183,8 +183,8 @@ VALUES ('admin', 'مدير النظام', 'admin');
 
 INSERT OR IGNORE INTO app_settings (key, value)
 VALUES
-  ('company_name_ar', 'شريف علي حسن'),
-  ('company_name_en', 'Sherif Ali Hassan'),
+  ('company_name_ar', 'Accounting Management'),
+  ('company_name_en', 'Accounting Management'),
   ('vat_rate', '0.14'),
   ('social_insurance_rate', '0.036'),
   ('stamp_rate', '0.001'),
