@@ -103,6 +103,9 @@ function ensureRuntimeMigrations(database) {
   addUserColumn('can_create_invoices', 'INTEGER NOT NULL DEFAULT 0');
   addUserColumn('can_create_payments', 'INTEGER NOT NULL DEFAULT 0');
   addUserColumn('can_change_status', 'INTEGER NOT NULL DEFAULT 0');
+  addUserColumn('can_edit_terms', 'INTEGER NOT NULL DEFAULT 0');
+  addUserColumn('can_edit_company_settings', 'INTEGER NOT NULL DEFAULT 0');
+  addUserColumn('can_edit_table_styles', 'INTEGER NOT NULL DEFAULT 0');
   addUserColumn('last_login_at', 'TEXT');
   addUserColumn('last_seen_at', 'TEXT');
   addUserColumn('current_session_started_at', 'TEXT');

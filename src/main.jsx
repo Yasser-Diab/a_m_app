@@ -70,8 +70,9 @@ const APP_BYLINE = "By Y.D";
 const DEFAULT_LOCAL_HOST = "192.168.137.1";
 const DEFAULT_LOCAL_PORT = 4181;
 const DEFAULT_API_BASE = `http://${DEFAULT_LOCAL_HOST}:${DEFAULT_LOCAL_PORT}`;
-const MANAGER_API_BASE = "https://yasserdiab.site";
-const MANAGER_PUBLIC_URL = "https://yasserdiab.site";
+const MANAGER_API_BASE = "https://manager.yasserdiab.site";
+const MANAGER_PUBLIC_URL = "https://manager.yasserdiab.site";
+const MANAGER_RECEIVER_HOST = "manager.yasserdiab.site";
 const SERVICE_TERMS_VERSION = "2026-06-27";
 const SERVICE_TERMS_STORAGE_KEY = "accountingManagementTermsAcceptedVersion";
 
@@ -827,6 +828,24 @@ function managerClientErrorMessage(error) {
     return "تعذر الاتصال بالسيرفر المحلي. تأكد من تشغيله أو اختر رابط السيرفر/التنل الصحيح.";
   }
   return text || "تعذر الاتصال مع Manager.";
+}
+
+function normalizeServerConfigDraft(config = {}, apiBase = DEFAULT_API_BASE) {
+  const dataDir = config.preferredDataDir || config.dataDir || "";
+  const dbPath = config.preferredDbPath || config.dbPath || "";
+  return {
+    serverUrl: cleanApiBase(config.serverUrl || apiBase || DEFAULT_API_BASE),
+    dataDir,
+    dbPath,
+    migrateFromDbPath: "",
+    migrateToDbPath: dbPath,
+    databaseProvider: config.databaseProvider || "local",
+    remoteDatabaseUrl: config.remoteDatabaseUrl || "",
+    port: config.port || DEFAULT_LOCAL_PORT,
+    lanIps: Array.isArray(config.lanIps) ? config.lanIps : [],
+    activeDataDir: config.dataDir || dataDir,
+    activeDbPath: config.dbPath || dbPath,
+  };
 }
 
 function versionParts(value) {
@@ -1813,7 +1832,15 @@ function App() {
       api.request(`/api/users/${currentUser.id}/presence`, {
         method: "POST",
         body: JSON.stringify(buildPresencePayload(networkOnline ? "presence" : "offline")),
-      }).catch(() => {});
+      })
+        .then((data) => {
+          if (data?.user) {
+            setCurrentUser((user) =>
+              user && user.id === data.user.id ? userWithFreshSession(data.user) : user,
+            );
+          }
+        })
+        .catch(() => {});
     };
     ping();
     const timer = window.setInterval(ping, 45 * 1000);
@@ -5959,7 +5986,7 @@ function ReportWorkspace({
               customer_name: data.party || partySearch || "",
             }
           : null);
-      setReportData(data);
+      setReportData(null);
       setPreviewUrl(url);
       setPreviewKey(key);
       setContext({
@@ -5980,7 +6007,7 @@ function ReportWorkspace({
               ),
             ]
           : documents,
-        reportData: data,
+        reportData: null,
         previewUrl: url,
         previewKey: key,
         dimensionUnit,
@@ -5996,18 +6023,6 @@ function ReportWorkspace({
     } finally {
       setBusy(false);
     }
-    return;
-    const key = currentPreviewKey();
-    const url = buildUrl(
-      apiBase,
-      `/api/documents/${workflow.reportType}/html?${reportQuery().toString()}`,
-    );
-    setPreviewUrl(url);
-    setPreviewKey(key);
-    setContext({ previewUrl: url, previewKey: key });
-    setMessage(
-      "تم تجهيز معاينة التقرير. راجعها ثم اضغط PDF أو Excel XLSX للحفظ.",
-    );
   }
 
   async function requestReportWithFallback() {
@@ -6071,6 +6086,8 @@ function ReportWorkspace({
             }
           : null);
       setReportData(data);
+      setPreviewUrl("");
+      setPreviewKey("");
       setContext({
         workflowId: currentWorkflow,
         partySearch,
@@ -6090,6 +6107,8 @@ function ReportWorkspace({
             ]
           : documents,
         reportData: data,
+        previewUrl: "",
+        previewKey: "",
         dimensionUnit,
         subtotalMode,
         party: selectedParty,
@@ -8030,6 +8049,45 @@ function completionFactor(value) {
 function formatCompletionPercent(row = {}) {
   return `${money(completionPercent(row.completion_percent ?? row.completion_ratio))}%`;
 }
+
+const USER_PERMISSION_FIELDS = [
+  {
+    key: "can_create_invoices",
+    label: "إنشاء فواتير معتمدة",
+    shortLabel: "فواتير",
+    title: "السماح بإنشاء فواتير معتمدة",
+  },
+  {
+    key: "can_create_payments",
+    label: "تسجيل دفعات",
+    shortLabel: "دفعات",
+    title: "السماح بتسجيل دفعات",
+  },
+  {
+    key: "can_change_status",
+    label: "تغيير حالة المستند",
+    shortLabel: "حالة المستند",
+    title: "السماح بتغيير حالة المستند",
+  },
+  {
+    key: "can_edit_terms",
+    label: "تعديل الشروط والأحكام",
+    shortLabel: "الشروط",
+    title: "السماح بتعديل الشروط والأحكام",
+  },
+  {
+    key: "can_edit_company_settings",
+    label: "تعديل إعدادات الشركة",
+    shortLabel: "إعدادات الشركة",
+    title: "السماح بتعديل بيانات الشركة وإعداداتها",
+  },
+  {
+    key: "can_edit_table_styles",
+    label: "تعديل استايلات الجداول",
+    shortLabel: "استايلات الجداول",
+    title: "السماح بتعديل ألوان وخطوط الجداول والتقارير",
+  },
+];
 
 function canUser(user, permission) {
   return ["admin", "manager"].includes(user?.role) || !!user?.[permission];
@@ -10958,6 +11016,9 @@ function SettingsView({
     can_create_invoices: 0,
     can_create_payments: 0,
     can_change_status: 0,
+    can_edit_terms: 0,
+    can_edit_company_settings: 0,
+    can_edit_table_styles: 0,
   });
   const [editingUserId, setEditingUserId] = useState(null);
   const [editingUser, setEditingUser] = useState({});
@@ -10966,6 +11027,13 @@ function SettingsView({
     new_password: "",
   });
   const [adminPasswordDraft, setAdminPasswordDraft] = useState("");
+  const [serverDraft, setServerDraft] = useState(() =>
+    normalizeServerConfigDraft({}, apiBase),
+  );
+  const [serverStatus, setServerStatus] = useState(null);
+  const [serverStatusLoading, setServerStatusLoading] = useState(false);
+  const [serverStatusExpanded, setServerStatusExpanded] = useState(true);
+  const [serverBusy, setServerBusy] = useState(false);
   const [companyProfileDraft, setCompanyProfileDraft] = useState(
     bootstrap?.company || {
       company_name: "",
@@ -11021,6 +11089,10 @@ function SettingsView({
   const managerCheckoutRenderIdRef = useRef(0);
   const isCompanyAdmin = ["admin", "manager"].includes(currentUser?.role);
   const adminUnlocked = isCompanyAdmin || password === "23320001";
+  const canEditCompanySettings = canUser(currentUser, "can_edit_company_settings");
+  const canEditTerms = canUser(currentUser, "can_edit_terms");
+  const canEditTableStyles = canUser(currentUser, "can_edit_table_styles");
+  const canEditServerSettings = canEditCompanySettings || adminUnlocked;
   const dashboardSummary = bootstrap?.summary || {};
   const documentStatuses = bootstrap?.docs || [];
   const managerSubscriptionPlans = useMemo(
@@ -11051,6 +11123,171 @@ function SettingsView({
     !managerSubscriptionCancelsAtPeriodEnd;
   function updateBranding(key, value) {
     setBrandingDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateServerDraft(key, value) {
+    setServerDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  const loadServerConfig = useCallback(async () => {
+    try {
+      const data = await api.request("/api/admin/server-config");
+      setServerDraft((current) => {
+        const next = normalizeServerConfigDraft(data, apiBase);
+        return {
+          ...next,
+          migrateFromDbPath: current.migrateFromDbPath || "",
+          migrateToDbPath: current.migrateToDbPath || next.dbPath,
+        };
+      });
+    } catch (error) {
+      setMessage(`تعذر تحميل إعدادات السيرفر: ${error.message}`);
+    }
+  }, [api, apiBase, setMessage]);
+
+  const refreshServerStatus = useCallback(
+    async (notify = false) => {
+      setServerStatusLoading(true);
+      try {
+        const data = await api.request("/api/admin/server-status");
+        setServerStatus(data);
+        if (notify) setMessage("تم تحديث حالة السيرفر.", { type: "success" });
+      } catch (error) {
+        setServerStatus({
+          text: `Could not read server status: ${error.message}`,
+        });
+        if (notify) setMessage(`تعذر قراءة حالة السيرفر: ${error.message}`);
+      } finally {
+        setServerStatusLoading(false);
+      }
+    },
+    [api, setMessage],
+  );
+
+  async function chooseServerDirectory() {
+    const picked = await window.priceOfferDesktop?.chooseDirectory?.();
+    if (picked) updateServerDraft("dataDir", picked);
+  }
+
+  async function chooseDatabaseFile(key = "dbPath") {
+    const picked = await window.priceOfferDesktop?.chooseDatabaseFile?.();
+    if (picked) updateServerDraft(key, picked);
+  }
+
+  async function saveServerConfig(event) {
+    event?.preventDefault?.();
+    if (!canEditServerSettings) {
+      setMessage("هذا المستخدم غير مسموح له بتعديل إعدادات السيرفر.");
+      return;
+    }
+    setServerBusy(true);
+    try {
+      const data = await api.request("/api/admin/server-config", {
+        method: "PUT",
+        body: JSON.stringify({
+          requester_user_id: currentUser?.id,
+          password,
+          dataDir: serverDraft.dataDir,
+          dbPath: serverDraft.dbPath,
+          databaseProvider: serverDraft.databaseProvider,
+          remoteDatabaseUrl: serverDraft.remoteDatabaseUrl,
+        }),
+      });
+      await loadServerConfig();
+      setMessage(
+        data.restartRequired
+          ? "تم حفظ المسارات. أعد تشغيل السيرفر أو التطبيق لتطبيق قاعدة البيانات/المجلد الجديد."
+          : "تم حفظ مسارات السيرفر.",
+        { type: data.restartRequired ? "warning" : "success" },
+      );
+    } catch (error) {
+      setMessage(`تعذر حفظ مسارات السيرفر: ${error.message}`);
+    } finally {
+      setServerBusy(false);
+    }
+  }
+
+  async function startHosting() {
+    if (!canEditServerSettings) {
+      setMessage("هذا المستخدم غير مسموح له بتشغيل الاستضافة.");
+      return;
+    }
+    setServerBusy(true);
+    try {
+      const data = await api.request("/api/admin/start-hosting", {
+        method: "POST",
+        body: JSON.stringify({
+          requester_user_id: currentUser?.id,
+          password,
+        }),
+      });
+      const nextServer = cleanApiBase(data.serverUrl || data.localUrl || "");
+      if (nextServer) {
+        updateServerDraft("serverUrl", nextServer);
+        setApiBase(nextServer);
+      }
+      setServerStatus((current) => ({
+        ...(current || {}),
+        text: [
+          data.message,
+          `Server URL: ${data.serverUrl || ""}`,
+          ...(data.lanUrls || []).map((url) => `LAN: ${url}`),
+          `Data folder: ${data.dataDir || ""}`,
+          `Database file: ${data.dbPath || ""}`,
+          data.needsInternetSetup || "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      }));
+      setMessage(data.message || "تم تشغيل الاستضافة.", { type: "success" });
+      await refreshServerStatus();
+    } catch (error) {
+      setMessage(`تعذر تشغيل الاستضافة: ${error.message}`);
+    } finally {
+      setServerBusy(false);
+    }
+  }
+
+  async function migrateDatabase() {
+    if (!canEditServerSettings) {
+      setMessage("هذا المستخدم غير مسموح له بترحيل قاعدة البيانات.");
+      return;
+    }
+    if (!serverDraft.migrateFromDbPath || !serverDraft.migrateToDbPath) {
+      setMessage("اختر قاعدة البيانات المصدر والهدف أولاً.");
+      return;
+    }
+    setServerBusy(true);
+    try {
+      const data = await api.request("/api/admin/migrate-database", {
+        method: "POST",
+        body: JSON.stringify({
+          requester_user_id: currentUser?.id,
+          password,
+          fromDbPath: serverDraft.migrateFromDbPath,
+          toDbPath: serverDraft.migrateToDbPath,
+        }),
+      });
+      setMessage(data.message || "تم ترحيل قاعدة البيانات.", {
+        type: "success",
+      });
+      await refreshServerStatus();
+    } catch (error) {
+      setMessage(`تعذر ترحيل قاعدة البيانات: ${error.message}`);
+    } finally {
+      setServerBusy(false);
+    }
+  }
+
+  async function copyServerStatus() {
+    const text = serverStatus?.text || "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage("تم نسخ حالة السيرفر.", { type: "success" });
+    } catch {
+      setMessage("تعذر النسخ من المتصفح، النص ظاهر ويمكن تحديده يدوياً.");
+    }
   }
 
   function managerPlanPrice(plan, billingCycle = managerBillingCycle) {
@@ -11088,7 +11325,10 @@ function SettingsView({
 
   async function saveBranding(event) {
     event.preventDefault();
-    if (!isCompanyAdmin) return;
+    if (!canEditTableStyles) {
+      setMessage("هذا المستخدم غير مسموح له بتعديل استايلات الجداول.");
+      return;
+    }
     try {
       const data = await api.request("/api/settings/report-branding", {
         method: "PUT",
@@ -11326,7 +11566,10 @@ function SettingsView({
           cleanup = nextCleanup;
         }
       } catch (error) {
-        if (!cancelled)
+        if (
+          !cancelled &&
+          !String(error?.message || "").includes("PayPal checkout was replaced")
+        )
           setManagerCheckoutError(error.message || "Could not render PayPal checkout.");
       } finally {
         if (!cancelled) setManagerCheckoutLoading(false);
@@ -11365,6 +11608,10 @@ function SettingsView({
     if (reportBranding) setBrandingDraft(reportBranding);
   }, [reportBranding]);
   useEffect(() => {
+    loadServerConfig();
+    refreshServerStatus();
+  }, [loadServerConfig, refreshServerStatus]);
+  useEffect(() => {
     let cancelled = false;
     async function loadUsers() {
       try {
@@ -11388,7 +11635,7 @@ function SettingsView({
 
   async function saveCompanyProfile(event) {
     event.preventDefault();
-    if (!isCompanyAdmin) {
+    if (!canEditCompanySettings) {
       setMessage("Company profile changes are available for managers only.");
       return;
     }
@@ -11409,6 +11656,10 @@ function SettingsView({
   }
 
   async function saveTerms(key, value) {
+    if (!canEditTerms) {
+      setMessage("هذا المستخدم غير مسموح له بتعديل الشروط والأحكام.");
+      return;
+    }
     try {
       await api.request(`/api/settings/terms/${key}`, {
         method: "PUT",
@@ -11444,6 +11695,9 @@ function SettingsView({
         can_create_invoices: 0,
         can_create_payments: 0,
         can_change_status: 0,
+        can_edit_terms: 0,
+        can_edit_company_settings: 0,
+        can_edit_table_styles: 0,
       });
       setMessage("تم إضافة المستخدم.");
     } catch (error) {
@@ -11513,30 +11767,192 @@ function SettingsView({
       }
     >
       <section className="panel settings-grid">
-        <div>
+        <div className="server-settings-panel">
           <div className="panel-head">
             <h2>
-              <Cloud size={18} /> Manager
+              <Server size={18} /> الخادم
             </h2>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => refreshServerStatus(true)}
+              disabled={serverStatusLoading}
+            >
+              <RefreshCw size={16} /> تحديث
+            </button>
           </div>
-          <div className="manager-online-status">
-            <span>
-              <ShieldCheck size={17} />
-              Local/manual backend
-            </span>
-            <strong>{managerSubscriptionStatus?.can_use_app !== false ? "Active" : "Checking"}</strong>
+          <form className="form-grid server-control-grid" onSubmit={saveServerConfig}>
+            <Field label="Server URL">
+              <input
+                dir="ltr"
+                value={serverDraft.serverUrl || ""}
+                onChange={(event) => updateServerDraft("serverUrl", event.target.value)}
+                onBlur={(event) => {
+                  const clean = cleanApiBase(event.target.value);
+                  if (clean) setApiBase(clean);
+                }}
+                list="settings-server-url-candidates"
+              />
+              <datalist id="settings-server-url-candidates">
+                {apiBaseCandidates(serverDraft.serverUrl).map((candidate) => (
+                  <option key={candidate} value={candidate} />
+                ))}
+              </datalist>
+            </Field>
+            <Field label="Data folder">
+              <div className="path-picker">
+                <input
+                  dir="ltr"
+                  value={serverDraft.dataDir || ""}
+                  onChange={(event) => updateServerDraft("dataDir", event.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={chooseServerDirectory}
+                  disabled={!window.priceOfferDesktop?.chooseDirectory}
+                >
+                  Browse <HardDrive size={16} />
+                </button>
+              </div>
+            </Field>
+            <Field label="Database file">
+              <div className="path-picker">
+                <input
+                  dir="ltr"
+                  value={serverDraft.dbPath || ""}
+                  onChange={(event) => updateServerDraft("dbPath", event.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => chooseDatabaseFile("dbPath")}
+                  disabled={!window.priceOfferDesktop?.chooseDatabaseFile}
+                >
+                  Browse <Database size={16} />
+                </button>
+              </div>
+            </Field>
+            <Field label="Migrate from old database">
+              <div className="path-picker">
+                <input
+                  dir="ltr"
+                  value={serverDraft.migrateFromDbPath || ""}
+                  onChange={(event) =>
+                    updateServerDraft("migrateFromDbPath", event.target.value)
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => chooseDatabaseFile("migrateFromDbPath")}
+                  disabled={!window.priceOfferDesktop?.chooseDatabaseFile}
+                >
+                  Browse <Database size={16} />
+                </button>
+              </div>
+            </Field>
+            <Field label="Migrate to new database">
+              <div className="path-picker">
+                <input
+                  dir="ltr"
+                  value={serverDraft.migrateToDbPath || ""}
+                  onChange={(event) =>
+                    updateServerDraft("migrateToDbPath", event.target.value)
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => chooseDatabaseFile("migrateToDbPath")}
+                  disabled={!window.priceOfferDesktop?.chooseDatabaseFile}
+                >
+                  Browse <Database size={16} />
+                </button>
+              </div>
+            </Field>
+            <Field label="Remote database URL">
+              <input
+                dir="ltr"
+                value={serverDraft.remoteDatabaseUrl || ""}
+                onChange={(event) =>
+                  updateServerDraft("remoteDatabaseUrl", event.target.value)
+                }
+              />
+            </Field>
+            <Field label="Database provider">
+              <select
+                value={serverDraft.databaseProvider || "local"}
+                onChange={(event) =>
+                  updateServerDraft("databaseProvider", event.target.value)
+                }
+              >
+                <option value="local">Local SQLite</option>
+                <option value="remote">Remote URL / tunnel</option>
+              </select>
+            </Field>
+            <div className="action-row server-actions">
+              <button type="submit" className="primary" disabled={serverBusy || !canEditServerSettings}>
+                <Save size={17} /> حفظ
+              </button>
+              <button
+                type="button"
+                onClick={startHosting}
+                disabled={serverBusy || !canEditServerSettings}
+              >
+                <Server size={17} /> تشغيل الاستضافة
+              </button>
+              <button type="button" onClick={createBackup} disabled={busy}>
+                <Database size={17} /> نسخة احتياطية
+              </button>
+              <button
+                type="button"
+                onClick={migrateDatabase}
+                disabled={serverBusy || !canEditServerSettings}
+              >
+                <Database size={17} /> Migrate DB
+              </button>
+            </div>
+          </form>
+          <div className="server-process-panel">
+            <div className="server-process-head">
+              <button
+                type="button"
+                className="server-process-toggle"
+                onClick={() => setServerStatusExpanded((value) => !value)}
+                title={serverStatusExpanded ? "Collapse" : "Expand"}
+              >
+                {serverStatusExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </button>
+              <span>Server process details</span>
+              <button
+                type="button"
+                className="server-process-copy"
+                onClick={copyServerStatus}
+                title="Copy server status"
+              >
+                <Copy size={16} />
+              </button>
+            </div>
+            {serverStatusExpanded && (
+              <pre dir="ltr">
+                {serverStatusLoading
+                  ? "Reading PowerShell status..."
+                  : serverStatus?.text || "No server process messages yet."}
+              </pre>
+            )}
           </div>
-          <div className="facts">
+          <div className="facts server-facts">
             <span>
-              <WalletCards size={16} />{" "}
-              {managerSubscriptionStatus?.access?.status ||
-                managerSubscriptionStatus?.subscription?.status ||
-                managerSubscriptionStatus?.status ||
-                "Local server controlled"}
+              <HardDrive size={16} /> {serverDraft.activeDataDir || serverDraft.dataDir || "-"}
             </span>
             <span>
-              <Server size={16} /> Manual local server / tunnel
+              <Database size={16} /> {serverDraft.activeDbPath || serverDraft.dbPath || "-"}
             </span>
+            <span>
+              <Smartphone size={16} /> {serverStatus?.localUrl || serverDraft.serverUrl || apiBase}
+            </span>
+            {(serverStatus?.lanUrls || serverDraft.lanIps || []).map((url) => (
+              <span key={url}>
+                <Smartphone size={16} /> {url}
+              </span>
+            ))}
           </div>
         </div>
 
@@ -11626,9 +12042,9 @@ function SettingsView({
           <h2>
             <Building2 size={18} /> Company profile
           </h2>
-          <span className="user-chip">{isCompanyAdmin ? "Manager" : "Locked"}</span>
+          <span className="user-chip">{canEditCompanySettings ? "Manager" : "Locked"}</span>
         </div>
-        {isCompanyAdmin ? (
+        {canEditCompanySettings ? (
           <form className="form-grid company-profile-form" onSubmit={saveCompanyProfile}>
             {[
               ["company_name", "Company name"],
@@ -11675,9 +12091,9 @@ function SettingsView({
           <h2>
             <FileText size={18} /> Report branding
           </h2>
-          <span className="user-chip">{isCompanyAdmin ? "Company admin" : "Locked"}</span>
+          <span className="user-chip">{canEditTableStyles ? "Company admin" : "Locked"}</span>
         </div>
-        {isCompanyAdmin ? (
+        {canEditTableStyles ? (
           <form className="form-grid branding-form" onSubmit={saveBranding}>
             <div
               className={logoDragging ? "logo-drop dragging" : "logo-drop"}
@@ -11809,7 +12225,7 @@ function SettingsView({
               />
               <span>Show address under report date block</span>
             </label>
-            <button type="submit" className="primary" disabled={!adminUnlocked}>
+            <button type="submit" className="primary" disabled={!canEditTableStyles}>
               <Save size={18} /> Save branding
             </button>
           </form>
@@ -11835,6 +12251,9 @@ function SettingsView({
         {managerSubscriptionError && (
           <div className="error-state">{managerSubscriptionError}</div>
         )}
+        <div className="manager-receiver-chip" dir="ltr">
+          Receiver: {MANAGER_RECEIVER_HOST}
+        </div>
         <div className="subscription-mode-grid" role="tablist" aria-label="Payment mode">
           <button
             type="button"
@@ -12080,45 +12499,25 @@ function SettingsView({
                   <option value="admin">مدير</option>
                 </select>
               </Field>
-              <label className="check-tile" title="السماح بإنشاء فواتير معتمدة">
-                <input
-                  type="checkbox"
-                  checked={!!newUser.can_create_invoices}
-                  onChange={(event) =>
-                    setNewUser({
-                      ...newUser,
-                      can_create_invoices: event.target.checked ? 1 : 0,
-                    })
-                  }
-                />
-                <span>إنشاء فواتير معتمدة</span>
-              </label>
-              <label className="check-tile" title="السماح بتسجيل دفعات">
-                <input
-                  type="checkbox"
-                  checked={!!newUser.can_create_payments}
-                  onChange={(event) =>
-                    setNewUser({
-                      ...newUser,
-                      can_create_payments: event.target.checked ? 1 : 0,
-                    })
-                  }
-                />
-                <span>تسجيل دفعات</span>
-              </label>
-              <label className="check-tile" title="السماح بتغيير حالة المستند">
-                <input
-                  type="checkbox"
-                  checked={!!newUser.can_change_status}
-                  onChange={(event) =>
-                    setNewUser({
-                      ...newUser,
-                      can_change_status: event.target.checked ? 1 : 0,
-                    })
-                  }
-                />
-                <span>تغيير حالة المستند</span>
-              </label>
+              {USER_PERMISSION_FIELDS.map((permission) => (
+                <label
+                  key={permission.key}
+                  className="check-tile"
+                  title={permission.title}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!newUser[permission.key]}
+                    onChange={(event) =>
+                      setNewUser({
+                        ...newUser,
+                        [permission.key]: event.target.checked ? 1 : 0,
+                      })
+                    }
+                  />
+                  <span>{permission.label}</span>
+                </label>
+              ))}
               <button type="submit" className="primary">
                 <UserPlus size={18} /> إضافة مستخدم
               </button>
@@ -12134,9 +12533,9 @@ function SettingsView({
                     <th>الحالة</th>
                     <th>آخر ظهور</th>
                     <th>وقت العمل</th>
-                    <th>فواتير</th>
-                    <th>دفعات</th>
-                    <th>حالة المستند</th>
+                    {USER_PERMISSION_FIELDS.map((permission) => (
+                      <th key={permission.key}>{permission.shortLabel}</th>
+                    ))}
                     <th>كلمة مرور جديدة</th>
                     <th></th>
                   </tr>
@@ -12207,63 +12606,28 @@ function SettingsView({
                             {user.work_time_label ||
                               workTimeLabel(user.work_time_seconds)}
                           </td>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={
-                                !!(
-                                  editingUser.can_create_invoices ??
-                                  user.can_create_invoices
-                                )
-                              }
-                              onChange={(event) =>
-                                setEditingUser({
-                                  ...editingUser,
-                                  can_create_invoices: event.target.checked
-                                    ? 1
-                                    : 0,
-                                })
-                              }
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={
-                                !!(
-                                  editingUser.can_create_payments ??
-                                  user.can_create_payments
-                                )
-                              }
-                              onChange={(event) =>
-                                setEditingUser({
-                                  ...editingUser,
-                                  can_create_payments: event.target.checked
-                                    ? 1
-                                    : 0,
-                                })
-                              }
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={
-                                !!(
-                                  editingUser.can_change_status ??
-                                  user.can_change_status
-                                )
-                              }
-                              onChange={(event) =>
-                                setEditingUser({
-                                  ...editingUser,
-                                  can_change_status: event.target.checked
-                                    ? 1
-                                    : 0,
-                                })
-                              }
-                            />
-                          </td>
+                          {USER_PERMISSION_FIELDS.map((permission) => (
+                            <td key={permission.key}>
+                              <input
+                                type="checkbox"
+                                checked={
+                                  !!(
+                                    editingUser[permission.key] ??
+                                    user[permission.key]
+                                  )
+                                }
+                                onChange={(event) =>
+                                  setEditingUser({
+                                    ...editingUser,
+                                    [permission.key]: event.target.checked
+                                      ? 1
+                                      : 0,
+                                  })
+                                }
+                                title={permission.title}
+                              />
+                            </td>
+                          ))}
                           <td>
                             <input
                               type="password"
@@ -12321,9 +12685,11 @@ function SettingsView({
                             {user.work_time_label ||
                               workTimeLabel(user.work_time_seconds)}
                           </td>
-                          <td>{user.can_create_invoices ? "نعم" : "-"}</td>
-                          <td>{user.can_create_payments ? "نعم" : "-"}</td>
-                          <td>{user.can_change_status ? "نعم" : "-"}</td>
+                          {USER_PERMISSION_FIELDS.map((permission) => (
+                            <td key={permission.key}>
+                              {user[permission.key] ? "نعم" : "-"}
+                            </td>
+                          ))}
                           <td> </td>
                           <td className="row-actions">
                             <button
@@ -12365,12 +12731,14 @@ function SettingsView({
           value={retailTerms}
           onChange={setRetailTerms}
           onSave={() => saveTerms("retail", retailTerms)}
+          disabled={!canEditTerms}
         />
         <TermEditor
           title="شروط الشركات"
           value={corporateTerms}
           onChange={setCorporateTerms}
           onSave={() => saveTerms("corporate", corporateTerms)}
+          disabled={!canEditTerms}
         />
       </section>
 
@@ -12382,7 +12750,7 @@ function SettingsView({
   );
 }
 
-function TermEditor({ title, value, onChange, onSave }) {
+function TermEditor({ title, value, onChange, onSave, disabled = false }) {
   const sections = value.sections || [];
   function updateSection(index, patch) {
     const next = sections.map((section, itemIndex) =>
@@ -12404,10 +12772,10 @@ function TermEditor({ title, value, onChange, onSave }) {
       <div className="panel-head">
         <h2>{title}</h2>
         <div className="action-row">
-          <button type="button" onClick={addSection}>
+          <button type="button" onClick={addSection} disabled={disabled}>
             <Plus size={17} /> قسم
           </button>
-          <button type="button" className="primary" onClick={onSave}>
+          <button type="button" className="primary" onClick={onSave} disabled={disabled}>
             <Check size={17} /> حفظ
           </button>
         </div>
@@ -12418,6 +12786,7 @@ function TermEditor({ title, value, onChange, onSave }) {
             <Field label="العنوان">
               <input
                 value={section.title || ""}
+                disabled={disabled}
                 onChange={(event) =>
                   updateSection(index, { title: event.target.value })
                 }
@@ -12426,6 +12795,7 @@ function TermEditor({ title, value, onChange, onSave }) {
             <Field label="البنود">
               <textarea
                 value={(section.lines || []).join("\n")}
+                disabled={disabled}
                 onChange={(event) =>
                   updateSection(index, {
                     lines: event.target.value.split("\n"),
@@ -12437,6 +12807,7 @@ function TermEditor({ title, value, onChange, onSave }) {
               className="danger-text"
               type="button"
               onClick={() => removeSection(index)}
+              disabled={disabled}
             >
               حذف القسم
             </button>

@@ -1,4 +1,5 @@
 const DEFAULT_API_BASE = "http://192.168.137.1:4181";
+const MANAGER_RECEIVER_HOST = "manager.yasserdiab.site";
 
 function cleanApiBase(value) {
   return String(value || "").trim().replace(/\/+$/, "");
@@ -90,17 +91,24 @@ function loadPayPalSdk(src, isCancelled = () => false) {
 }
 
 export async function loadManagerSubscriptionConfig(apiBase = DEFAULT_API_BASE) {
-  const [publicData, plansData] = await Promise.all([
-    localRequest(apiBase, "/api/manager/public").catch(() => null),
-    localRequest(apiBase, "/api/subscription/plans").catch(() => ({ plans: [] })),
-  ]);
+  const gatewayData = await localRequest(apiBase, "/api/subscription/config").catch(
+    () => null,
+  );
+  const [publicData, plansData] = gatewayData
+    ? [gatewayData, { plans: gatewayData.plans || [] }]
+    : await Promise.all([
+        localRequest(apiBase, "/api/manager/public").catch(() => null),
+        localRequest(apiBase, "/api/subscription/plans").catch(() => ({ plans: [] })),
+      ]);
   return {
     company: null,
     access: null,
     subscription: null,
     plans: publicData?.plans || plansData?.plans || [],
-    paypal: null,
+    paypal: publicData?.paypal || publicData?.settings?.paypal || null,
     api: null,
+    receiver: MANAGER_RECEIVER_HOST,
+    source: publicData?.source || "",
   };
 }
 
@@ -146,7 +154,12 @@ export async function renderManagerPayPalCheckout({
 
   const recurring = paymentMode === "recurring";
   const paypalIntent = recurring ? "subscription" : "capture";
-  const publicConfig = await localRequest(apiBase, "/api/manager/public").catch(() => null);
+  const publicConfig =
+    (await localRequest(apiBase, "/api/paypal/client-config", {
+      method: "GET",
+    }).catch(() => null)) ||
+    (await localRequest(apiBase, "/api/subscription/config").catch(() => null)) ||
+    (await localRequest(apiBase, "/api/manager/public").catch(() => null));
   const clientConfig = publicConfig?.paypal || publicConfig?.settings?.paypal || null;
   if (!clientConfig?.client_id && !clientConfig?.clientId && !clientConfig?.sdk_url) {
     throw new Error("PayPal credentials are not configured in the Manager app yet.");
@@ -171,11 +184,16 @@ export async function renderManagerPayPalCheckout({
 
   const createOrder = async () => {
     if (isCancelled()) throw new Error("PayPal checkout was replaced.");
-    const data = await localRequest(apiBase, "/api/payments/create-checkout", {
-      method: "POST",
-      body: orderPayload,
-    });
-    const id = data.id || data.orderID || data.order_id;
+    const data =
+      (await localRequest(apiBase, "/api/paypal/orders", {
+        method: "POST",
+        body: orderPayload,
+      }).catch(() => null)) ||
+      (await localRequest(apiBase, "/api/payments/create-checkout", {
+        method: "POST",
+        body: orderPayload,
+      }));
+    const id = data.id || data.orderID || data.order_id || data.paypal_order_id;
     if (!id) throw new Error("Manager did not return a PayPal order id.");
     return id;
   };
@@ -183,21 +201,36 @@ export async function renderManagerPayPalCheckout({
   const approve = async (data) => {
     if (isCancelled()) return;
     const orderId = data.orderID || data.id;
-    const capture = await localRequest(
-      apiBase,
-      "/api/payments/paypal/capture",
-      {
+    const capture =
+      (await localRequest(
+        apiBase,
+        `/api/paypal/orders/${encodeURIComponent(orderId)}/capture`,
+        {
+          method: "POST",
+          body: { ...orderPayload, order_id: orderId },
+        },
+      ).catch(() => null)) ||
+      (await localRequest(apiBase, "/api/payments/paypal/capture", {
         method: "POST",
         body: { ...orderPayload, order_id: orderId },
-      },
-    );
+      }));
     await onApproved?.(capture);
   };
 
-  let preparedSubscription = null;
   const prepareSubscriptionPlan = async () => {
     if (isCancelled()) throw new Error("PayPal checkout was replaced.");
-    throw new Error("Recurring PayPal subscription checkout is not configured in the local Manager yet.");
+    const data = await localRequest(apiBase, "/api/paypal/subscription-plan", {
+      method: "POST",
+      body: orderPayload,
+    });
+    const id =
+      data.plan_id ||
+      data.paypal_plan_id ||
+      data.subscription_plan_id ||
+      data.id ||
+      data.planId;
+    if (!id) throw new Error("Manager did not return a PayPal subscription plan id.");
+    return id;
   };
 
   const createSubscription = async (data, actions) => {
@@ -213,10 +246,20 @@ export async function renderManagerPayPalCheckout({
     if (isCancelled()) return;
     const subscriptionId = data.subscriptionID || data.subscriptionId || data.id;
     if (!subscriptionId) throw new Error("PayPal did not return a subscription id.");
-    await onApproved?.({ subscription_id: subscriptionId });
+    const activation = await localRequest(apiBase, "/api/paypal/subscriptions/activate", {
+      method: "POST",
+      body: { ...orderPayload, subscription_id: subscriptionId },
+    }).catch(() => ({ subscription_id: subscriptionId }));
+    await onApproved?.(activation);
   };
 
   const reportError = (error) => {
+    if (
+      isCancelled() ||
+      String(error?.message || "").includes("PayPal checkout was replaced")
+    ) {
+      return;
+    }
     onError?.(error);
   };
 

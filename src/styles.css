@@ -5392,6 +5392,48 @@ button.global-input-clear {
   gap: 12px;
 }
 
+.server-control-grid .field:first-child,
+.server-control-grid .server-actions {
+  grid-column: 1 / -1;
+}
+
+.path-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.path-picker input {
+  min-width: 0;
+}
+
+.path-picker button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+.server-actions {
+  justify-content: flex-start;
+}
+
+.server-facts span {
+  direction: ltr;
+  text-align: left;
+}
+
+.manager-receiver-chip {
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .desktop-server-options {
   display: grid;
   gap: 8px;
@@ -5509,14 +5551,16 @@ button.global-input-clear {
 
 .server-process-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
 }
 
 .server-process-toggle {
-  justify-content: space-between;
-  width: 100%;
+  width: 38px;
+  min-height: 38px;
+  padding: 0;
+  justify-content: center;
 }
 
 .server-process-copy {
@@ -5694,7 +5738,8 @@ button.global-input-clear {
 }
 
 @media (max-width: 560px) {
-  .server-path-row {
+  .server-path-row,
+  .path-picker {
     grid-template-columns: minmax(0, 1fr);
   }
 }

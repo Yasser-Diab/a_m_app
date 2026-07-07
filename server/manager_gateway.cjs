@@ -3,7 +3,7 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 
-const MANAGER_RECEIVER = "yasserdiab.site";
+const MANAGER_RECEIVER = "manager.yasserdiab.site";
 const MANAGER_PUBLIC_BASE_URL =
   process.env.AM_MANAGER_BASE_URL ||
   process.env.AM_MANAGER_URL ||
@@ -235,6 +235,7 @@ function usersPayload(database) {
     database,
     `SELECT id, username, display_name, role, is_active,
             can_create_invoices, can_create_payments, can_change_status,
+            can_edit_terms, can_edit_company_settings, can_edit_table_styles,
             last_login_at, last_seen_at, current_session_started_at, current_session_ended_at, created_at
        FROM users
       ORDER BY role = 'admin' DESC, role = 'manager' DESC, display_name COLLATE NOCASE`,
@@ -244,9 +245,18 @@ function usersPayload(database) {
     display_name: user.display_name,
     role: user.role,
     is_active: !!Number(user.is_active),
-    can_create_invoices: !!Number(user.can_create_invoices),
-    can_create_payments: !!Number(user.can_create_payments),
-    can_change_status: !!Number(user.can_change_status),
+    can_create_invoices:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_create_invoices),
+    can_create_payments:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_create_payments),
+    can_change_status:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_change_status),
+    can_edit_terms:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_edit_terms),
+    can_edit_company_settings:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_edit_company_settings),
+    can_edit_table_styles:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_edit_table_styles),
     last_login_at: user.last_login_at,
     last_seen_at: user.last_seen_at,
     session_started_at: user.current_session_started_at || user.last_login_at,

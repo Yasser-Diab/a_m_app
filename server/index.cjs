@@ -3,7 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const net = require("net");
-const { spawn } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const express = require("express");
 const cors = require("cors");
 const electronRuntime = require("electron");
@@ -2528,6 +2528,19 @@ function companyAdminAuthorized(database, source = {}) {
   );
 }
 
+function userPermissionAuthorized(database, source = {}, permission = "") {
+  if (companyAdminAuthorized(database, source)) return true;
+  const userId = Number(source.requester_user_id || source.user_id || 0);
+  if (!userId || !permission) return false;
+  const user = database.get(
+    `SELECT role, is_active, ${permission} AS permission_value
+       FROM users
+      WHERE id = ?`,
+    [userId],
+  );
+  return normalizeBool(user?.is_active) && normalizeBool(user?.permission_value);
+}
+
 function planForRequest(plans, requestedPlanId, requestedUsers = 1) {
   const activePlans = (plans || []).filter((plan) => normalizeBool(plan.active ?? 1));
   const selected =
@@ -3058,6 +3071,10 @@ function subscriptionAccessBypass(req) {
       "/manager-payments",
       "/manager-subscription/status",
       "/manager/public",
+      "/admin/server-config",
+      "/admin/server-status",
+      "/admin/start-hosting",
+      "/admin/migrate-database",
     ].includes(apiPath)
   ) {
     return true;
@@ -3409,7 +3426,9 @@ function upsertManagerUser(database, manager = {}) {
       `UPDATE users
        SET display_name = ?, role = 'manager', pin_hash = ?,
            can_create_invoices = 1, can_create_payments = 1,
-           can_change_status = 1, is_active = 1
+           can_change_status = 1, can_edit_terms = 1,
+           can_edit_company_settings = 1, can_edit_table_styles = 1,
+           is_active = 1
        WHERE id = ?`,
       [displayName, hashPassword(password), existing.id],
     );
@@ -3418,8 +3437,9 @@ function upsertManagerUser(database, manager = {}) {
   const result = database.run(
     `INSERT INTO users
       (username, display_name, role, pin_hash, can_create_invoices,
-       can_create_payments, can_change_status, is_active)
-     VALUES (?, ?, 'manager', ?, 1, 1, 1, 1)`,
+       can_create_payments, can_change_status, can_edit_terms,
+       can_edit_company_settings, can_edit_table_styles, is_active)
+     VALUES (?, ?, 'manager', ?, 1, 1, 1, 1, 1, 1, 1)`,
     [username, displayName, hashPassword(password)],
   );
   return database.get("SELECT * FROM users WHERE id = ?", [
@@ -3549,12 +3569,22 @@ function trackClientDevice(database, req, user = {}) {
 
 function ensureDefaultUsers(database) {
   database.run(
-    `INSERT OR IGNORE INTO users (username, display_name, role, pin_hash, can_create_invoices, can_create_payments, can_change_status, is_active)
-     VALUES (?, ?, ?, ?, 1, 1, 1, 1)`,
+    `INSERT OR IGNORE INTO users
+      (username, display_name, role, pin_hash, can_create_invoices,
+       can_create_payments, can_change_status, can_edit_terms,
+       can_edit_company_settings, can_edit_table_styles, is_active)
+     VALUES (?, ?, ?, ?, 1, 1, 1, 1, 1, 1, 1)`,
     ["Yasser", "Eng. Yasser", "admin", hashPassword("982700")],
   );
   database.run(
-    "UPDATE users SET can_create_invoices = 1, can_create_payments = 1, can_change_status = 1 WHERE role = 'admin'",
+    `UPDATE users
+        SET can_create_invoices = 1,
+            can_create_payments = 1,
+            can_change_status = 1,
+            can_edit_terms = 1,
+            can_edit_company_settings = 1,
+            can_edit_table_styles = 1
+      WHERE role IN ('admin', 'manager')`,
   );
 }
 
@@ -3585,6 +3615,15 @@ function publicUser(row) {
     can_change_status: normalizeBool(
       row.can_change_status || row.role === "admin" || row.role === "manager",
     ),
+    can_edit_terms: normalizeBool(
+      row.can_edit_terms || row.role === "admin" || row.role === "manager",
+    ),
+    can_edit_company_settings: normalizeBool(
+      row.can_edit_company_settings || row.role === "admin" || row.role === "manager",
+    ),
+    can_edit_table_styles: normalizeBool(
+      row.can_edit_table_styles || row.role === "admin" || row.role === "manager",
+    ),
     is_active: row.is_active,
     last_login_at: row.last_login_at || null,
     last_seen_at: row.last_seen_at || null,
@@ -3598,6 +3637,36 @@ function publicUser(row) {
     work_time_label: durationLabel(onlineSeconds),
     is_online: normalizeBool(row.is_online),
   };
+}
+
+function currentPublicUser(database, id) {
+  if (!id) return null;
+  const row = database.get(
+    `
+      SELECT id, username, display_name, role,
+             can_create_invoices, can_create_payments, can_change_status,
+             can_edit_terms, can_edit_company_settings, can_edit_table_styles,
+             is_active, last_login_at, last_seen_at,
+             current_session_started_at, current_session_ended_at, created_at,
+             CASE
+               WHEN current_session_started_at IS NOT NULL
+                AND current_session_ended_at IS NULL
+                AND last_seen_at IS NOT NULL
+                AND last_seen_at >= datetime('now', '-2 minutes')
+               THEN 1 ELSE 0
+             END AS is_online,
+             CASE
+               WHEN current_session_started_at IS NULL THEN 0
+               WHEN current_session_ended_at IS NOT NULL THEN 0
+               ELSE MAX(0, CAST(strftime('%s', 'now') - strftime('%s', current_session_started_at) AS INTEGER))
+             END AS online_for_seconds
+        FROM users
+       WHERE id = ?
+       LIMIT 1
+    `,
+    [id],
+  );
+  return publicUser(row);
 }
 
 function statementParts(row) {
@@ -6445,6 +6514,132 @@ async function writeProductiveQuantitiesXlsx(data, outputPath) {
   await workbook.xlsx.writeFile(outputPath);
 }
 
+function runPowerShellServerStatus(port) {
+  if (process.platform !== "win32") {
+    return Promise.resolve({
+      ok: false,
+      error: "PowerShell status is only available on Windows.",
+    });
+  }
+  const safePid = Math.max(0, Math.floor(Number(process.pid) || 0));
+  const safePort = Math.max(0, Math.floor(Number(port) || 0));
+  const command = `
+$ErrorActionPreference = 'SilentlyContinue'
+$pidValue = ${safePid}
+$portValue = ${safePort}
+$proc = Get-CimInstance Win32_Process -Filter "ProcessId = $pidValue" |
+  Select-Object ProcessId, Name, ExecutablePath, CommandLine, CreationDate
+$listeners = @(
+  Get-NetTCPConnection -LocalPort $portValue -State Listen -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+      [pscustomobject]@{
+        LocalAddress = $_.LocalAddress
+        LocalPort = $_.LocalPort
+        State = "$($_.State)"
+        OwningProcess = $_.OwningProcess
+        ProcessName = $p.ProcessName
+        Path = $p.Path
+      }
+    }
+)
+[pscustomobject]@{
+  GeneratedAt = (Get-Date).ToString("o")
+  Process = $proc
+  Listeners = $listeners
+} | ConvertTo-Json -Depth 6
+`;
+  return new Promise((resolve) => {
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+      {
+        timeout: 5000,
+        windowsHide: true,
+        maxBuffer: 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          resolve({
+            ok: false,
+            error: error.message,
+            stderr: String(stderr || "").trim(),
+          });
+          return;
+        }
+        try {
+          resolve({
+            ok: true,
+            data: JSON.parse(String(stdout || "{}")),
+          });
+        } catch (parseError) {
+          resolve({
+            ok: false,
+            error: parseError.message,
+            stdout: String(stdout || "").trim(),
+            stderr: String(stderr || "").trim(),
+          });
+        }
+      },
+    );
+  });
+}
+
+function formatServerStatusText(status = {}) {
+  const lines = [
+    "Accounting Management server status",
+    `Generated: ${status.generatedAt || new Date().toISOString()}`,
+    `Version: ${APP_VERSION}`,
+    `PID: ${status.pid}`,
+    `Node: ${status.node}`,
+    `Platform: ${status.platform}`,
+    `Hostname: ${status.hostname}`,
+    `Uptime: ${durationLabel(status.uptimeSeconds || 0)}`,
+    `Port: ${status.port}`,
+    `Server URL: ${status.serverUrl}`,
+    `Local URL: ${status.localUrl}`,
+    `Data folder: ${status.dataDir}`,
+    `Database file: ${status.dbPath}`,
+  ];
+  if (status.lanUrls?.length) {
+    lines.push("LAN URLs:");
+    for (const url of status.lanUrls) lines.push(`  - ${url}`);
+  }
+  const ps = status.powerShell;
+  if (ps?.ok && ps.data) {
+    const processInfo = ps.data.Process || {};
+    const listeners = Array.isArray(ps.data.Listeners)
+      ? ps.data.Listeners
+      : ps.data.Listeners
+        ? [ps.data.Listeners]
+        : [];
+    lines.push("");
+    lines.push("PowerShell process:");
+    lines.push(`  ProcessId: ${processInfo.ProcessId || status.pid}`);
+    lines.push(`  Name: ${processInfo.Name || ""}`);
+    lines.push(`  Path: ${processInfo.ExecutablePath || ""}`);
+    lines.push(`  Created: ${processInfo.CreationDate || ""}`);
+    if (processInfo.CommandLine) lines.push(`  CommandLine: ${processInfo.CommandLine}`);
+    lines.push("");
+    lines.push("PowerShell TCP listeners:");
+    if (listeners.length) {
+      for (const listener of listeners) {
+        lines.push(
+          `  - ${listener.LocalAddress}:${listener.LocalPort} ${listener.State} ` +
+            `pid=${listener.OwningProcess} ${listener.ProcessName || ""}`,
+        );
+      }
+    } else {
+      lines.push("  - No listening TCP entry was reported for this port.");
+    }
+  } else if (ps?.error) {
+    lines.push("");
+    lines.push(`PowerShell status unavailable: ${ps.error}`);
+    if (ps.stderr) lines.push(ps.stderr);
+  }
+  return lines.join("\n");
+}
+
 async function createServer(options = {}) {
   const bootstrapServerConfig =
     options.dataDir || options.dbPath ? {} : readBootstrapServerConfig();
@@ -6895,8 +7090,8 @@ async function createServer(options = {}) {
   });
 
   app.put("/api/company/profile", (req, res) => {
-    if (!companyAdminAuthorized(database, req.body))
-      return res.status(403).json({ error: "Manager access is required" });
+    if (!userPermissionAuthorized(database, req.body, "can_edit_company_settings"))
+      return res.status(403).json({ error: "Company settings permission is required" });
     const current = readJsonSetting(database, "company_profile", {});
     const profile = {
       ...current,
@@ -6931,7 +7126,9 @@ async function createServer(options = {}) {
       database
         .all(
           `
-      SELECT id, username, display_name, role, can_create_invoices, can_create_payments, can_change_status,
+      SELECT id, username, display_name, role,
+             can_create_invoices, can_create_payments, can_change_status,
+             can_edit_terms, can_edit_company_settings, can_edit_table_styles,
              is_active, last_login_at, last_seen_at, current_session_started_at, current_session_ended_at, created_at,
              CASE
                WHEN current_session_started_at IS NOT NULL
@@ -6964,9 +7161,9 @@ async function createServer(options = {}) {
        WHERE id = ? AND is_active = 1`,
       [id],
     );
-    const user = database.get("SELECT * FROM users WHERE id = ?", [id]);
+    const user = currentPublicUser(database, id);
     trackClientDevice(database, req, user || { id });
-    res.json({ ok: true });
+    res.json({ ok: true, user });
   });
 
   app.post("/api/users", (req, res) => {
@@ -6986,7 +7183,12 @@ async function createServer(options = {}) {
         .json({ error: "User name, display name and password are required" });
     try {
       const result = database.run(
-        "INSERT INTO users (username, display_name, role, pin_hash, can_create_invoices, can_create_payments, can_change_status, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+        `INSERT INTO users
+          (username, display_name, role, pin_hash,
+           can_create_invoices, can_create_payments, can_change_status,
+           can_edit_terms, can_edit_company_settings, can_edit_table_styles,
+           is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         [
           username,
           displayName,
@@ -6995,6 +7197,9 @@ async function createServer(options = {}) {
           role === "admin" || role === "manager" ? 1 : normalizeBool(req.body.can_create_invoices),
           role === "admin" || role === "manager" ? 1 : normalizeBool(req.body.can_create_payments),
           role === "admin" || role === "manager" ? 1 : normalizeBool(req.body.can_change_status),
+          role === "admin" || role === "manager" ? 1 : normalizeBool(req.body.can_edit_terms),
+          role === "admin" || role === "manager" ? 1 : normalizeBool(req.body.can_edit_company_settings),
+          role === "admin" || role === "manager" ? 1 : normalizeBool(req.body.can_edit_table_styles),
         ],
       );
       res
@@ -7026,6 +7231,9 @@ async function createServer(options = {}) {
       "can_create_invoices",
       "can_create_payments",
       "can_change_status",
+      "can_edit_terms",
+      "can_edit_company_settings",
+      "can_edit_table_styles",
     ];
     const sets = [];
     const params = [];
@@ -7038,6 +7246,9 @@ async function createServer(options = {}) {
             "can_create_invoices",
             "can_create_payments",
             "can_change_status",
+            "can_edit_terms",
+            "can_edit_company_settings",
+            "can_edit_table_styles",
           ].includes(key)
             ? normalizeBool(req.body[key])
             : key === "role"
@@ -7849,8 +8060,8 @@ async function createServer(options = {}) {
   });
 
   app.put("/api/settings/report-branding", (req, res) => {
-    if (!companyAdminAuthorized(database, req.body))
-      return res.status(403).json({ error: "Wrong password" });
+    if (!userPermissionAuthorized(database, req.body, "can_edit_table_styles"))
+      return res.status(403).json({ error: "Table style permission is required" });
     const branding = normalizeReportBranding(req.body.branding || req.body);
     writeJsonSetting(database, "report_branding", branding);
     res.json(reportBranding(database));
@@ -8382,8 +8593,8 @@ async function createServer(options = {}) {
   });
 
   app.put("/api/settings/terms/:key", (req, res) => {
-    if (!companyAdminAuthorized(database, req.body))
-      return res.status(403).json({ error: "Wrong password" });
+    if (!userPermissionAuthorized(database, req.body, "can_edit_terms"))
+      return res.status(403).json({ error: "Terms permission is required" });
     const key =
       req.params.key === "corporate" ? "terms_corporate" : "terms_retail";
     database.run(
@@ -8538,7 +8749,7 @@ async function createServer(options = {}) {
   });
 
   app.post("/api/admin/start-hosting", (req, res) => {
-    if (!companyAdminAuthorized(database, req.body))
+    if (!userPermissionAuthorized(database, req.body, "can_edit_company_settings"))
       return res.status(403).json({ error: "Wrong password" });
     const port = options.port || DEFAULT_PORT;
     const lanIps = getLanIps();
@@ -8573,8 +8784,36 @@ async function createServer(options = {}) {
     });
   });
 
+  app.get("/api/admin/server-status", async (req, res) => {
+    const lanUrls = getLanIps().map((ip) => `http://${ip}:${activePort}`);
+    const status = {
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      version: APP_VERSION,
+      pid: process.pid,
+      node: process.version,
+      execPath: process.execPath,
+      cwd: process.cwd(),
+      rootDir: ROOT_DIR,
+      platform: `${process.platform} ${process.arch}`,
+      hostname: os.hostname(),
+      uptimeSeconds: Math.round(process.uptime()),
+      port: activePort,
+      serverUrl: defaultServerUrl(activePort),
+      localUrl: `http://127.0.0.1:${activePort}`,
+      lanUrls,
+      dataDir,
+      dbPath,
+      powerShell: await runPowerShellServerStatus(activePort),
+    };
+    res.json({
+      ...status,
+      text: formatServerStatusText(status),
+    });
+  });
+
   app.put("/api/admin/server-config", (req, res) => {
-    if (!companyAdminAuthorized(database, req.body))
+    if (!userPermissionAuthorized(database, req.body, "can_edit_company_settings"))
       return res.status(403).json({ error: "Wrong password" });
     const preferredDataDir = normalizeText(req.body.dataDir || req.body.data_dir);
     const preferredDbPath = normalizeText(req.body.dbPath || req.body.db_path);
@@ -8605,7 +8844,7 @@ async function createServer(options = {}) {
   });
 
   app.post("/api/admin/migrate-database", (req, res) => {
-    if (!companyAdminAuthorized(database, req.body))
+    if (!userPermissionAuthorized(database, req.body, "can_edit_company_settings"))
       return res.status(403).json({ error: "Wrong password" });
     const fromPath = normalizeText(req.body.fromDbPath || req.body.from_db_path);
     const toPath = normalizeText(req.body.toDbPath || req.body.to_db_path);
