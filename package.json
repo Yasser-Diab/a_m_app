@@ -1,6 +1,6 @@
 {
   "name": "accounting-management",
-  "version": "1.3.9",
+  "version": "1.4.2",
   "description": "Local multi-user price offers, invoices, account statements, and contractor certificates.",
   "author": "Yasser Diab",
   "main": "electron/main.cjs",
@@ -19,7 +19,8 @@
     "cap:sync": "npm run build:web && node scripts/clean_android_assets.cjs && cap sync android && node scripts/verify_built_assets.cjs android",
     "android:add": "cap add android",
     "android:debug": "powershell -ExecutionPolicy Bypass -File scripts/build_android_variants.ps1",
-    "package:release": "powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1"
+    "package:release": "powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1",
+    "package:relese": "npm run package:release"
   },
   "dependencies": {
     "@capacitor/local-notifications": "^7.0.6",
