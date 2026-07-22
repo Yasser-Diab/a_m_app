@@ -15,9 +15,14 @@ CREATE TABLE IF NOT EXISTS users (
   can_create_invoices INTEGER NOT NULL DEFAULT 0,
   can_create_payments INTEGER NOT NULL DEFAULT 0,
   can_change_status INTEGER NOT NULL DEFAULT 0,
+  can_edit_terms INTEGER NOT NULL DEFAULT 0,
+  can_edit_company_settings INTEGER NOT NULL DEFAULT 0,
+  can_edit_table_styles INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   last_login_at TEXT,
   last_seen_at TEXT,
+  current_session_started_at TEXT,
+  current_session_ended_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -41,6 +46,57 @@ CREATE TABLE IF NOT EXISTS chat_message_reads (
   UNIQUE(message_id, user_name),
   FOREIGN KEY (message_id) REFERENCES chat_messages(id)
 );
+
+CREATE TABLE IF NOT EXISTS message_reactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  emoji TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(message_id, user_id, emoji),
+  FOREIGN KEY (message_id) REFERENCES chat_messages(id)
+);
+
+CREATE TABLE IF NOT EXISTS message_attachments (
+  id TEXT PRIMARY KEY,
+  message_id INTEGER,
+  created_by TEXT,
+  attachment_type TEXT NOT NULL DEFAULT 'file',
+  display_name TEXT,
+  storage_key TEXT NOT NULL,
+  total_size INTEGER NOT NULL DEFAULT 0,
+  uploaded_size INTEGER NOT NULL DEFAULT 0,
+  file_count INTEGER NOT NULL DEFAULT 0,
+  folder_count INTEGER NOT NULL DEFAULT 0,
+  mime_type TEXT,
+  sha256 TEXT,
+  status TEXT NOT NULL DEFAULT 'preparing',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT,
+  deleted_at TEXT,
+  FOREIGN KEY (message_id) REFERENCES chat_messages(id)
+);
+
+CREATE TABLE IF NOT EXISTS attachment_entries (
+  id TEXT PRIMARY KEY,
+  attachment_id TEXT NOT NULL,
+  parent_entry_id TEXT,
+  entry_type TEXT NOT NULL DEFAULT 'file',
+  relative_path TEXT NOT NULL,
+  display_name TEXT,
+  storage_key TEXT,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  uploaded_bytes INTEGER NOT NULL DEFAULT 0,
+  mime_type TEXT,
+  sha256 TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (attachment_id) REFERENCES message_attachments(id),
+  FOREIGN KEY (parent_entry_id) REFERENCES attachment_entries(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_reactions_message ON message_reactions(message_id);
+CREATE INDEX IF NOT EXISTS idx_message_attachments_message ON message_attachments(message_id);
+CREATE INDEX IF NOT EXISTS idx_attachment_entries_attachment_parent ON attachment_entries(attachment_id, parent_entry_id);
 
 CREATE TABLE IF NOT EXISTS work_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,6 +147,7 @@ CREATE TABLE IF NOT EXISTS work_items (
   vehicle_no TEXT,
   certificate_no TEXT,
   vat_enabled INTEGER NOT NULL DEFAULT 0,
+  vat_terms_only INTEGER NOT NULL DEFAULT 0,
   social_insurance_enabled INTEGER NOT NULL DEFAULT 0,
   stamp_enabled INTEGER NOT NULL DEFAULT 0,
   works_insurance_enabled INTEGER NOT NULL DEFAULT 0,

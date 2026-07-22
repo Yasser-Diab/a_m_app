@@ -4,18 +4,23 @@ const path = require("path");
 const crypto = require("crypto");
 
 const MANAGER_RECEIVER = "manager.yasserdiab.site";
+const MANAGER_PUBLIC_BASE_DEFAULT = "https://manager.yasserdiab.site";
 const MANAGER_PUBLIC_BASE_URL =
   process.env.AM_MANAGER_BASE_URL ||
   process.env.AM_MANAGER_URL ||
-  `https://${MANAGER_RECEIVER}`;
+  MANAGER_PUBLIC_BASE_DEFAULT;
 const MANAGER_LOCAL_BASE_URL =
   process.env.AM_MANAGER_LOCAL_URL || "http://127.0.0.1:4295";
 const MANAGER_PUBLIC_INGEST_URL =
   process.env.AM_MANAGER_INGEST_URL ||
-  `${MANAGER_PUBLIC_BASE_URL.replace(/\/$/, "")}/api/ingest/account`;
+  `${MANAGER_PUBLIC_BASE_DEFAULT}/api/ingest/account`;
 const MANAGER_LOCAL_INGEST_URL =
   process.env.AM_MANAGER_LOCAL_INGEST_URL ||
   `${MANAGER_LOCAL_BASE_URL.replace(/\/$/, "")}/api/ingest/account`;
+const DEFAULT_MANAGER_TIMEOUT_MS = Math.max(
+  800,
+  Number(process.env.AM_MANAGER_TIMEOUT_MS || 2500),
+);
 
 const FALLBACK_PLAN_NAMES = {
   starter: "Starter",
@@ -25,6 +30,10 @@ const FALLBACK_PLAN_NAMES = {
 
 function normalizeText(value) {
   return String(value ?? "").trim();
+}
+
+function normalizeLowerText(value) {
+  return normalizeText(value).toLowerCase();
 }
 
 function cleanUrl(value) {
@@ -133,27 +142,47 @@ async function readJsonResponse(response) {
 }
 
 async function managerRequest(url, options = {}) {
-  const { requiresToken, ...fetchOptions } = options || {};
+  const { requiresToken, timeoutMs, ...fetchOptions } = options || {};
   const token = requiresToken === false ? "" : requireManagerToken();
-  const response = await fetch(url, {
-    ...fetchOptions,
-    headers: {
-      Accept: "application/json",
-      ...(fetchOptions.body ? { "Content-Type": "application/json" } : {}),
-      ...(token
-        ? {
-            "X-Manager-Token": token,
-            Authorization: `Bearer ${token}`,
-          }
-        : {}),
-      ...(fetchOptions.headers || {}),
-    },
-  });
-  const data = await readJsonResponse(response);
-  if (!response.ok) {
-    throw new Error(data?.error || data?.message || `Manager HTTP ${response.status}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    Math.max(800, Number(timeoutMs || DEFAULT_MANAGER_TIMEOUT_MS)),
+  );
+  try {
+    const response = await fetch(url, {
+      ...fetchOptions,
+      signal: fetchOptions.signal || controller.signal,
+      headers: {
+        Accept: "application/json",
+        ...(fetchOptions.body ? { "Content-Type": "application/json" } : {}),
+        ...(token
+          ? {
+              "X-Manager-Token": token,
+              Authorization: `Bearer ${token}`,
+            }
+          : {}),
+        ...(fetchOptions.headers || {}),
+      },
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) {
+      const error = new Error(
+        data?.error || data?.message || `Manager HTTP ${response.status}`,
+      );
+      error.status = response.status;
+      error.data = data;
+      throw error;
+    }
+    return data;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Manager request timed out: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return data;
 }
 
 function companyPayload(database) {
@@ -235,7 +264,8 @@ function usersPayload(database) {
     database,
     `SELECT id, username, display_name, role, is_active,
             can_create_invoices, can_create_payments, can_change_status,
-            last_login_at, last_seen_at, created_at
+            can_edit_terms, can_edit_company_settings, can_edit_table_styles,
+            last_login_at, last_seen_at, current_session_started_at, current_session_ended_at, created_at
        FROM users
       ORDER BY role = 'admin' DESC, role = 'manager' DESC, display_name COLLATE NOCASE`,
   ).map((user) => ({
@@ -244,11 +274,22 @@ function usersPayload(database) {
     display_name: user.display_name,
     role: user.role,
     is_active: !!Number(user.is_active),
-    can_create_invoices: !!Number(user.can_create_invoices),
-    can_create_payments: !!Number(user.can_create_payments),
-    can_change_status: !!Number(user.can_change_status),
+    can_create_invoices:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_create_invoices),
+    can_create_payments:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_create_payments),
+    can_change_status:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_change_status),
+    can_edit_terms:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_edit_terms),
+    can_edit_company_settings:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_edit_company_settings),
+    can_edit_table_styles:
+      ["admin", "manager"].includes(user.role) || !!Number(user.can_edit_table_styles),
     last_login_at: user.last_login_at,
     last_seen_at: user.last_seen_at,
+    session_started_at: user.current_session_started_at || user.last_login_at,
+    session_ended_at: user.current_session_ended_at || null,
     created_at: user.created_at,
   }));
 }
@@ -358,14 +399,128 @@ function baseUrlFromUrl(url) {
 
 function candidateManagerBaseUrls() {
   return [
-    MANAGER_PUBLIC_BASE_URL,
-    baseUrlFromUrl(MANAGER_PUBLIC_INGEST_URL),
     MANAGER_LOCAL_BASE_URL,
     baseUrlFromUrl(MANAGER_LOCAL_INGEST_URL),
+    MANAGER_PUBLIC_BASE_URL,
+    baseUrlFromUrl(MANAGER_PUBLIC_INGEST_URL),
   ]
     .map(cleanUrl)
     .filter(Boolean)
     .filter((url, index, all) => all.indexOf(url) === index);
+}
+
+function managerEventIdentity(database, options = {}, source = {}) {
+  const { account, app } = managerIdentity(database, options);
+  const userId = normalizeText(source.user_id || source.user_key || source.userId) || "anonymous";
+  return {
+    company: normalizeText(source.company || source.company_name) || account.name,
+    company_name: normalizeText(source.company_name || source.company) || account.name,
+    external_key: account.external_key,
+    account_name: account.name,
+    install_id: app.install_id,
+    user_id: userId,
+    user_key: userId,
+    username: normalizeText(source.username || source.display_name),
+  };
+}
+
+function managerEventCacheKey(identity = {}) {
+  const value = [identity.external_key, identity.install_id, identity.user_id].join("|");
+  return `manager_events_cache_${crypto.createHash("sha256").update(value).digest("hex").slice(0, 16)}`;
+}
+
+function cacheManagerEvents(database, identity, data = {}) {
+  const root = responseRoot(data);
+  const cached = {
+    ok: root.ok !== false,
+    events: Array.isArray(root.events) ? root.events : [],
+    source: root.source || "manager",
+    synced_at: new Date().toISOString(),
+  };
+  writeJsonSetting(database, managerEventCacheKey(identity), cached);
+  return cached;
+}
+
+function updateCachedManagerEventState(database, identity, eventId, action) {
+  const key = managerEventCacheKey(identity);
+  const cached = readJsonSetting(database, key, { ok: true, events: [] });
+  const stamp = new Date().toISOString();
+  const events = (Array.isArray(cached.events) ? cached.events : []).map((event) => {
+    if (Number(event.id) !== Number(eventId)) return event;
+    if (action === "dismiss") return { ...event, dismissed: true, dismissed_at: stamp };
+    if (action === "seen") return { ...event, seen: true, seen_at: stamp, should_notify: false };
+    return { ...event, notified: true, notified_at: stamp, should_notify: false };
+  });
+  writeJsonSetting(database, key, { ...cached, events, updated_at: stamp });
+}
+
+async function sendManagerEventState(eventId, action, identity) {
+  let lastError = null;
+  for (const base of candidateManagerBaseUrls()) {
+    try {
+      return await managerRequest(`${base}/api/events/${encodeURIComponent(eventId)}/${action}`, {
+        method: "POST",
+        body: JSON.stringify(identity),
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Could not update Manager event state.");
+}
+
+function queueManagerEventState(database, eventId, action, identity) {
+  const queue = readJsonSetting(database, "manager_event_state_queue", []);
+  const next = (Array.isArray(queue) ? queue : []).filter(
+    (item) =>
+      !(
+        Number(item.event_id) === Number(eventId) &&
+        item.action === action &&
+        item.identity?.user_id === identity.user_id
+      ),
+  );
+  next.push({ event_id: Number(eventId), action, identity, queued_at: new Date().toISOString() });
+  writeJsonSetting(database, "manager_event_state_queue", next.slice(-200));
+}
+
+async function flushManagerEventStateQueue(database) {
+  const queue = readJsonSetting(database, "manager_event_state_queue", []);
+  if (!Array.isArray(queue) || !queue.length) return;
+  const remaining = [];
+  for (const item of queue) {
+    try {
+      await sendManagerEventState(item.event_id, item.action, item.identity || {});
+    } catch {
+      remaining.push(item);
+    }
+  }
+  writeJsonSetting(database, "manager_event_state_queue", remaining);
+}
+
+async function fetchManagerEvents(database, options = {}, source = {}) {
+  const identity = managerEventIdentity(database, options, source);
+  await flushManagerEventStateQueue(database);
+  const query = new URLSearchParams(identity);
+  let lastError = null;
+  for (const base of candidateManagerBaseUrls()) {
+    try {
+      const data = await managerRequest(`${base}/api/events?${query.toString()}`);
+      return cacheManagerEvents(database, identity, data);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  const cached = readJsonSetting(database, managerEventCacheKey(identity), null);
+  return {
+    ok: true,
+    events: Array.isArray(cached?.events)
+      ? cached.events.filter((event) => !event.dismissed)
+      : [],
+    source: "manager-cache",
+    stale: true,
+    warning: lastError?.message || "Manager events are temporarily unavailable.",
+    synced_at: cached?.synced_at || "",
+  };
 }
 
 async function syncAccountToManager(database, options = {}) {
@@ -400,7 +555,7 @@ function responseRoot(data) {
 
 function normalizePlan(plan) {
   if (!plan || typeof plan !== "object") return null;
-  const id = normalizeText(plan.id || plan.plan_id || plan.slug || plan.name).toLowerCase();
+  const id = normalizeLowerText(plan.id || plan.plan_id || plan.slug || plan.name);
   if (!id) return null;
   const monthly = Number(plan.monthly ?? plan.monthly_price ?? plan.price ?? plan.amount ?? 0);
   const annually = Number(
@@ -521,30 +676,33 @@ function fallbackConfig(database) {
 async function fetchManagerConfig(database, options = {}) {
   const paths = [
     { path: "/api/receiver", requiresToken: false },
-    { path: "/api/subscription/config" },
-    { path: "/api/paypal/client-config" },
-    { path: "/api/paypal/config" },
+    { path: "/api/subscription/config", requiresToken: false },
+    { path: "/api/paypal/client-config", requiresToken: false },
+    { path: "/api/paypal/config", requiresToken: false },
     { path: "/api/public/subscription-config", requiresToken: false },
   ];
   let lastError = null;
   let bestConfig = null;
   for (const base of candidateManagerBaseUrls()) {
     for (const item of paths) {
-      try {
-        const data = await managerRequest(`${base}${item.path}`, {
-          requiresToken: item.requiresToken,
-        });
-        const config = configFromManagerData(data);
-        bestConfig = {
-          receiver: config.receiver || bestConfig?.receiver || MANAGER_RECEIVER,
-          manager_name: config.manager_name || bestConfig?.manager_name || "",
-          plans: config.plans.length ? config.plans : bestConfig?.plans || [],
-          paypal: config.paypal.client_id ? config.paypal : bestConfig?.paypal || config.paypal,
-          source: config.source || bestConfig?.source || "manager",
-        };
-        if (bestConfig.plans.length && bestConfig.paypal?.client_id) return bestConfig;
-      } catch (error) {
-        lastError = error;
+      for (const requiresToken of [item.requiresToken, true]) {
+        try {
+          const data = await managerRequest(`${base}${item.path}`, {
+            requiresToken,
+          });
+          const config = configFromManagerData(data);
+          bestConfig = {
+            receiver: config.receiver || bestConfig?.receiver || MANAGER_RECEIVER,
+            manager_name: config.manager_name || bestConfig?.manager_name || "",
+            plans: config.plans.length ? config.plans : bestConfig?.plans || [],
+            paypal: config.paypal.client_id ? config.paypal : bestConfig?.paypal || config.paypal,
+            source: config.source || bestConfig?.source || "manager",
+          };
+          if (bestConfig.plans.length && bestConfig.paypal?.client_id) return bestConfig;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
       }
     }
   }
@@ -575,16 +733,21 @@ async function fetchManagerSubscriptionStatus(database, options = {}) {
   });
   let lastError = null;
   for (const base of candidateManagerBaseUrls()) {
-    try {
-      const status = await managerRequest(`${base}/api/subscription/status?${query.toString()}`);
-      writeJsonSetting(database, "manager_subscription_status", {
-        fetched_at: new Date().toISOString(),
-        source: base,
-        status,
-      });
-      return status;
-    } catch (error) {
-      lastError = error;
+    for (const requiresToken of [false, true]) {
+      try {
+        const status = await managerRequest(
+          `${base}/api/subscription/status?${query.toString()}`,
+          { requiresToken },
+        );
+        writeJsonSetting(database, "manager_subscription_status", {
+          fetched_at: new Date().toISOString(),
+          source: base,
+          status,
+        });
+        return status;
+      } catch (error) {
+        lastError = error;
+      }
     }
   }
   throw lastError || new Error("Could not load subscription status from manager.");
@@ -605,6 +768,31 @@ function cachedManagerData(database) {
 }
 
 function registerManagerGatewayRoutes(app, database, options = {}) {
+  app.get("/api/events", async (req, res) => {
+    try {
+      res.json(await fetchManagerEvents(database, options, req.query || {}));
+    } catch (error) {
+      res.json({ ok: true, events: [], source: "manager-fallback", warning: error.message });
+    }
+  });
+
+  app.post("/api/events/:id/:action", async (req, res) => {
+    const eventId = Number(req.params.id);
+    const action = normalizeLowerText(req.params.action);
+    if (!Number.isInteger(eventId) || eventId <= 0 || !["seen", "dismiss", "notified"].includes(action)) {
+      return res.status(400).json({ error: "Unknown Manager event or action." });
+    }
+    const identity = managerEventIdentity(database, options, { ...(req.query || {}), ...(req.body || {}) });
+    updateCachedManagerEventState(database, identity, eventId, action);
+    try {
+      const result = await sendManagerEventState(eventId, action, identity);
+      return res.json({ ...result, source: "manager" });
+    } catch (error) {
+      queueManagerEventState(database, eventId, action, identity);
+      return res.json({ ok: true, event_id: eventId, action, pending_sync: true, warning: error.message });
+    }
+  });
+
   app.post("/api/manager-sync", async (req, res) => {
     try {
       const result = await syncAccountToManager(database, options);
@@ -652,12 +840,16 @@ function registerManagerGatewayRoutes(app, database, options = {}) {
       if (req.query.intent) query.set("intent", normalizeText(req.query.intent));
       const suffix = query.toString() ? `?${query.toString()}` : "";
       for (const base of candidateManagerBaseUrls()) {
-        try {
-          return res.json(
-            await managerRequest(`${base}/api/paypal/client-config${suffix}`),
-          );
-        } catch {
-          // Fall back to the merged config below.
+        for (const requiresToken of [false, true]) {
+          try {
+            return res.json(
+              await managerRequest(`${base}/api/paypal/client-config${suffix}`, {
+                requiresToken,
+              }),
+            );
+          } catch {
+            // Try the protected manager endpoint, then the merged config.
+          }
         }
       }
       const config = await fetchManagerConfig(database, options);
@@ -677,15 +869,18 @@ function registerManagerGatewayRoutes(app, database, options = {}) {
     const payload = payloadWithManagerIdentity(database, options, req.body || {});
     let lastError = null;
     for (const base of candidateManagerBaseUrls()) {
-      try {
-        return res.json(
-          await managerRequest(`${base}/api/paypal/subscription-plan`, {
-            method: "POST",
-            body: JSON.stringify(payload),
-          }),
-        );
-      } catch (error) {
-        lastError = error;
+      for (const requiresToken of [true, false]) {
+        try {
+          return res.json(
+            await managerRequest(`${base}/api/paypal/subscription-plan`, {
+              method: "POST",
+              body: JSON.stringify(payload),
+              requiresToken,
+            }),
+          );
+        } catch (error) {
+          lastError = error;
+        }
       }
     }
     res.status(502).json({ error: lastError?.message || "Could not prepare recurring PayPal subscription." });
@@ -697,15 +892,21 @@ function registerManagerGatewayRoutes(app, database, options = {}) {
     let lastError = null;
     for (const base of candidateManagerBaseUrls()) {
       for (const item of paths) {
-        try {
-          return res.json(
-            await managerRequest(`${base}${item}`, {
-              method: "POST",
-              body: JSON.stringify(payload),
-            }),
-          );
-        } catch (error) {
-          lastError = error;
+        for (const requiresToken of [true, false]) {
+          try {
+            return res.json(
+              await managerRequest(`${base}${item}`, {
+                method: "POST",
+                body: JSON.stringify(payload),
+                requiresToken,
+              }),
+            );
+          } catch (error) {
+            lastError = error;
+            if (requiresToken && [400, 409, 422].includes(Number(error.status))) {
+              return res.status(Number(error.status)).json({ error: error.message });
+            }
+          }
         }
       }
     }
@@ -726,19 +927,25 @@ function registerManagerGatewayRoutes(app, database, options = {}) {
     let lastError = null;
     for (const base of candidateManagerBaseUrls()) {
       for (const item of paths) {
-        try {
-          const capture = await managerRequest(`${base}${item}`, {
-            method: "POST",
-            body: JSON.stringify(payload),
-          });
-          const cached = readJsonSetting(database, "manager_paypal_captures", []);
-          writeJsonSetting(database, "manager_paypal_captures", [
-            { captured_at: new Date().toISOString(), order_id: orderID, capture },
-            ...(Array.isArray(cached) ? cached : []).slice(0, 49),
-          ]);
-          return res.json(capture);
-        } catch (error) {
-          lastError = error;
+        for (const requiresToken of [true, false]) {
+          try {
+            const capture = await managerRequest(`${base}${item}`, {
+              method: "POST",
+              body: JSON.stringify(payload),
+              requiresToken,
+            });
+            const cached = readJsonSetting(database, "manager_paypal_captures", []);
+            writeJsonSetting(database, "manager_paypal_captures", [
+              { captured_at: new Date().toISOString(), order_id: orderID, capture },
+              ...(Array.isArray(cached) ? cached : []).slice(0, 49),
+            ]);
+            return res.json(capture);
+          } catch (error) {
+            lastError = error;
+            if (requiresToken && [400, 409, 422].includes(Number(error.status))) {
+              return res.status(Number(error.status)).json({ error: error.message });
+            }
+          }
         }
       }
     }
@@ -749,19 +956,25 @@ function registerManagerGatewayRoutes(app, database, options = {}) {
     const payload = payloadWithManagerIdentity(database, options, req.body || {});
     let lastError = null;
     for (const base of candidateManagerBaseUrls()) {
-      try {
-        const activation = await managerRequest(`${base}/api/paypal/subscriptions/activate`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        const cached = readJsonSetting(database, "manager_paypal_subscriptions", []);
-        writeJsonSetting(database, "manager_paypal_subscriptions", [
-          { activated_at: new Date().toISOString(), activation },
-          ...(Array.isArray(cached) ? cached : []).slice(0, 49),
-        ]);
-        return res.json(activation);
-      } catch (error) {
-        lastError = error;
+      for (const requiresToken of [true, false]) {
+        try {
+          const activation = await managerRequest(`${base}/api/paypal/subscriptions/activate`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+            requiresToken,
+          });
+          const cached = readJsonSetting(database, "manager_paypal_subscriptions", []);
+          writeJsonSetting(database, "manager_paypal_subscriptions", [
+            { activated_at: new Date().toISOString(), activation },
+            ...(Array.isArray(cached) ? cached : []).slice(0, 49),
+          ]);
+          return res.json(activation);
+        } catch (error) {
+          lastError = error;
+          if (requiresToken && [400, 409, 422].includes(Number(error.status))) {
+            return res.status(Number(error.status)).json({ error: error.message });
+          }
+        }
       }
     }
     res.status(502).json({ error: lastError?.message || "Could not activate PayPal subscription." });
@@ -771,15 +984,21 @@ function registerManagerGatewayRoutes(app, database, options = {}) {
     const payload = payloadWithManagerIdentity(database, options, req.body || {});
     let lastError = null;
     for (const base of candidateManagerBaseUrls()) {
-      try {
-        return res.json(
-          await managerRequest(`${base}/api/subscription/cancel`, {
-            method: "POST",
-            body: JSON.stringify(payload),
-          }),
-        );
-      } catch (error) {
-        lastError = error;
+      for (const requiresToken of [true, false]) {
+        try {
+          return res.json(
+            await managerRequest(`${base}/api/subscription/cancel`, {
+              method: "POST",
+              body: JSON.stringify(payload),
+              requiresToken,
+            }),
+          );
+        } catch (error) {
+          lastError = error;
+          if (requiresToken && [400, 409, 422].includes(Number(error.status))) {
+            return res.status(Number(error.status)).json({ error: error.message });
+          }
+        }
       }
     }
     res.status(502).json({ error: lastError?.message || "Could not cancel subscription." });
@@ -791,6 +1010,8 @@ module.exports = {
   MANAGER_RECEIVER,
   MANAGER_PUBLIC_INGEST_URL,
   MANAGER_LOCAL_INGEST_URL,
+  fetchManagerEvents,
+  fetchManagerSubscriptionStatus,
   registerManagerGatewayRoutes,
   syncAccountToManager,
 };

@@ -1,0 +1,21 @@
+Accounting Management v1.4.1
+
+Windows:
+1. Run `AccountingManagement-Setup-1.4.1.exe`.
+2. The installer is per-user and should not need "Run as administrator".
+3. Open the app, create a company account or log in to an existing company.
+4. If another old local server is already running, v1.4.1 will start on the next available local port instead of attaching to the old backend.
+
+Android:
+1. Install `AccountingManagement-Android-v1.4.1-debug.apk`.
+2. Log in using the local server or tunnel URL for the company.
+
+Included app targets:
+- Accounting Management for Windows
+- Accounting Management for Android
+
+Backend:
+- Local/manual server mode is restored.
+- Default data location is `D:\AM_Data\price_offer.db`.
+- Optional tunnel URL can point to `https://manager.yasserdiab.site`.
+- Do not place service-role keys, database passwords, or PayPal secrets in this app.

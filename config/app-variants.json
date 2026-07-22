@@ -1,0 +1,17 @@
+{
+  "version": "1.4.3",
+  "baseAppId": "com.sherifalihassan.priceoffer",
+  "desktopOutput": "dist-installer",
+  "androidOutput": "dist-android",
+  "variants": {
+    "main": {
+      "name": "Accounting Management",
+      "shortName": "A.M",
+      "appIdSuffix": "",
+      "entryTab": "dashboard",
+      "icon": "build/variants/main.ico",
+      "androidIcon": "build/variants/main.png",
+      "artifactPrefix": "AccountingManagement"
+    }
+  }
+}
