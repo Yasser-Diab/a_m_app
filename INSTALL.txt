@@ -17,5 +17,5 @@ Included app targets:
 Backend:
 - Local/manual server mode is restored.
 - Default data location is `D:\AM_Data\price_offer.db`.
-- Optional tunnel URL can point to `https://yasserdiab.site`.
+- Optional tunnel URL can point to `https://manager.yasserdiab.site`.
 - Do not place service-role keys, database passwords, or PayPal secrets in this app.

@@ -12,6 +12,7 @@ build_logs/
 PDFs/
 extracted_media/
 supabase/
+Repo/
 
 *.zip
 *.exe

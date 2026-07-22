@@ -19,11 +19,17 @@ const apiBaseArgument = process.argv.find((argument) =>
 const clientOnlyArgument = process.argv.find((argument) =>
   argument.startsWith('--price-offer-client-only='),
 );
+const connectionModeArgument = process.argv.find((argument) =>
+  argument.startsWith('--price-offer-connection-mode='),
+);
 const startupWarningArgument = process.argv.find((argument) =>
   argument.startsWith('--price-offer-startup-warning='),
 );
 const candidatesArgument = process.argv.find((argument) =>
   argument.startsWith('--price-offer-server-candidates='),
+);
+const installedVersionArgument = process.argv.find((argument) =>
+  argument.startsWith('--price-offer-installed-version='),
 );
 const defaultApiBase =
   apiBaseArgument?.split('=')[1] ||
@@ -49,9 +55,11 @@ function serverCandidates() {
 contextBridge.exposeInMainWorld('priceOfferDesktop', {
   apiBase: defaultApiBase,
   clientOnly: clientOnlyArgument?.split('=')[1] === '1',
+  connectionMode: connectionModeArgument?.split('=')[1] === 'remote' ? 'remote' : 'local',
   startupWarning: decodeArgument(startupWarningArgument),
   serverCandidates: serverCandidates(),
   platform: process.platform,
+  installedVersion: decodeArgument(installedVersionArgument),
   appVariant: process.env.AM_APP_VARIANT || process.env.VITE_APP_VARIANT || packagedMetadata.amVariant || '',
   entryTab: packagedMetadata.amEntryTab || '',
   openExternal: (url) => ipcRenderer.invoke('open-external-url', url),
@@ -60,8 +68,20 @@ contextBridge.exposeInMainWorld('priceOfferDesktop', {
   getDesktopSettings: () => ipcRenderer.invoke('desktop-settings:get'),
   updateDesktopSettings: (patch) => ipcRenderer.invoke('desktop-settings:update', patch || {}),
   startLocalServer: (options) => ipcRenderer.invoke('start-local-server', options || {}),
+  getConnectionStatus: (serverUrl) => ipcRenderer.invoke('connection-status', serverUrl || ''),
   showSection: (section) => ipcRenderer.invoke('show-section', section || ''),
   showNotification: (payload) => ipcRenderer.invoke('show-desktop-notification', payload || {}),
+  restoreInputFocus: () => ipcRenderer.invoke('restore-input-focus'),
+  saveReportFile: (payload) => ipcRenderer.invoke('save-report-file', payload || {}),
+  getInstalledVersion: () => ipcRenderer.invoke('app-version:get'),
+  getUpdateState: () => ipcRenderer.invoke('app-update:get-state'),
+  checkForUpdates: () => ipcRenderer.invoke('app-update:check'),
+  installUpdate: () => ipcRenderer.invoke('app-update:install'),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback?.(state);
+    ipcRenderer.on('app-update:state', listener);
+    return () => ipcRenderer.removeListener('app-update:state', listener);
+  },
   onDesktopSettingsChanged: (callback) => {
     const listener = (_event, settings) => callback?.(settings);
     ipcRenderer.on('desktop:settings-changed', listener);

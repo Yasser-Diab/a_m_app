@@ -37,8 +37,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify tag matches packaged application version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ("${{ github.ref_name }}" -ne "v$version") {
+            throw "Release tag ${{ github.ref_name }} does not match package version v$version"
+          }
+
       - name: Build Windows installer
         run: npm run dist:win -- --publish never
+
+      - name: Verify Windows updater assets
+        run: npm run verify:release-assets
 
       - name: Build Android APK
         run: npm run android:debug
@@ -48,7 +59,9 @@ jobs:
         run: |
           $version = node -p "require('./package.json').version"
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          Copy-Item "dist-installer/AccountingManagement-Setup-*.exe" "release-assets/" -Force
+          Copy-Item "dist-installer/AccountingManagement/AccountingManagement-Setup-*.exe" "release-assets/" -Force
+          Copy-Item "dist-installer/AccountingManagement/AccountingManagement-Setup-*.exe.blockmap" "release-assets/" -Force
+          Copy-Item "dist-installer/AccountingManagement/latest.yml" "release-assets/" -Force
           $apk = Get-ChildItem "android/app/build/outputs/apk" -Filter "*.apk" -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           Copy-Item $apk.FullName "release-assets/AccountingManagement-Android-v$version.apk" -Force
           Copy-Item "INSTALL.txt" "release-assets/INSTALL.txt" -Force
@@ -58,7 +71,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist-installer/AccountingManagement-Setup-*.exe
+            dist-installer/AccountingManagement/AccountingManagement-Setup-*.exe
+            dist-installer/AccountingManagement/AccountingManagement-Setup-*.exe.blockmap
+            dist-installer/AccountingManagement/latest.yml
             release-assets/AccountingManagement-Android-*.apk
             AccountingManagement_V*_release.zip
           generate_release_notes: true
+          draft: false
+          prerelease: false
+          make_latest: true

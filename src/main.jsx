@@ -1,9 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
+import { createPortal, flushSync } from "react-dom";
 import {
   Activity,
   AlertTriangle,
   ArrowDown,
+  Bell,
   Building2,
   Check,
   ClipboardList,
@@ -14,12 +23,16 @@ import {
   FileDown,
   FileSpreadsheet,
   FileText,
+  Files,
+  FolderOpen,
   HardDrive,
+  Download,
   Eye,
   KeyRound,
   LogOut,
   Maximize2,
   MessageCircle,
+  MoreHorizontal,
   Minimize2,
   Monitor,
   Moon,
@@ -54,6 +67,21 @@ import {
 import appLogo from "./assets/sticker logo s.png";
 import { CHAT_EMOJI_CATEGORIES } from "./emoji-data.js";
 import {
+  applySmartClipboardGridToRows,
+  expandSmartClipboardGrid,
+  fillSmartSelectionDownRows,
+  findSmartCtrlArrowDestination,
+  findSmartTableMatches,
+  hasExplicitSmartValue,
+  insertSmartRowRelative,
+  isSmartFillDownShortcut,
+  normalizeSmartNumericClipboardValue,
+  parseSmartClipboardGrid,
+  replaceSmartSearchMatches,
+  removeSmartRowById,
+  smartSelectionAfterNavigation,
+} from "./smart-table-clipboard.mjs";
+import {
   loadManagerPayments,
   loadManagerSubscriptionConfig,
   loadManagerSubscriptionStatus,
@@ -62,8 +90,11 @@ import {
 import "./styles.css";
 
 const APP_NAME = "Accounting Management";
-const APP_VERSION = "1.4.1";
-const APP_RELEASE_LABEL = "1.4.1";
+const APP_VERSION =
+  window.priceOfferDesktop?.installedVersion ||
+  import.meta.env.VITE_APP_VERSION ||
+  "1.4.3";
+const APP_RELEASE_LABEL = APP_VERSION;
 const APP_DISPLAY_VERSION = APP_RELEASE_LABEL || APP_VERSION;
 const APP_MARK = "A.M";
 const APP_BYLINE = "By Y.D";
@@ -72,7 +103,6 @@ const DEFAULT_LOCAL_PORT = 4181;
 const DEFAULT_API_BASE = `http://${DEFAULT_LOCAL_HOST}:${DEFAULT_LOCAL_PORT}`;
 const MANAGER_API_BASE = "https://manager.yasserdiab.site";
 const MANAGER_PUBLIC_URL = "https://manager.yasserdiab.site";
-const MANAGER_RECEIVER_HOST = "manager.yasserdiab.site";
 const SERVICE_TERMS_VERSION = "2026-06-27";
 const SERVICE_TERMS_STORAGE_KEY = "accountingManagementTermsAcceptedVersion";
 
@@ -266,9 +296,14 @@ const TAXES = [
   { key: "contractor_tax_enabled", label: "ضريبة 1%" },
 ];
 
+const VAT_TERMS_ONLY_OPTION = {
+  key: "vat_terms_only",
+  label: "الأسعار تشمل ضريبة 14% في الشروط فقط (بدون احتساب)",
+};
+
 const DEFAULT_ENTRY = {
   party_role: "customer",
-  party_category: "retail",
+  party_category: "unselected",
   source_customer_id: "",
   source_customer_name: "",
   certificate_no: "",
@@ -286,6 +321,7 @@ const DEFAULT_ENTRY = {
   height_cm: "",
   rate: "",
   vat_enabled: false,
+  vat_terms_only: false,
   social_insurance_enabled: false,
   stamp_enabled: false,
   works_insurance_enabled: false,
@@ -296,15 +332,21 @@ const DEFAULT_ENTRY = {
 };
 
 function getInitialApiBase() {
-  const desktopApi = cleanApiBase(window.priceOfferDesktop?.apiBase);
-  if (desktopApi && !isHostedManagerApiBase(desktopApi)) return desktopApi;
+  const currentOrigin = getCurrentOriginApiBase();
+  if (shouldPinApiBaseToCurrentOrigin() && currentOrigin) return currentOrigin;
   const stored = cleanApiBase(localStorage.getItem("priceOfferApiBase"));
-  if (stored && !isHostedManagerApiBase(stored)) return stored;
-  if (location.protocol.startsWith("http") && location.port !== "5173") {
-    const currentOrigin = cleanApiBase(location.origin);
-    if (currentOrigin && !isHostedManagerApiBase(currentOrigin)) return currentOrigin;
+  const storedMode = localStorage.getItem("priceOfferConnectionMode");
+  if (
+    (storedMode === "remote" || (stored && !isLocalApiBase(stored))) &&
+    isApiBaseUsableOnCurrentPage(stored)
+  ) {
+    return stored;
   }
-  return DEFAULT_API_BASE;
+  const desktopApi = cleanApiBase(window.priceOfferDesktop?.apiBase);
+  if (isApiBaseUsableOnCurrentPage(desktopApi)) return desktopApi;
+  if (isApiBaseUsableOnCurrentPage(stored)) return stored;
+  if (isApiBaseUsableOnCurrentPage(currentOrigin)) return currentOrigin;
+  return safeApiBaseForCurrentPage(DEFAULT_API_BASE);
 }
 
 function money(value) {
@@ -313,22 +355,42 @@ function money(value) {
   );
 }
 
+function formatMonetaryTotal(value) {
+  return Math.round(Number(value || 0)).toLocaleString("en-US", {
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+  });
+}
+
+let lastEditableFocusTarget = null;
+
+function isEditableFocusTarget(target) {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
 function restoreInputInteractivity(target = null) {
+  window.priceOfferDesktop?.restoreInputFocus?.().catch?.(() => {});
   const repair = () => {
     document.documentElement.removeAttribute("inert");
     document.body?.removeAttribute("inert");
     document.body?.classList.remove("input-locked", "modal-open", "is-busy");
+    if (document.body?.style.pointerEvents === "none") {
+      document.body.style.pointerEvents = "";
+    }
     const focusTarget =
       target && target.isConnected
         ? target
-        : document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : null;
-    if (
-      focusTarget instanceof HTMLInputElement ||
-      focusTarget instanceof HTMLTextAreaElement ||
-      focusTarget instanceof HTMLSelectElement
-    ) {
+        : lastEditableFocusTarget?.isConnected
+          ? lastEditableFocusTarget
+          : document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+    if (isEditableFocusTarget(focusTarget)) {
       if (!focusTarget.disabled && !focusTarget.readOnly) {
         focusTarget.focus({ preventScroll: true });
       }
@@ -336,6 +398,7 @@ function restoreInputInteractivity(target = null) {
   };
   window.requestAnimationFrame(repair);
   window.setTimeout(repair, 60);
+  window.setTimeout(repair, 180);
 }
 
 function userWithFreshSession(user = null) {
@@ -459,7 +522,23 @@ function normalizeClientUnitCode(value) {
     ].includes(text)
   )
     return "lm";
-  if (["count", "number", "no", "nos", "pcs", "piece", "pieces", "عدد"].includes(text))
+  if (
+    [
+      "count",
+      "number",
+      "no",
+      "nos",
+      "pcs",
+      "piece",
+      "pieces",
+      "unit",
+      "units",
+      "عدد",
+      "وحدة",
+      "وحده",
+      "قطعة",
+    ].includes(text)
+  )
     return "count";
   return "sqm";
 }
@@ -533,6 +612,39 @@ function rowUnitName(row = {}) {
   return combinedParts.length > 1 ? combinedParts[combinedParts.length - 1] : "";
 }
 
+function distinctReportLocationValues(values = []) {
+  const unique = [];
+  for (const rawValue of values) {
+    const value = String(rawValue || "").trim();
+    if (!value) continue;
+    const normalized = normalizeArabic(value);
+    if (unique.some((item) => item.normalized === normalized)) continue;
+    unique.push({ value, normalized });
+  }
+  return unique.map((item) => item.value).sort(naturalTextCompare);
+}
+
+function reportLocationContext(rows = [], fallback = {}) {
+  const printableRows = (rows || []).filter(
+    (row) => row && typeof row === "object",
+  );
+  const sourceRows = printableRows.length
+    ? printableRows
+    : fallback && (fallback.building_unit || fallback.floor_apartment)
+      ? [fallback]
+      : [];
+  const buildings = distinctReportLocationValues(
+    sourceRows.map(rowBuildingName),
+  );
+  const units = distinctReportLocationValues(sourceRows.map(rowUnitName));
+  return {
+    buildings,
+    units,
+    hasSingleBuilding: buildings.length === 1,
+    hasSingleUnit: buildings.length === 1 && units.length === 1,
+  };
+}
+
 function rowLocationLabel(row = {}) {
   const parts = [];
   for (const source of [rowBuildingName(row), rowUnitName(row)]) {
@@ -562,25 +674,61 @@ function locationPartValues(rows = [], key) {
 }
 
 function singleDocumentLocation(form = {}, rows = []) {
-  const realRows = (rows || []).filter((row) => rowLocationLabel(row));
-  if (realRows.length) {
-    const buildings = uniqueValues(realRows.map(rowBuildingName)).sort(
+  const documentRows = rows || [];
+  if (documentRows.length) {
+    const buildings = uniqueValues(documentRows.map(rowBuildingName).filter(Boolean)).sort(
       naturalTextCompare,
     );
-    const units = uniqueValues(realRows.map(rowUnitName)).sort(naturalTextCompare);
-    if (buildings.length === 1) {
-      return [buildings[0], units.length === 1 ? units[0] : ""]
-        .filter(Boolean)
-        .join(" / ");
-    }
-    if (!buildings.length && units.length === 1) return units[0];
+    const units = uniqueValues(documentRows.map(rowUnitName).filter(Boolean)).sort(naturalTextCompare);
+    const everyRowHasTheSameLocation =
+      buildings.length === 1 &&
+      units.length <= 1 &&
+      documentRows.every(
+        (row) =>
+          normalizeArabic(rowBuildingName(row)) === normalizeArabic(buildings[0]) &&
+          normalizeArabic(rowUnitName(row)) === normalizeArabic(units[0] || ""),
+      );
+    if (everyRowHasTheSameLocation)
+      return [buildings[0], units[0]].filter(Boolean).join(" ");
     return "";
   }
   return rowLocationLabel(form);
 }
 
 function projectWithLocation(project, location) {
-  return String(project || "").trim();
+  const projectText = String(project || "").trim();
+  const locationText = String(location || "").trim();
+  if (!locationText) return projectText;
+  if (!projectText) return locationText;
+  if (normalizeArabic(projectText).includes(normalizeArabic(locationText))) {
+    return projectText;
+  }
+  return `${projectText} ${locationText}`;
+}
+
+function reportProjectHeading(project, rows = [], fallback = {}) {
+  const projectText = String(project || "").trim();
+  const { buildings, units, hasSingleBuilding, hasSingleUnit } =
+    reportLocationContext(rows, fallback);
+  const parts = [];
+  const append = (rawValue) => {
+    const value = String(rawValue || "").trim();
+    if (!value) return;
+    const normalized = normalizeArabic(value);
+    if (
+      parts.some((part) => {
+        const existing = normalizeArabic(part);
+        return existing === normalized || existing.includes(normalized);
+      })
+    ) {
+      return;
+    }
+    parts.push(value);
+  };
+  append(projectText);
+  if (hasSingleBuilding) append(buildings[0]);
+  if (hasSingleUnit) append(units[0]);
+  return parts.join(" - ");
 }
 
 function subtotalFlagsFromMode(mode = "none") {
@@ -641,108 +789,159 @@ function blankReportTotals() {
 function buildReportRowBlocks(rows = [], subtotalMode = "none") {
   const realRows = rows || [];
   const flags = subtotalFlagsFromMode(subtotalMode);
-  const hasBuildings = realRows.some((row) => rowBuildingName(row));
-  const hasUnits = realRows.some((row) => rowUnitName(row));
-  const shouldGroup = hasBuildings || hasUnits;
-  if (!shouldGroup) return realRows.map((row) => ({ type: "row", row }));
+  if (!realRows.length) return [];
 
   const indexedRows = realRows.map((row, index) => ({ row, index }));
-  indexedRows.sort((left, right) => {
-    const buildingCompare = naturalTextCompare(
-      rowBuildingName(left.row),
-      rowBuildingName(right.row),
-    );
-    if (buildingCompare) return buildingCompare;
-    const unitCompare = naturalTextCompare(rowUnitName(left.row), rowUnitName(right.row));
-    if (unitCompare) return unitCompare;
-    return left.index - right.index;
-  });
-
-  const buildingTotals = new Map();
-  const unitTotals = new Map();
-  const ensureTotals = (map, key, label) => {
-    if (!map.has(key)) map.set(key, { label, totals: blankReportTotals() });
-    return map.get(key);
-  };
-  for (const { row } of indexedRows) {
-    const building = hasBuildings
-      ? rowGroupKey(rowBuildingName(row), "بدون مبنى")
-      : rowGroupKey("");
-    const unit = hasUnits ? rowGroupKey(rowUnitName(row), "بدون وحدة") : rowGroupKey("");
-    if (hasBuildings) addReportTotals(ensureTotals(buildingTotals, building.key, building.label).totals, row);
-    if (hasUnits) {
-      addReportTotals(
-        ensureTotals(unitTotals, `${building.key}::${unit.key}`, unit.label).totals,
-        row,
-      );
-    }
+  const { buildings, units, hasSingleBuilding, hasSingleUnit } =
+    reportLocationContext(realRows);
+  if (!buildings.length) {
+    return indexedRows.map(({ row }) => ({ type: "row", row }));
   }
 
   const blocks = [];
-  let activeBuildingKey = null;
-  let activeUnitKey = null;
-  const closeUnit = () => {
-    if (!activeUnitKey || !flags.unit) {
-      activeUnitKey = null;
-      return;
-    }
-    const entry = unitTotals.get(activeUnitKey);
-    if (entry) {
-      blocks.push({
-        type: "subtotal",
-        level: "unit",
-        label: entry.label,
-        totals: entry.totals,
-      });
-    }
-    activeUnitKey = null;
-  };
-  const closeBuilding = () => {
-    if (!activeBuildingKey || !flags.building || !hasBuildings) {
-      activeBuildingKey = null;
-      return;
-    }
-    const entry = buildingTotals.get(activeBuildingKey);
-    if (entry) {
-      blocks.push({
-        type: "subtotal",
-        level: "building",
-        label: entry.label,
-        totals: entry.totals,
-      });
-    }
-    activeBuildingKey = null;
-  };
+  indexedRows
+    .filter(({ row }) => !rowBuildingName(row))
+    .sort((left, right) => left.index - right.index)
+    .forEach(({ row }) => blocks.push({ type: "row", row }));
 
-  for (const { row } of indexedRows) {
-    const building = hasBuildings
-      ? rowGroupKey(rowBuildingName(row), "بدون مبنى")
-      : rowGroupKey("");
-    const unit = hasUnits ? rowGroupKey(rowUnitName(row), "بدون وحدة") : rowGroupKey("");
-    if (hasBuildings && building.key !== activeBuildingKey) {
-      closeUnit();
-      closeBuilding();
-      activeBuildingKey = building.key;
+  if (hasSingleBuilding) {
+    const buildingLabel = buildings[0];
+    const buildingRows = indexedRows.filter(
+      ({ row }) =>
+        normalizeArabic(rowBuildingName(row)) ===
+        normalizeArabic(buildingLabel),
+    );
+    const buildingTotals = blankReportTotals();
+    buildingRows.forEach(({ row }) => addReportTotals(buildingTotals, row));
+
+    if (hasSingleUnit) {
+      buildingRows
+        .sort((left, right) => left.index - right.index)
+        .forEach(({ row }) => blocks.push({ type: "row", row }));
+      if (flags.unit) {
+        const unitTotals = blankReportTotals();
+        buildingRows
+          .filter(({ row }) => rowUnitName(row))
+          .forEach(({ row }) => addReportTotals(unitTotals, row));
+        blocks.push({
+          type: "subtotal",
+          level: "unit",
+          label: units[0],
+          totals: unitTotals,
+        });
+      }
+    } else {
+      buildingRows
+        .filter(({ row }) => !rowUnitName(row))
+        .sort((left, right) => left.index - right.index)
+        .forEach(({ row }) => blocks.push({ type: "row", row }));
+      const unitGroups = new Map();
+      for (const item of buildingRows.filter(({ row }) => rowUnitName(row))) {
+        const unit = rowGroupKey(rowUnitName(item.row));
+        if (!unitGroups.has(unit.key)) {
+          unitGroups.set(unit.key, {
+            label: unit.label,
+            rows: [],
+            totals: blankReportTotals(),
+          });
+        }
+        const group = unitGroups.get(unit.key);
+        group.rows.push(item);
+        addReportTotals(group.totals, item.row);
+      }
+      [...unitGroups.values()]
+        .sort((left, right) => naturalTextCompare(left.label, right.label))
+        .forEach((unit) => {
+          blocks.push({ type: "heading", level: "unit", label: unit.label });
+          unit.rows
+            .sort((left, right) => left.index - right.index)
+            .forEach(({ row }) => blocks.push({ type: "row", row }));
+          if (flags.unit) {
+            blocks.push({
+              type: "subtotal",
+              level: "unit",
+              label: unit.label,
+              totals: unit.totals,
+            });
+          }
+        });
+    }
+    if (flags.building) {
       blocks.push({
-        type: "heading",
+        type: "subtotal",
         level: "building",
-        label: building.label,
+        label: buildingLabel,
+        totals: buildingTotals,
       });
     }
-    const unitKey = `${building.key}::${unit.key}`;
-    if (hasUnits && unitKey !== activeUnitKey) {
-      closeUnit();
-      activeUnitKey = unitKey;
-      blocks.push({
-        type: "heading",
-        level: "unit",
-        label: unit.label,
-      });
-    }
-    blocks.push({ type: "row", row });
+    return blocks;
   }
-  closeUnit();
-  closeBuilding();
+
+  const buildingGroups = new Map();
+  for (const item of indexedRows.filter(({ row }) => rowBuildingName(row))) {
+    const building = rowGroupKey(rowBuildingName(item.row));
+    if (!buildingGroups.has(building.key)) {
+      buildingGroups.set(building.key, {
+        key: building.key,
+        label: building.label,
+        rows: [],
+        totals: blankReportTotals(),
+      });
+    }
+    const group = buildingGroups.get(building.key);
+    group.rows.push(item);
+    addReportTotals(group.totals, item.row);
+  }
+
+  [...buildingGroups.values()]
+    .sort((left, right) => naturalTextCompare(left.label, right.label))
+    .forEach((building) => {
+      blocks.push({ type: "heading", level: "building", label: building.label });
+
+      building.rows
+        .filter(({ row }) => !rowUnitName(row))
+        .sort((left, right) => left.index - right.index)
+        .forEach(({ row }) => blocks.push({ type: "row", row }));
+
+      const unitGroups = new Map();
+      for (const item of building.rows.filter(({ row }) => rowUnitName(row))) {
+        const unit = rowGroupKey(rowUnitName(item.row));
+        if (!unitGroups.has(unit.key)) {
+          unitGroups.set(unit.key, {
+            label: unit.label,
+            rows: [],
+            totals: blankReportTotals(),
+          });
+        }
+        const group = unitGroups.get(unit.key);
+        group.rows.push(item);
+        addReportTotals(group.totals, item.row);
+      }
+      [...unitGroups.values()]
+        .sort((left, right) => naturalTextCompare(left.label, right.label))
+        .forEach((unit) => {
+          blocks.push({ type: "heading", level: "unit", label: unit.label });
+          unit.rows
+            .sort((left, right) => left.index - right.index)
+            .forEach(({ row }) => blocks.push({ type: "row", row }));
+          if (flags.unit) {
+            blocks.push({
+              type: "subtotal",
+              level: "unit",
+              label: unit.label,
+              totals: unit.totals,
+            });
+          }
+        });
+      if (flags.building) {
+        blocks.push({
+          type: "subtotal",
+          level: "building",
+          label: building.label,
+          totals: building.totals,
+        });
+      }
+    });
   return blocks;
 }
 
@@ -818,6 +1017,59 @@ function cleanApiBase(value) {
     .replace(/\/+$/, "");
 }
 
+function isPrivateOrLocalHostname(hostname = "") {
+  const host = String(hostname || "").toLowerCase();
+  return (
+    ["127.0.0.1", "localhost", "::1", DEFAULT_LOCAL_HOST].includes(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  );
+}
+
+function getCurrentOriginApiBase() {
+  if (!location.protocol.startsWith("http") || location.port === "5173") {
+    return "";
+  }
+  const currentOrigin = cleanApiBase(location.origin);
+  return isHostedManagerApiBase(currentOrigin) ? "" : currentOrigin;
+}
+
+function shouldPinApiBaseToCurrentOrigin() {
+  return (
+    location.protocol === "https:" &&
+    !window.priceOfferDesktop &&
+    !isPrivateOrLocalHostname(location.hostname)
+  );
+}
+
+function isApiBaseUsableOnCurrentPage(value) {
+  const clean = cleanApiBase(value);
+  if (!clean || isHostedManagerApiBase(clean)) return false;
+  try {
+    const url = new URL(clean);
+    if (location.protocol === "https:" && url.protocol === "http:") {
+      return false;
+    }
+    if (shouldPinApiBaseToCurrentOrigin() && isLocalApiBase(clean)) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeApiBaseForCurrentPage(value, fallback = "") {
+  const clean = cleanApiBase(value);
+  if (isApiBaseUsableOnCurrentPage(clean)) return clean;
+  const fallbackClean = cleanApiBase(fallback);
+  if (isApiBaseUsableOnCurrentPage(fallbackClean)) return fallbackClean;
+  const currentOrigin = getCurrentOriginApiBase();
+  if (isApiBaseUsableOnCurrentPage(currentOrigin)) return currentOrigin;
+  return clean || fallbackClean || DEFAULT_API_BASE;
+}
+
 function hasManagerClientPack() {
   return true;
 }
@@ -834,7 +1086,10 @@ function normalizeServerConfigDraft(config = {}, apiBase = DEFAULT_API_BASE) {
   const dataDir = config.preferredDataDir || config.dataDir || "";
   const dbPath = config.preferredDbPath || config.dbPath || "";
   return {
-    serverUrl: cleanApiBase(config.serverUrl || apiBase || DEFAULT_API_BASE),
+    serverUrl: safeApiBaseForCurrentPage(
+      apiBase || config.serverUrl || DEFAULT_API_BASE,
+      apiBase || DEFAULT_API_BASE,
+    ),
     dataDir,
     dbPath,
     migrateFromDbPath: "",
@@ -869,15 +1124,31 @@ function compareAppVersions(left, right) {
 function isLocalApiBase(value) {
   try {
     const url = new URL(cleanApiBase(value));
-    return (
-      ["127.0.0.1", "localhost", DEFAULT_LOCAL_HOST].includes(url.hostname) ||
-      /^10\./.test(url.hostname) ||
-      /^192\.168\./.test(url.hostname) ||
-      /^172\.(1[6-9]|2\d|3[0-1])\./.test(url.hostname)
-    );
+    return isPrivateOrLocalHostname(url.hostname);
   } catch {
     return false;
   }
+}
+
+function isLoopbackApiBase(value) {
+  try {
+    const hostname = new URL(cleanApiBase(value)).hostname.toLowerCase();
+    return ["127.0.0.1", "localhost", "::1"].includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
+function connectionModeForApiBase(value, explicitMode = "") {
+  if (["local", "remote"].includes(explicitMode)) return explicitMode;
+  const clean = cleanApiBase(value);
+  const desktopApi = cleanApiBase(window.priceOfferDesktop?.apiBase);
+  const desktopMode = window.priceOfferDesktop?.connectionMode;
+  if (clean && clean === desktopApi && ["local", "remote"].includes(desktopMode)) {
+    return desktopMode;
+  }
+  if (isLoopbackApiBase(clean)) return "local";
+  return "remote";
 }
 
 function isHostedManagerApiBase(value) {
@@ -886,26 +1157,26 @@ function isHostedManagerApiBase(value) {
 }
 
 function apiBaseCandidates(preferred = "") {
+  const currentOrigin = getCurrentOriginApiBase();
   return [
     preferred,
     ...(window.priceOfferDesktop?.serverCandidates || []),
     window.priceOfferDesktop?.apiBase,
     localStorage.getItem("priceOfferApiBase"),
-    location.protocol.startsWith("http") ? location.origin : "",
+    currentOrigin,
     DEFAULT_API_BASE,
     `http://127.0.0.1:${DEFAULT_LOCAL_PORT}`,
     `http://localhost:${DEFAULT_LOCAL_PORT}`,
-    MANAGER_PUBLIC_URL,
   ]
     .map(cleanApiBase)
     .filter(Boolean)
-    .filter((value) => !isHostedManagerApiBase(value))
+    .filter(isApiBaseUsableOnCurrentPage)
     .filter((value, index, all) => all.indexOf(value) === index);
 }
 
 async function probeApiBase(candidate) {
   const clean = cleanApiBase(candidate);
-  if (!clean) return "";
+  if (!isApiBaseUsableOnCurrentPage(clean)) return "";
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 1800);
   try {
@@ -947,6 +1218,75 @@ function downloadBlob(blob, fileName) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fall through to the selection-based copy path used by older webviews.
+  }
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.inset = "0 auto auto 0";
+    textarea.style.width = "1px";
+    textarea.style.height = "1px";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, value.length);
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
+function hasSelectedTextInsideEditor(target) {
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement
+  ) {
+    return (
+      typeof target.selectionStart === "number" &&
+      typeof target.selectionEnd === "number" &&
+      target.selectionEnd > target.selectionStart
+    );
+  }
+  const editor = target?.closest?.('[contenteditable="true"]');
+  if (!editor) return false;
+  const selection = window.getSelection?.();
+  return Boolean(
+    selection &&
+      !selection.isCollapsed &&
+      selection.toString().length > 0 &&
+      editor.contains(selection.anchorNode) &&
+      editor.contains(selection.focusNode),
+  );
+}
+
+function performanceStart() {
+  return globalThis.performance?.now?.() || Date.now();
+}
+
+function logDevelopmentPerformance(label, startedAt, metadata = "") {
+  if (!import.meta.env.DEV) return;
+  const elapsed = (globalThis.performance?.now?.() || Date.now()) - startedAt;
+  const threshold = label.includes("draft") ? 2 : 8;
+  if (elapsed < threshold) return;
+  console.debug(
+    `[Performance] ${label}: ${elapsed.toFixed(1)} ms${metadata ? ` (${metadata})` : ""}`,
+  );
 }
 
 function blobToBase64(blob) {
@@ -1230,7 +1570,7 @@ function mapRowToForm(row) {
           ? "contractor_certificate"
           : "price_offer",
     party_role: row.party_role || "customer",
-    party_category: row.party_category || "retail",
+    party_category: row.party_category || "unselected",
     unit_code: row.unit_code || "sqm",
     measurement_mode: row.measurement_mode || "standard",
     document_status: row.document_status || "draft",
@@ -1272,6 +1612,7 @@ function App() {
   const closeNotice = useCallback((id) => {
     setNotices((current) => current.filter((notice) => notice.id !== id));
   }, []);
+
   const setMessage = useCallback((value, options = {}) => {
     if (!value) {
       setNotices([]);
@@ -1287,6 +1628,35 @@ function App() {
       sticky: options.sticky ?? type !== "success",
     };
     setNotices((current) => [...current.slice(-4), notice]);
+  }, []);
+  useEffect(() => {
+    const preventNativeNumberStep = (event) => {
+      if (
+        event.target instanceof HTMLInputElement &&
+        event.target.type === "number" &&
+        (event.key === "ArrowUp" || event.key === "ArrowDown")
+      ) {
+        event.preventDefault();
+      }
+    };
+    const preventNativeNumberWheel = (event) => {
+      if (
+        event.target instanceof HTMLInputElement &&
+        event.target.type === "number" &&
+        document.activeElement === event.target
+      ) {
+        event.preventDefault();
+      }
+    };
+    document.addEventListener("keydown", preventNativeNumberStep, true);
+    document.addEventListener("wheel", preventNativeNumberWheel, {
+      capture: true,
+      passive: false,
+    });
+    return () => {
+      document.removeEventListener("keydown", preventNativeNumberStep, true);
+      document.removeEventListener("wheel", preventNativeNumberWheel, true);
+    };
   }, []);
   const [busy, setBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -1305,9 +1675,14 @@ function App() {
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine !== false);
   const [sessionNow, setSessionNow] = useState(() => Date.now());
   const [subscriptionState, setSubscriptionState] = useState(null);
+  const [managerEvents, setManagerEvents] = useState([]);
+  const notifiedManagerEventIdsRef = useRef(new Set());
   const [subscriptionModalVisible, setSubscriptionModalVisible] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(
     () => localStorage.getItem(SERVICE_TERMS_STORAGE_KEY) === SERVICE_TERMS_VERSION,
+  );
+  const [developerDataVisible, setDeveloperDataVisible] = useState(
+    () => localStorage.getItem("priceOfferDeveloperDataVisible") === "1",
   );
 
   useEffect(() => {
@@ -1318,6 +1693,19 @@ function App() {
       });
     }
   }, [setMessage]);
+
+  useEffect(() => {
+    const storedMode = localStorage.getItem("priceOfferConnectionMode");
+    const connectionMode = connectionModeForApiBase(apiBase, storedMode || "");
+    localStorage.setItem("priceOfferApiBase", cleanApiBase(apiBase));
+    localStorage.setItem("priceOfferConnectionMode", connectionMode);
+    window.priceOfferDesktop
+      ?.updateDesktopSettings?.({
+        serverUrl: cleanApiBase(apiBase),
+        connectionMode,
+      })
+      .catch?.(() => {});
+  }, []);
 
   useEffect(() => {
     if (!busy) restoreInputInteractivity();
@@ -1361,14 +1749,18 @@ function App() {
   }, [currentUser]);
 
   useEffect(() => {
+    const rememberEditableFocus = (event) => {
+      const target = event.target;
+      if (isEditableFocusTarget(target) && !target.disabled && !target.readOnly) {
+        lastEditableFocusTarget = target;
+      }
+    };
     const recoverTextFocus = (event) => {
       const target = event.target;
-      if (
-        !(target instanceof HTMLInputElement) &&
-        !(target instanceof HTMLTextAreaElement)
-      )
+      if (!isEditableFocusTarget(target))
         return;
       if (target.disabled || target.readOnly) return;
+      lastEditableFocusTarget = target;
       window.requestAnimationFrame(() => {
         if (!target.isConnected || target.disabled || target.readOnly) return;
         const active = document.activeElement;
@@ -1383,8 +1775,12 @@ function App() {
         if (document.activeElement !== target) target.focus({ preventScroll: true });
       });
     };
+    document.addEventListener("focusin", rememberEditableFocus, true);
     document.addEventListener("pointerdown", recoverTextFocus, true);
-    return () => document.removeEventListener("pointerdown", recoverTextFocus, true);
+    return () => {
+      document.removeEventListener("focusin", rememberEditableFocus, true);
+      document.removeEventListener("pointerdown", recoverTextFocus, true);
+    };
   }, []);
 
   useEffect(() => {
@@ -1517,9 +1913,11 @@ function App() {
       if (cancelled) return;
       if (settings.apiBase) {
         const clean = cleanApiBase(settings.apiBase);
-        if (clean && !isHostedManagerApiBase(clean)) {
+        if (isApiBaseUsableOnCurrentPage(clean)) {
           setApiBaseState(clean);
           localStorage.setItem("priceOfferApiBase", clean);
+        } else if (clean) {
+          localStorage.removeItem("priceOfferApiBase");
         }
       }
       if (
@@ -1538,6 +1936,13 @@ function App() {
   useEffect(() => {
     document.title = APP_VARIANT.name;
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "priceOfferDeveloperDataVisible",
+      developerDataVisible ? "1" : "0",
+    );
+  }, [developerDataVisible]);
 
   useEffect(() => {
     const applyTheme = () => {
@@ -1616,7 +2021,7 @@ function App() {
         return data ?? {};
       },
     }),
-    [apiBase, currentUser],
+    [apiBase],
   );
 
   const companyHeaderLogo = reportBranding?.logoDataUri || appLogo;
@@ -1628,6 +2033,36 @@ function App() {
     if (/windows/i.test(navigator.userAgent)) return "win32";
     return "web";
   }, []);
+
+  const developerDataItems = useMemo(
+    () =>
+      [
+        ["API", apiBase],
+        ["Installed Version", APP_VERSION],
+        ["Server Version", health?.serverVersion || health?.version],
+        ["DB Schema", health?.databaseSchemaVersion],
+        ["Backend", health?.backend || "local-server"],
+        ["Port", health?.port],
+        ["Data", health?.dataDir],
+        ["DB", health?.dbPath],
+        ["View", activeTab],
+      ].filter(([, value]) => value !== undefined && value !== null && value !== ""),
+    [activeTab, apiBase, health],
+  );
+
+  function renderDeveloperDataStrip() {
+    if (!developerDataVisible) return null;
+    return (
+      <div className="developer-data-strip" dir="ltr">
+        {developerDataItems.map(([label, value]) => (
+          <span key={label} title={`${label}: ${value}`}>
+            <strong>{label}</strong>
+            <code>{String(value)}</code>
+          </span>
+        ))}
+      </div>
+    );
+  }
 
   const checkForUpdates = useCallback(
     async (silent = true) => {
@@ -1641,13 +2076,18 @@ function App() {
         return `v${clean}`;
       };
       try {
-        const data = await api.request(
-          `/api/update/latest?platform=${encodeURIComponent(updatePlatform)}`,
-        );
+        const data = window.priceOfferDesktop?.checkForUpdates
+          ? await window.priceOfferDesktop.checkForUpdates()
+          : await api.request(
+              `/api/update/latest?platform=${encodeURIComponent(updatePlatform)}&installed_version=${encodeURIComponent(APP_VERSION)}`,
+            );
         const normalized = {
           ...data,
-          currentVersion: normalizeVersion(data.currentVersion),
-          latestVersion: normalizeVersion(data.latestVersion),
+          installedVersion: normalizeVersion(APP_VERSION),
+          currentVersion: normalizeVersion(APP_VERSION),
+          latestVersion: data.latestVersion
+            ? normalizeVersion(data.latestVersion)
+            : "",
         };
         setUpdateInfo(normalized);
         if (!silent && !normalized.updateAvailable) {
@@ -1658,6 +2098,7 @@ function App() {
         return normalized;
       } catch (error) {
         setUpdateInfo({
+          status: "error",
           updateAvailable: false,
           currentVersion: normalizeVersion(currentVersion),
           error: error.message,
@@ -1668,12 +2109,17 @@ function App() {
         setCheckingUpdate(false);
       }
     },
-    [api, updateInfo?.currentVersion, updatePlatform],
+    [api, updatePlatform],
   );
 
-  const refreshAll = useCallback(async () => {
-    setBusy(true);
-    setMessage("");
+  const refreshAll = useCallback(async (options = {}) => {
+    const {
+      showBusy = true,
+      clearNotice = true,
+      includeSubscription = true,
+    } = options;
+    if (showBusy) setBusy(true);
+    if (clearNotice) setMessage("");
     try {
       const [
         healthData,
@@ -1693,7 +2139,9 @@ function App() {
         })),
         api.request("/api/settings/report-branding").catch(() => null),
         api.request("/api/subscription/plans").catch(() => ({ plans: [] })),
-        api.request("/api/subscription/status").catch(() => null),
+        includeSubscription
+          ? api.request("/api/subscription/status").catch(() => null)
+          : Promise.resolve(null),
       ]);
       if (subscriptionStatus) {
         setSubscriptionState({
@@ -1737,10 +2185,20 @@ function App() {
       setHealth(null);
       setMessage(`تعذر الاتصال بالسيرفر المحلي: ${error.message}`);
     } finally {
-      setBusy(false);
+      if (showBusy) setBusy(false);
       restoreInputInteractivity();
     }
   }, [api]);
+
+  const refreshLocalData = useCallback(
+    () =>
+      refreshAll({
+        showBusy: false,
+        clearNotice: false,
+        includeSubscription: false,
+      }),
+    [refreshAll],
+  );
 
   useEffect(() => {
     refreshAll();
@@ -1780,14 +2238,102 @@ function App() {
   }, [api, currentUser?.id]);
 
   useEffect(() => {
+    if (!currentUser?.id) {
+      setManagerEvents([]);
+      return undefined;
+    }
+    let cancelled = false;
+    const loadEvents = async () => {
+      try {
+        const query = new URLSearchParams({
+          user_id: String(currentUser.id),
+          username: currentUser.username || currentUser.display_name || "",
+          company: bootstrap?.company?.company_name || "",
+        });
+        const data = await api.request(`/api/events?${query.toString()}`);
+        const events = data?.events || [];
+        if (cancelled) return;
+        setManagerEvents(events.filter((event) => event.in_app_enabled));
+        for (const event of events.filter((item) => item.windows_enabled)) {
+          if (event.notified || notifiedManagerEventIdsRef.current.has(event.id)) {
+            continue;
+          }
+          notifiedManagerEventIdsRef.current.add(event.id);
+          if (window.priceOfferDesktop?.showNotification) {
+            await window.priceOfferDesktop.showNotification({
+              title: event.title,
+              body: event.message,
+              section: "settings",
+            });
+          } else if ("Notification" in window) {
+            if (Notification.permission === "default") {
+              await Notification.requestPermission().catch(() => "denied");
+            }
+            if (Notification.permission === "granted") {
+              new Notification(event.title, { body: event.message });
+            }
+          }
+          await api.request(`/api/events/${event.id}/notified`, {
+            method: "POST",
+            body: JSON.stringify({ user_id: currentUser.id }),
+          }).catch(() => null);
+        }
+      } catch {
+        if (!cancelled) setManagerEvents([]);
+      }
+    };
+    loadEvents();
+    const timer = window.setInterval(loadEvents, 60 * 1000);
+    const onFocus = () => loadEvents();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [
+    api,
+    bootstrap?.company?.company_name,
+    currentUser?.display_name,
+    currentUser?.id,
+    currentUser?.username,
+  ]);
+
+  useEffect(() => {
     if (!currentUser) return undefined;
+    if (window.priceOfferDesktop?.getUpdateState) {
+      let cancelled = false;
+      const normalizeDesktopState = (state = {}) => {
+        const normalize = (value) =>
+          `v${String(value || APP_VERSION).replace(/^v/i, "")}`;
+        return {
+          ...state,
+          installedVersion: normalize(APP_VERSION),
+          currentVersion: normalize(APP_VERSION),
+          latestVersion: state.latestVersion ? normalize(state.latestVersion) : "",
+        };
+      };
+      window.priceOfferDesktop.getUpdateState().then((state) => {
+        if (!cancelled) setUpdateInfo(normalizeDesktopState(state));
+      }).catch(() => null);
+      const unsubscribe = window.priceOfferDesktop.onUpdateState?.((state) => {
+        if (cancelled) return;
+        const normalized = normalizeDesktopState(state);
+        setUpdateInfo(normalized);
+        setCheckingUpdate(normalized.status === "checking");
+      });
+      return () => {
+        cancelled = true;
+        unsubscribe?.();
+      };
+    }
     checkForUpdates(true);
     const timer = window.setInterval(
       () => checkForUpdates(true),
       6 * 60 * 60 * 1000,
     );
     return () => window.clearInterval(timer);
-  }, [currentUser, checkForUpdates]);
+  }, [currentUser?.id, checkForUpdates]);
 
   useEffect(() => {
     if (!currentUser?.id) return undefined;
@@ -1894,7 +2440,7 @@ function App() {
       .catch((error) => {
         setMessage(`تعذر تحديث حالة الاشتراك: ${error.message}`);
       });
-  }, [api, currentUser, setMessage]);
+  }, [api, currentUser?.id, setMessage]);
 
   useEffect(() => {
     if (!currentUser || !subscriptionState?.status) return;
@@ -1913,9 +2459,26 @@ function App() {
       localStorage.setItem(key, String(Date.now()));
       setSubscriptionModalVisible(true);
     }
-  }, [currentUser, subscriptionState?.status, subscriptionState?.can_use_app]);
+  }, [currentUser?.id, subscriptionState?.status, subscriptionState?.can_use_app]);
 
   async function openUpdateDownload() {
+    if (window.priceOfferDesktop?.installUpdate) {
+      if (updateInfo?.canInstall) {
+        setMessage("سيتم إغلاق التطبيق وتثبيت التحديث الذي تم تنزيله.");
+        await window.priceOfferDesktop.installUpdate();
+        return;
+      }
+      if (["available", "downloading"].includes(updateInfo?.status)) {
+        setMessage(
+          updateInfo?.status === "downloading"
+            ? `جاري تنزيل التحديث (${Math.round(updateInfo.downloadPercent || 0)}%).`
+            : "تم العثور على التحديث وبدأ تنزيله. سيظهر زر إعادة التشغيل بعد اكتمال التنزيل.",
+        );
+        return;
+      }
+      await checkForUpdates(false);
+      return;
+    }
     const info = updateInfo?.downloadUrl
       ? updateInfo
       : await checkForUpdates(false);
@@ -1931,17 +2494,50 @@ function App() {
     );
   }
 
-  function setApiBase(value) {
-    const clean = cleanApiBase(value) || DEFAULT_API_BASE;
+  function setApiBase(value, options = {}) {
+    const clean = safeApiBaseForCurrentPage(value, apiBase || DEFAULT_API_BASE);
+    const connectionMode = connectionModeForApiBase(
+      clean,
+      options.connectionMode || "",
+    );
     setApiBaseState(clean);
     localStorage.setItem("priceOfferApiBase", clean);
-    saveNativeSettings({ apiBase: clean });
+    localStorage.setItem("priceOfferConnectionMode", connectionMode);
+    window.priceOfferDesktop
+      ?.updateDesktopSettings?.({ serverUrl: clean, connectionMode })
+      .catch?.(() => {});
+    saveNativeSettings({ apiBase: clean, connectionMode });
   }
 
   function cycleThemeMode() {
     const modes = ["system", "light", "dark", "gold"];
     const next = modes[(modes.indexOf(themeMode) + 1) % modes.length] || "system";
     setThemeMode(next);
+  }
+
+  async function updateManagerEventState(eventId, action) {
+    if (!currentUser?.id) return;
+    try {
+      await api.request(`/api/events/${eventId}/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: currentUser.id }),
+      });
+      if (action === "dismiss") {
+        setManagerEvents((current) =>
+          current.filter((event) => Number(event.id) !== Number(eventId)),
+        );
+      } else {
+        setManagerEvents((current) =>
+          current.map((event) =>
+            Number(event.id) === Number(eventId)
+              ? { ...event, seen: true }
+              : event,
+          ),
+        );
+      }
+    } finally {
+      restoreInputInteractivity();
+    }
   }
 
   function focusSubscriptionPanel() {
@@ -1955,8 +2551,10 @@ function App() {
 
   async function login(credentials, explicitApiBase = "") {
     setBusy(true);
-    const loginApiBase =
-      cleanApiBase(explicitApiBase || credentials.apiBase) || apiBase || DEFAULT_API_BASE;
+    const loginApiBase = safeApiBaseForCurrentPage(
+      explicitApiBase || credentials.apiBase || apiBase,
+      apiBase || DEFAULT_API_BASE,
+    );
     try {
       const response = await fetch(buildUrl(loginApiBase, "/api/auth/login"), {
         method: "POST",
@@ -2013,14 +2611,27 @@ function App() {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      if (data.server?.serverUrl || data.server?.localUrl) {
-        setApiBase(data.server.serverUrl || data.server.localUrl);
+      const connectionMode =
+        localStorage.getItem("priceOfferConnectionMode") ||
+        window.priceOfferDesktop?.connectionMode ||
+        connectionModeForApiBase(apiBase);
+      if (
+        connectionMode !== "remote" &&
+        (data.server?.serverUrl || data.server?.localUrl)
+      ) {
+        setApiBase(data.server.serverUrl || data.server.localUrl, {
+          connectionMode: "local",
+        });
       }
       setBootstrap((current) => ({
         ...(current || {}),
         company: data.company || current?.company,
       }));
-      setMessage("Company account created on the local server.");
+      setMessage(
+        connectionMode === "remote"
+          ? "Company account created through the configured remote server."
+          : "Company account created on the local server.",
+      );
       return { ...data, message: "Company account created. You can log in now." };
     } finally {
       setBusy(false);
@@ -2203,7 +2814,7 @@ function App() {
       const partyObject = party || {
         id: doc.party_id,
         display_name: doc.customer_name,
-        base_name: doc.customer_name,
+        base_name: "",
       };
       const query = new URLSearchParams({ document_id: String(doc.id) });
       if (currentUser?.display_name)
@@ -2241,6 +2852,9 @@ function App() {
           );
           return flags;
         }, {});
+        taxFlags.vat_terms_only = (reportData.rows || []).some(
+          (row) => !!row.vat_terms_only,
+        );
         const baseName =
           partyObject.base_name ||
           firstRow.base_party_name ||
@@ -2262,7 +2876,10 @@ function App() {
           ...taxFlags,
           party_role: workflow.partyRole,
           party_category:
-            partyObject.category || firstRow.party_category || "retail",
+            doc.party_category ||
+            firstRow.party_category ||
+            partyObject.category ||
+            "unselected",
           base_party_name: baseName,
           customer_name: baseName,
           customer_display_name: displayName,
@@ -2313,7 +2930,11 @@ function App() {
           reportData,
         });
         setEntryDirty(false);
-        setActiveTab("entry");
+        setActiveTab(
+          doc.document_type === "contractor_certificate"
+            ? "contractor"
+            : "entry",
+        );
         setMessage(
           `تم فتح ${documentTypeLabel(doc.document_type)} ${doc.operation_no || doc.document_no || ""} للتعديل.`,
         );
@@ -2453,7 +3074,7 @@ function App() {
       setEntryForm({
         ...DEFAULT_ENTRY,
         party_role: sourceMeta.role,
-        party_category: partyObject.category || firstRow.party_category || "retail",
+        party_category: partyObject.category || firstRow.party_category || "unselected",
         party_id: partyObject.id || firstRow.party_id || "",
         base_party_name:
           partyObject.base_name || firstRow.base_party_name || doc.customer_name || "",
@@ -2480,6 +3101,7 @@ function App() {
           flags[tax.key] = rows.some((row) => !!row[tax.key]);
           return flags;
         }, {}),
+        vat_terms_only: rows.some((row) => !!row.vat_terms_only),
       });
       setEditingId(null);
       setEditorContext({
@@ -2706,12 +3328,13 @@ function App() {
       setEditingId(null);
       setEntryDirty(false);
       setMessage(editingId ? "تم تعديل البند." : "تم حفظ البند.");
-      await refreshAll();
+      await refreshLocalData();
       await refreshContextReport();
     } catch (error) {
       setMessage(`لم يتم الحفظ: ${error.message}`);
     } finally {
       setBusy(false);
+      restoreInputInteractivity();
     }
   }
 
@@ -2721,12 +3344,13 @@ function App() {
     try {
       await api.request(`/api/entries/${id}`, { method: "DELETE" });
       setMessage("تم حذف البند.");
-      await refreshAll();
+      await refreshLocalData();
       await refreshContextReport();
     } catch (error) {
       setMessage(`لم يتم الحذف: ${error.message}`);
     } finally {
       setBusy(false);
+      restoreInputInteractivity();
     }
   }
 
@@ -2776,7 +3400,11 @@ function App() {
     setEditingId(row.id);
     setEditorContext(context);
     setEntryDirty(false);
-    setActiveTab("entry");
+    setActiveTab(
+      mapRowToForm(row).document_type === "contractor_certificate"
+        ? "contractor"
+        : "entry",
+    );
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -2793,7 +3421,7 @@ function App() {
     setEntryForm({
       ...DEFAULT_ENTRY,
       party_role: workflow.partyRole,
-      party_category: party?.category || "retail",
+      party_category: party?.category || "unselected",
       base_party_name: party?.base_name || "",
       customer_name: party?.base_name || "",
       customer_display_name: party?.display_name || "",
@@ -2822,7 +3450,7 @@ function App() {
           )?.[0] || "offer"
         ]?.reportData || null,
     });
-    setActiveTab("entry");
+    setActiveTab(type === "contractor_certificate" ? "contractor" : "entry");
   }
 
   async function createBackup() {
@@ -2890,6 +3518,23 @@ function App() {
                   now={sessionNow}
                 />
                 <button
+                  type="button"
+                  className={
+                    developerDataVisible
+                      ? "icon-button compact-top-control developer-data-toggle active"
+                      : "icon-button compact-top-control developer-data-toggle"
+                  }
+                  title={
+                    developerDataVisible
+                      ? "Hide developer data"
+                      : "Show developer data"
+                  }
+                  aria-pressed={developerDataVisible}
+                  onClick={() => setDeveloperDataVisible((visible) => !visible)}
+                >
+                  <Activity size={18} />
+                </button>
+                <button
                   className="icon-button compact-top-control"
                   title={`Theme: ${themeMode}`}
                   onClick={cycleThemeMode}
@@ -2907,6 +3552,7 @@ function App() {
                 </button>
               </div>
             </header>
+            {renderDeveloperDataStrip()}
             <NoticeCenter notices={notices} onClose={closeNotice} />
             <SubscriptionBlockedNotice
               state={subscriptionState}
@@ -2931,6 +3577,10 @@ function App() {
               createBackup={createBackup}
               setMessage={setMessage}
               busy={busy}
+              updateInfo={updateInfo}
+              checkingUpdate={checkingUpdate}
+              checkForUpdates={checkForUpdates}
+              openUpdateDownload={openUpdateDownload}
               subscriptionOnly
             />
           </section>
@@ -2981,25 +3631,33 @@ function App() {
               <button
                 type="button"
                 className={
-                  updateInfo?.updateAvailable
+                  updateInfo?.updateAvailable || updateInfo?.canInstall
                     ? "update-chip available"
                     : "update-chip"
                 }
                 title={
-                  updateInfo?.updateAvailable
+                  updateInfo?.canInstall
+                    ? `Restart to install ${updateInfo.latestVersion}`
+                    : updateInfo?.status === "downloading"
+                      ? `Downloading update ${Math.round(updateInfo.downloadPercent || 0)}%`
+                      : updateInfo?.updateAvailable
                     ? `Update available: ${updateInfo.latestVersion}`
                     : checkingUpdate
                       ? "Checking for updates..."
-                      : `Current version: ${updateInfo?.currentVersion || `v${APP_DISPLAY_VERSION}`}`
+                      : updateInfo?.status === "current"
+                        ? `Application is current (${updateInfo.currentVersion})`
+                        : updateInfo?.status === "error"
+                          ? "Update check failed"
+                          : `Installed version: v${APP_DISPLAY_VERSION}`
                 }
                 onClick={
-                  updateInfo?.updateAvailable
+                  updateInfo?.updateAvailable || updateInfo?.canInstall
                     ? openUpdateDownload
                     : () => checkForUpdates(false)
                 }
                 disabled={checkingUpdate}
               >
-                {updateInfo?.updateAvailable ? (
+                {updateInfo?.updateAvailable || updateInfo?.canInstall ? (
                   <RefreshCw
                     size={14}
                     className={checkingUpdate ? "animate-spin" : ""}
@@ -3008,10 +3666,37 @@ function App() {
                   <Check size={14} />
                 )}
                 <span>
-                  {updateInfo?.updateAvailable
-                    ? `Update ${updateInfo.latestVersion} Available`
-                    : updateInfo?.currentVersion || `v${APP_DISPLAY_VERSION}`}
+                  {updateInfo?.canInstall
+                    ? `Restart to install ${updateInfo.latestVersion}`
+                    : updateInfo?.status === "downloading"
+                      ? `Downloading ${Math.round(updateInfo.downloadPercent || 0)}%`
+                      : updateInfo?.updateAvailable
+                        ? `Update ${updateInfo.latestVersion} Available`
+                        : checkingUpdate
+                          ? "Checking..."
+                          : updateInfo?.status === "current"
+                            ? updateInfo.currentVersion
+                            : updateInfo?.status === "error"
+                              ? "Update check failed"
+                              : `Installed v${APP_DISPLAY_VERSION}`}
                 </span>
+              </button>
+              <button
+                type="button"
+                className={
+                  developerDataVisible
+                    ? "icon-button compact-top-control developer-data-toggle active"
+                    : "icon-button compact-top-control developer-data-toggle"
+                }
+                title={
+                  developerDataVisible
+                    ? "Hide developer data"
+                    : "Show developer data"
+                }
+                aria-pressed={developerDataVisible}
+                onClick={() => setDeveloperDataVisible((visible) => !visible)}
+              >
+                <Activity size={18} />
               </button>
               <button
                 className="icon-button compact-top-control"
@@ -3042,6 +3727,8 @@ function App() {
               </span>
             </div>
           </header>
+
+          {renderDeveloperDataStrip()}
 
           {!showSplash && busy && <LoadingOverlay />}
 
@@ -3135,23 +3822,82 @@ function App() {
             />
           )}
           {activeTab === "contractor" && (
-            <ReportWorkspace
-              workflowId="contractor"
-              locked
-              api={api}
-              apiBase={apiBase}
-              currentUser={currentUser}
-              refreshKey={refreshKey}
-              setMessage={setMessage}
-              onOpenDocument={openCustomerDocument}
-              onCopyDocument={copyDocumentAsNew}
-              onDocumentConverted={handleDocumentSaved}
-              onEditRow={editRow}
-              onDeleteRow={deleteEntry}
-              onNewRow={newRowFromContext}
-              context={reportContexts.contractor}
-              setContext={(patch) => updateReportContext("contractor", patch)}
-            />
+            <div className="page-stack">
+              <ContractorsView
+                api={api}
+                currentUser={currentUser}
+                setMessage={setMessage}
+                refreshKey={refreshKey}
+              />
+              <section className="panel contractor-entry-launcher">
+                <div>
+                  <h2>أعمال ودفعات المقاولين</h2>
+                  <p>إدخال المستخلصات والأعمال والدفعات الخاصة بالمقاولين من هذا القسم فقط.</p>
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => newRowFromContext(WORKFLOWS.contractor, null, null)}
+                >
+                  <Plus size={17} /> إدخال مستخلص / أعمال مقاول
+                </button>
+              </section>
+              {editorContext?.workflowId === "contractor" && (
+                <EntryEditor
+                  api={api}
+                  lookups={lookups}
+                  entryForm={entryForm}
+                  setEntryForm={updateEntryForm}
+                  setEntryDirty={setEntryDirty}
+                  editingId={editingId}
+                  setEditingId={setEditingId}
+                  saveEntry={saveEntry}
+                  editorContext={editorContext}
+                  onEditRow={editRow}
+                  onDeleteRow={deleteEntry}
+                  setMessage={setMessage}
+                  onCloseContext={() => {
+                    setEditorContext(null);
+                    setEditingId(null);
+                    setEntryDirty(false);
+                    setEntryForm(variantEntryDefaults());
+                    setActiveTab("contractor");
+                  }}
+                  onBack={() => setActiveTab("contractor")}
+                  busy={busy}
+                  currentUser={currentUser}
+                  refreshAll={refreshLocalData}
+                  onDocumentSaved={handleDocumentSaved}
+                  scopeRole="contractor"
+                />
+              )}
+              <ReportWorkspace
+                workflowId="contractor"
+                locked
+                api={api}
+                apiBase={apiBase}
+                currentUser={currentUser}
+                refreshKey={refreshKey}
+                setMessage={setMessage}
+                onOpenDocument={openCustomerDocument}
+                onCopyDocument={copyDocumentAsNew}
+                onDocumentConverted={handleDocumentSaved}
+                onEditRow={editRow}
+                onDeleteRow={deleteEntry}
+                onNewRow={newRowFromContext}
+                context={reportContexts.contractor}
+                setContext={(patch) => updateReportContext("contractor", patch)}
+              />
+              <PaymentsView
+                api={api}
+                lookups={lookups}
+                currentUser={currentUser}
+                refreshKey={refreshKey}
+                setMessage={setMessage}
+                refreshAll={refreshLocalData}
+                partyRole="contractor"
+              />
+            </div>
           )}
           {activeTab === "quantities" && (
             <ProductiveQuantitiesView
@@ -3168,10 +3914,12 @@ function App() {
               currentUser={currentUser}
               refreshKey={refreshKey}
               setMessage={setMessage}
-              refreshAll={refreshAll}
+              refreshAll={refreshLocalData}
               focus={paymentFocus}
+              partyRole="customer"
             />
           )}
+          {editorContext?.workflowId !== "contractor" && (
           <div className="entry-state-host" hidden={activeTab !== "entry"}>
             <EntryEditor
               api={api}
@@ -3223,10 +3971,12 @@ function App() {
               }}
               busy={busy}
               currentUser={currentUser}
-              refreshAll={refreshAll}
+              refreshAll={refreshLocalData}
               onDocumentSaved={handleDocumentSaved}
+              scopeRole="customer"
             />
           </div>
+          )}
           {activeTab === "settings" && (
             <SettingsView
               api={api}
@@ -3247,6 +3997,12 @@ function App() {
               createBackup={createBackup}
               setMessage={setMessage}
               busy={busy}
+              updateInfo={updateInfo}
+              checkingUpdate={checkingUpdate}
+              checkForUpdates={checkForUpdates}
+              openUpdateDownload={openUpdateDownload}
+              managerEvents={managerEvents}
+              onManagerEventAction={updateManagerEventState}
             />
           )}
         </section>
@@ -3428,15 +4184,24 @@ function CompanyLoginView({ apiBase, setApiBase, login, createAccount, message, 
     () => localStorage.getItem("priceOfferLastUsername") || "",
   );
   const [password, setPassword] = useState("");
-  const [serverUrl, setServerUrl] = useState(() => cleanApiBase(apiBase) || DEFAULT_API_BASE);
+  const [serverUrl, setServerUrl] = useState(() =>
+    safeApiBaseForCurrentPage(apiBase, DEFAULT_API_BASE),
+  );
   const [serverBusy, setServerBusy] = useState(false);
   const [createDraft, setCreateDraft] = useState({
     company_name: "",
     contact_name: "",
     email: "",
     phone: "",
+    address: "Cairo, Egypt",
+    website: "",
     user_name: "",
     password: "",
+    data_folder: "",
+    local_port: String(DEFAULT_LOCAL_PORT),
+    manager_api_base: MANAGER_PUBLIC_URL,
+    database_provider: "local",
+    remote_database_url: "",
   });
   const [error, setError] = useState("");
   const serverCandidates = useMemo(
@@ -3447,23 +4212,23 @@ function CompanyLoginView({ apiBase, setApiBase, login, createAccount, message, 
         DEFAULT_API_BASE,
         `http://127.0.0.1:${DEFAULT_LOCAL_PORT}`,
         `http://localhost:${DEFAULT_LOCAL_PORT}`,
-        MANAGER_PUBLIC_URL,
       ]
         .map(cleanApiBase)
         .filter(Boolean)
+        .filter(isApiBaseUsableOnCurrentPage)
         .filter((value, index, all) => all.indexOf(value) === index),
     [serverUrl],
   );
 
   useEffect(() => {
-    setServerUrl(cleanApiBase(apiBase) || DEFAULT_API_BASE);
+    setServerUrl(safeApiBaseForCurrentPage(apiBase, DEFAULT_API_BASE));
   }, [apiBase]);
 
   async function submit(event) {
     event.preventDefault();
     setError("");
     try {
-      const cleanServer = cleanApiBase(serverUrl) || DEFAULT_API_BASE;
+      const cleanServer = safeApiBaseForCurrentPage(serverUrl, apiBase || DEFAULT_API_BASE);
       setApiBase?.(cleanServer);
       await login(
         {
@@ -3487,12 +4252,15 @@ function CompanyLoginView({ apiBase, setApiBase, login, createAccount, message, 
       setCompanyName(createDraft.company_name);
       setName(createDraft.user_name);
       setPassword(createDraft.password);
-      const nextServer =
-        cleanApiBase(result?.server?.serverUrl || result?.server?.localUrl) ||
-        cleanApiBase(apiBase) ||
-        DEFAULT_API_BASE;
+      const currentMode = connectionModeForApiBase(apiBase);
+      const nextServer = safeApiBaseForCurrentPage(
+        currentMode === "remote"
+          ? apiBase
+          : result?.server?.serverUrl || result?.server?.localUrl,
+        apiBase || DEFAULT_API_BASE,
+      );
       setServerUrl(nextServer);
-      setApiBase?.(nextServer);
+      setApiBase?.(nextServer, { connectionMode: currentMode });
       await login(
         {
           username: createDraft.user_name,
@@ -3511,15 +4279,23 @@ function CompanyLoginView({ apiBase, setApiBase, login, createAccount, message, 
     setCreateDraft((current) => ({ ...current, [key]: value }));
   }
 
+  async function chooseCreateDataFolder() {
+    const picked = await window.priceOfferDesktop?.chooseDirectory?.();
+    if (picked) updateCreateDraft("data_folder", picked);
+  }
+
   async function startLocalServer() {
     if (!window.priceOfferDesktop?.startLocalServer) return;
     setServerBusy(true);
     setError("");
     try {
       const info = await window.priceOfferDesktop.startLocalServer();
-      const next = cleanApiBase(info?.serverUrl || info?.apiBase || info?.localUrl || DEFAULT_API_BASE);
+      const next = safeApiBaseForCurrentPage(
+        info?.serverUrl || info?.apiBase || info?.localUrl,
+        apiBase || DEFAULT_API_BASE,
+      );
       setServerUrl(next);
-      setApiBase?.(next);
+      setApiBase?.(next, { connectionMode: "local" });
       setError(info?.message || "Local server is running.");
     } catch (serverError) {
       setError(`Could not start local server: ${serverError.message}`);
@@ -3647,6 +4423,21 @@ function CompanyLoginView({ apiBase, setApiBase, login, createAccount, message, 
                 autoComplete="tel"
               />
             </Field>
+            <Field label="Company address">
+              <textarea
+                value={createDraft.address}
+                onChange={(event) => updateCreateDraft("address", event.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Website">
+              <input
+                dir="ltr"
+                value={createDraft.website}
+                onChange={(event) => updateCreateDraft("website", event.target.value)}
+                autoComplete="url"
+              />
+            </Field>
             <Field label="Login name">
               <input
                 value={createDraft.user_name}
@@ -3664,6 +4455,73 @@ function CompanyLoginView({ apiBase, setApiBase, login, createAccount, message, 
                 required
               />
             </Field>
+            {connectionModeForApiBase(apiBase) !== "remote" && (
+              <>
+            <Field label="Company database folder">
+              <div className="server-path-row">
+                <input
+                  dir="ltr"
+                  value={createDraft.data_folder}
+                  onChange={(event) => updateCreateDraft("data_folder", event.target.value)}
+                  required={connectionModeForApiBase(apiBase) !== "remote"}
+                />
+                <button
+                  type="button"
+                  onClick={chooseCreateDataFolder}
+                  disabled={!window.priceOfferDesktop?.chooseDirectory}
+                >
+                  <HardDrive size={17} /> Browse
+                </button>
+              </div>
+            </Field>
+            <Field label="New local server port">
+              <input
+                dir="ltr"
+                type="text"
+                inputMode="numeric"
+                value={createDraft.local_port}
+                onChange={(event) => updateCreateDraft("local_port", event.target.value)}
+                required
+              />
+            </Field>
+              </>
+            )}
+            <Field label="Manager API URL">
+              <input
+                dir="ltr"
+                value={createDraft.manager_api_base}
+                onChange={(event) =>
+                  updateCreateDraft("manager_api_base", event.target.value)
+                }
+                autoComplete="url"
+                required
+              />
+            </Field>
+            {connectionModeForApiBase(apiBase) !== "remote" && (
+              <>
+            <Field label="Database provider">
+              <select
+                value={createDraft.database_provider}
+                onChange={(event) =>
+                  updateCreateDraft("database_provider", event.target.value)
+                }
+              >
+                <option value="local">Local SQLite</option>
+                <option value="remote">Remote URL / tunnel</option>
+              </select>
+            </Field>
+            <Field label="Remote database URL">
+              <input
+                dir="ltr"
+                value={createDraft.remote_database_url}
+                onChange={(event) =>
+                  updateCreateDraft("remote_database_url", event.target.value)
+                }
+                autoComplete="url"
+              />
+            </Field>
+              </>
+            )}
             <button className="primary" disabled={busy}>
               <UserPlus size={18} /> Create account
             </button>
@@ -3680,7 +4538,9 @@ function LoginView({ apiBase, setApiBase, login, message, busy }) {
     () => localStorage.getItem("priceOfferLastUsername") || "",
   );
   const [password, setPassword] = useState("");
-  const [serverUrl, setServerUrl] = useState(() => cleanApiBase(apiBase) || DEFAULT_API_BASE);
+  const [serverUrl, setServerUrl] = useState(() =>
+    safeApiBaseForCurrentPage(apiBase, DEFAULT_API_BASE),
+  );
   const [serverBusy, setServerBusy] = useState(false);
   const [error, setError] = useState("");
   const serverCandidates = useMemo(
@@ -3691,23 +4551,23 @@ function LoginView({ apiBase, setApiBase, login, message, busy }) {
         DEFAULT_API_BASE,
         `http://127.0.0.1:${DEFAULT_LOCAL_PORT}`,
         `http://localhost:${DEFAULT_LOCAL_PORT}`,
-        MANAGER_PUBLIC_URL,
       ]
         .map(cleanApiBase)
         .filter(Boolean)
+        .filter(isApiBaseUsableOnCurrentPage)
         .filter((value, index, all) => all.indexOf(value) === index),
     [serverUrl],
   );
 
   useEffect(() => {
-    setServerUrl(cleanApiBase(apiBase) || DEFAULT_API_BASE);
+    setServerUrl(safeApiBaseForCurrentPage(apiBase, DEFAULT_API_BASE));
   }, [apiBase]);
 
   async function submit(event) {
     event.preventDefault();
     setError("");
     try {
-      const cleanServer = cleanApiBase(serverUrl) || DEFAULT_API_BASE;
+      const cleanServer = safeApiBaseForCurrentPage(serverUrl, apiBase || DEFAULT_API_BASE);
       setApiBase?.(cleanServer);
       await login({ username: name, password, apiBase: cleanServer }, cleanServer);
     } catch (loginError) {
@@ -3721,9 +4581,12 @@ function LoginView({ apiBase, setApiBase, login, message, busy }) {
     setError("");
     try {
       const info = await window.priceOfferDesktop.startLocalServer();
-      const next = cleanApiBase(info?.serverUrl || info?.apiBase || info?.localUrl || DEFAULT_API_BASE);
+      const next = safeApiBaseForCurrentPage(
+        info?.serverUrl || info?.apiBase || info?.localUrl,
+        apiBase || DEFAULT_API_BASE,
+      );
       setServerUrl(next);
-      setApiBase?.(next);
+      setApiBase?.(next, { connectionMode: "local" });
       setError(info?.message || "Local server is running.");
     } catch (serverError) {
       setError(`تعذر تشغيل السيرفر المحلي: ${serverError.message}`);
@@ -4076,24 +4939,24 @@ function RemovedOwnerPanel({
                     </td>
                     <td>
                       <input
-                        type="number"
-                        min="1"
+                        type="text"
+                        inputMode="numeric"
                         value={plan.users || 1}
                         onChange={(event) => updatePlan(index, "users", event.target.value)}
                       />
                     </td>
                     <td>
                       <input
-                        type="number"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
                         value={plan.monthly || 0}
                         onChange={(event) => updatePlan(index, "monthly", event.target.value)}
                       />
                     </td>
                     <td>
                       <input
-                        type="number"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
                         value={plan.annually || 0}
                         onChange={(event) => updatePlan(index, "annually", event.target.value)}
                       />
@@ -4241,6 +5104,231 @@ function RemovedOwnerPanel({
         </div>
       </section>
     </div>
+  );
+}
+
+function ManagerEventsAdmin({ api, ownerName, adminPassword, setMessage }) {
+  const emptyDraft = {
+    event_type: "information",
+    title: "",
+    message: "",
+    starts_at: "",
+    expires_at: "",
+    target_users: "",
+    target_companies: "",
+    backgroundColor: "#eef6ff",
+    color: "#17212b",
+    borderColor: "#4387d8",
+    offer_price: "",
+    offer_details: "",
+    in_app_enabled: true,
+    windows_enabled: false,
+    active: true,
+  };
+  const [events, setEvents] = useState([]);
+  const [draft, setDraft] = useState(emptyDraft);
+  const [busy, setBusy] = useState(false);
+
+  const authQuery = new URLSearchParams({
+    login: ownerName || "",
+    password: adminPassword || "",
+  });
+
+  async function loadEvents() {
+    if (!ownerName || !adminPassword) return;
+    try {
+      const data = await api.request(`/api/manager/events?${authQuery.toString()}`);
+      setEvents(data?.events || []);
+    } catch (error) {
+      setMessage?.(`Could not load manager events: ${error.message}`);
+    }
+  }
+
+  useEffect(() => {
+    loadEvents();
+  }, [ownerName, adminPassword]);
+
+  async function createEvent(event) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const created = await api.request("/api/manager/events", {
+        method: "POST",
+        body: JSON.stringify({
+          login: ownerName,
+          password: adminPassword,
+          event_type: draft.event_type,
+          title: draft.title,
+          message: draft.message,
+          starts_at: draft.starts_at ? new Date(draft.starts_at).toISOString() : "",
+          expires_at: draft.expires_at ? new Date(draft.expires_at).toISOString() : "",
+          target_users: draft.target_users,
+          target_companies: draft.target_companies,
+          style: {
+            backgroundColor: draft.backgroundColor,
+            color: draft.color,
+            borderColor: draft.borderColor,
+          },
+          offer_price: draft.offer_price,
+          offer_details: draft.offer_details,
+          in_app_enabled: draft.in_app_enabled,
+          windows_enabled: draft.windows_enabled,
+          active: draft.active,
+          created_by: ownerName,
+        }),
+      });
+      setEvents((current) => [created, ...current]);
+      setDraft(emptyDraft);
+      setMessage?.("Manager event created and ready for targeted users.");
+    } catch (error) {
+      setMessage?.(`Could not create manager event: ${error.message}`);
+    } finally {
+      setBusy(false);
+      restoreInputInteractivity();
+    }
+  }
+
+  async function toggleEvent(event) {
+    setBusy(true);
+    try {
+      const updated = await api.request(`/api/manager/events/${event.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          login: ownerName,
+          password: adminPassword,
+          active: !event.active,
+        }),
+      });
+      setEvents((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+    } finally {
+      setBusy(false);
+      restoreInputInteractivity();
+    }
+  }
+
+  return (
+    <section className="manager-admin-panel wide manager-events-admin">
+      <h3>Notifications, warnings, and offers</h3>
+      <form className="form-grid manager-event-form" onSubmit={createEvent}>
+        <Field label="Event type">
+          <select
+            value={draft.event_type}
+            onChange={(event) => setDraft({ ...draft, event_type: event.target.value })}
+          >
+            <option value="information">Information</option>
+            <option value="warning">Warning</option>
+            <option value="offer">Offer</option>
+          </select>
+        </Field>
+        <Field label="Custom title">
+          <input
+            required
+            value={draft.title}
+            onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+          />
+        </Field>
+        <Field label="Message / details">
+          <textarea
+            required
+            value={draft.message}
+            onChange={(event) => setDraft({ ...draft, message: event.target.value })}
+          />
+        </Field>
+        <Field label="Start date/time (optional)">
+          <input
+            type="datetime-local"
+            value={draft.starts_at}
+            onChange={(event) => setDraft({ ...draft, starts_at: event.target.value })}
+          />
+        </Field>
+        <Field label="Expiry date/time (optional)">
+          <input
+            type="datetime-local"
+            value={draft.expires_at}
+            onChange={(event) => setDraft({ ...draft, expires_at: event.target.value })}
+          />
+        </Field>
+        <Field label="Target users (comma separated; blank = all)">
+          <input
+            value={draft.target_users}
+            onChange={(event) => setDraft({ ...draft, target_users: event.target.value })}
+          />
+        </Field>
+        <Field label="Target companies (comma separated; blank = all)">
+          <input
+            value={draft.target_companies}
+            onChange={(event) =>
+              setDraft({ ...draft, target_companies: event.target.value })
+            }
+          />
+        </Field>
+        <div className="manager-event-color-grid">
+          {[
+            ["backgroundColor", "Background"],
+            ["color", "Text"],
+            ["borderColor", "Border"],
+          ].map(([key, label]) => (
+            <Field key={key} label={label}>
+              <input
+                type="color"
+                value={draft[key]}
+                onChange={(event) => setDraft({ ...draft, [key]: event.target.value })}
+              />
+            </Field>
+          ))}
+        </div>
+        {draft.event_type === "offer" && (
+          <>
+            <Field label="Offer price / value">
+              <input
+                value={draft.offer_price}
+                onChange={(event) => setDraft({ ...draft, offer_price: event.target.value })}
+              />
+            </Field>
+            <Field label="Offer-specific details">
+              <input
+                value={draft.offer_details}
+                onChange={(event) => setDraft({ ...draft, offer_details: event.target.value })}
+              />
+            </Field>
+          </>
+        )}
+        <div className="manager-event-flags">
+          {[
+            ["in_app_enabled", "In-app notification"],
+            ["windows_enabled", "Windows notification"],
+            ["active", "Active"],
+          ].map(([key, label]) => (
+            <label key={key}>
+              <input
+                type="checkbox"
+                checked={!!draft[key]}
+                onChange={(event) => setDraft({ ...draft, [key]: event.target.checked })}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+        <button type="submit" className="primary" disabled={busy}>
+          <Send size={16} /> Create and send event
+        </button>
+      </form>
+      <div className="manager-event-admin-list">
+        {events.map((event) => (
+          <article key={event.id}>
+            <div>
+              <strong>{event.title}</strong>
+              <span>{event.event_type} · {event.active ? "active" : "inactive"}</span>
+            </div>
+            <button type="button" onClick={() => toggleEvent(event)} disabled={busy}>
+              {event.active ? "Deactivate" : "Activate"}
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -4741,8 +5829,8 @@ function ManagerPortal({ api, apiBase, setApiBase, setMessage, message }) {
               </Field>
               <Field label="Users">
                 <input
-                  type="number"
-                  min="1"
+                  type="text"
+                  inputMode="numeric"
                   value={form.requested_users}
                   onChange={(event) => updateForm("requested_users", event.target.value)}
                 />
@@ -5021,6 +6109,13 @@ function ManagerPortal({ api, apiBase, setApiBase, setMessage, message }) {
               </div>
             </form>
 
+            <ManagerEventsAdmin
+              api={api}
+              ownerName={ownerName}
+              adminPassword={adminPassword}
+              setMessage={setMessage}
+            />
+
             <section className="manager-admin-panel wide">
               <h3>Companies</h3>
               <div className="table-scroll compact-table">
@@ -5203,16 +6298,223 @@ function ManagerPortal({ api, apiBase, setApiBase, setMessage, message }) {
   );
 }
 
+function DashboardBarChart({ title, rows = [], labelKey, valueKey, color = "#4387d8" }) {
+  const max = Math.max(1, ...rows.map((row) => Number(row[valueKey] || 0)));
+  return (
+    <section className="dashboard-chart-card">
+      <h3>{title}</h3>
+      <div className="dashboard-bars">
+        {!rows.length && <div className="empty-state">لا توجد بيانات في هذه الفترة.</div>}
+        {rows.slice(-12).map((row, index) => (
+          <div className="dashboard-bar-row" key={`${row[labelKey]}-${index}`}>
+            <span title={String(row[labelKey] || "")}>{row[labelKey]}</span>
+            <div>
+              <i
+                style={{
+                  width: `${Math.max(2, (Number(row[valueKey] || 0) / max) * 100)}%`,
+                  background: row.color || color,
+                }}
+              />
+            </div>
+            <strong>{money(row[valueKey])}</strong>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DashboardCircle({ label, value, tone }) {
+  return (
+    <div className={`dashboard-circle ${tone}`}>
+      <div>
+        <strong>{money(value)}</strong>
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
+function DashboardAnalytics({ data, range, setRange, from, setFrom, to, setTo }) {
+  if (!data) return <section className="panel"><LoadingOverlay compact /></section>;
+  const totals = data.totals || {};
+  const paidVsUnpaid = [
+    { label: "مدفوع من العملاء", amount: totals.paid || 0, color: "#20a464" },
+    { label: "مطلوب سداده - الفواتير المعتمدة", amount: totals.invoiced || 0, color: "#dc3f45" },
+  ];
+  return (
+    <section className="panel dashboard-analytics-panel">
+      <div className="panel-head">
+        <h2>
+          <Activity size={19} /> التحليلات المالية والتشغيلية
+        </h2>
+        <div className="dashboard-range-filters">
+          {[
+            ["lifetime", "كل المدة"],
+            ["year", "السنة الحالية"],
+            ["month", "الشهر الحالي"],
+            ["custom", "فترة مخصصة"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={range === value ? "active" : ""}
+              onClick={() => setRange(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {range === "custom" && (
+        <div className="dashboard-custom-range">
+          <Field label="من">
+            <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+          </Field>
+          <Field label="إلى">
+            <input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+          </Field>
+        </div>
+      )}
+      <div className="dashboard-circle-row">
+        <DashboardCircle
+          label="المدفوع من العملاء"
+          value={totals.paid}
+          tone="paid"
+        />
+        <DashboardCircle
+          label="إجمالي الفواتير المعتمدة المطلوب سدادها"
+          value={totals.invoiced}
+          tone="due"
+        />
+      </div>
+      <div className="metric-grid dashboard-financial-metrics">
+        <MetricCard label="إجمالي المدفوع من العملاء" value={money(totals.paid)} />
+        <MetricCard label="المطلوب سداده - الفواتير المعتمدة" value={money(totals.invoiced)} />
+        <MetricCard label="إجمالي غير المدفوع الحقيقي" value={money(totals.unpaid)} />
+        <MetricCard label="المتأخر غير المدفوع" value={money(totals.overdue)} />
+        <MetricCard label="إجمالي الفواتير" value={money(totals.invoiced)} />
+        <MetricCard label="مدفوع مدى الحياة" value={money(data.lifetime?.paid)} />
+        <MetricCard label="مدفوع السنة" value={money(data.yearly?.paid)} />
+        <MetricCard label="مدفوع الشهر" value={money(data.monthly?.paid)} />
+      </div>
+      <div className="dashboard-chart-grid">
+        <DashboardBarChart
+          title="المدفوع مقابل إجمالي الفواتير المعتمدة"
+          rows={paidVsUnpaid}
+          labelKey="label"
+          valueKey="amount"
+          color="#2f9e64"
+        />
+        <DashboardBarChart
+          title="الفواتير حسب الشهر"
+          rows={data.invoices_by_month}
+          labelKey="month"
+          valueKey="amount"
+          color="#4387d8"
+        />
+        <DashboardBarChart
+          title="المدفوعات حسب الشهر"
+          rows={data.payments_by_month}
+          labelKey="month"
+          valueKey="amount"
+          color="#2f9e64"
+        />
+        <DashboardBarChart
+          title="اتجاه التحصيل النقدي"
+          rows={data.cash_collection_trend}
+          labelKey="month"
+          valueKey="amount"
+          color="#8e5bd9"
+        />
+        <DashboardBarChart
+          title="أعمار الديون"
+          rows={data.aging}
+          labelKey="label"
+          valueKey="amount"
+          color="#d28a00"
+        />
+        <DashboardBarChart
+          title="غير المدفوع حسب العميل"
+          rows={data.customers}
+          labelKey="customer"
+          valueKey="unpaid"
+          color="#d94b4b"
+        />
+        <DashboardBarChart
+          title="المدفوع حسب العميل"
+          rows={data.customers}
+          labelKey="customer"
+          valueKey="paid"
+          color="#2f9e64"
+        />
+      </div>
+    </section>
+  );
+}
+
 function Dashboard(props) {
   const { api, setMessage, onOpenDocument, focus, ...workspaceProps } = props;
+  const [analyticsRange, setAnalyticsRange] = useState("lifetime");
+  const [analyticsFrom, setAnalyticsFrom] = useState("");
+  const [analyticsTo, setAnalyticsTo] = useState("");
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const dashboardWorkflow = ["offer", "invoice", "contractor"].includes(
     workspaceProps.context?.workflowId,
   )
     ? workspaceProps.context.workflowId
     : "offer";
 
+  useEffect(() => {
+    let cancelled = false;
+    const query = new URLSearchParams({ range: analyticsRange });
+    if (analyticsRange === "custom") {
+      if (analyticsFrom) query.set("from", analyticsFrom);
+      if (analyticsTo) query.set("to", analyticsTo);
+    }
+    api.request(`/api/dashboard/analytics?${query.toString()}`)
+      .then((data) => {
+        if (!cancelled) setAnalytics(data);
+      })
+      .catch((error) => {
+        if (!cancelled) setMessage(`تعذر تحميل تحليلات لوحة التحكم: ${error.message}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    analyticsFrom,
+    analyticsRange,
+    analyticsTo,
+    api,
+    setMessage,
+    workspaceProps.refreshKey,
+  ]);
+
   return (
     <div className="page-stack">
+      <button
+        type="button"
+        className="dashboard-analytics-toggle"
+        aria-expanded={analyticsOpen}
+        onClick={() => setAnalyticsOpen((current) => !current)}
+      >
+        <Activity size={19} />
+        التحليلات المالية والتشغيلية
+        <span>{analyticsOpen ? "إخفاء" : "عرض"}</span>
+      </button>
+      {analyticsOpen && (
+        <DashboardAnalytics
+          data={analytics}
+          range={analyticsRange}
+          setRange={setAnalyticsRange}
+          from={analyticsFrom}
+          setFrom={setAnalyticsFrom}
+          to={analyticsTo}
+          setTo={setAnalyticsTo}
+        />
+      )}
       <CustomerExplorer
         api={api}
         setMessage={setMessage}
@@ -5540,6 +6842,215 @@ function CustomerExplorer({ api, setMessage, onOpenDocument, focus }) {
   );
 }
 
+function ContractorsView({ api, currentUser, setMessage, refreshKey }) {
+  const empty = {
+    base_name: "",
+    display_name: "",
+    phone: "",
+    email: "",
+    address: "",
+    tax_no: "",
+    notes: "",
+  };
+  const [rows, setRows] = useState([]);
+  const [search, setSearch] = useState("");
+  const [draft, setDraft] = useState(empty);
+  const [editingId, setEditingId] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const canManage = canUser(currentUser, "can_edit_company_settings");
+
+  const load = useCallback(async () => {
+    const query = new URLSearchParams({ role: "contractor" });
+    if (search) query.set("q", search);
+    const data = await api.request(`/api/parties?${query.toString()}`);
+    setRows(data || []);
+  }, [api, search]);
+
+  useEffect(() => {
+    load().catch((error) => setMessage(`تعذر تحميل المقاولين: ${error.message}`));
+  }, [load, refreshKey, setMessage]);
+
+  async function save(event) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const row = await api.request(
+        editingId ? `/api/parties/${editingId}` : "/api/parties",
+        {
+          method: editingId ? "PUT" : "POST",
+          body: JSON.stringify({
+            ...draft,
+            role: "contractor",
+            category: "corporate",
+            requester_user_id: currentUser?.id,
+          }),
+        },
+      );
+      setRows((current) =>
+        editingId
+          ? current.map((item) => (item.id === row.id ? row : item))
+          : [row, ...current],
+      );
+      setDraft(empty);
+      setEditingId(null);
+      setMessage(editingId ? "تم تعديل بيانات المقاول." : "تم إضافة المقاول.");
+    } catch (error) {
+      setMessage(`تعذر حفظ المقاول: ${error.message}`);
+    } finally {
+      setBusy(false);
+      restoreInputInteractivity();
+    }
+  }
+
+  async function remove(row) {
+    setBusy(true);
+    try {
+      await api.request(`/api/parties/${row.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ requester_user_id: currentUser?.id }),
+      });
+      setRows((current) => current.filter((item) => item.id !== row.id));
+      if (editingId === row.id) {
+        setEditingId(null);
+        setDraft(empty);
+      }
+      setMessage(`تم حذف سجل المقاول ${row.display_name}.`);
+    } catch (error) {
+      setMessage(`تعذر حذف المقاول: ${error.message}`);
+    } finally {
+      setBusy(false);
+      restoreInputInteractivity();
+    }
+  }
+
+  return (
+    <section className="panel contractors-management-panel">
+      <ConfirmationLayer
+        dialog={
+          pendingDelete
+            ? {
+                title: "حذف سجل المقاول",
+                message: `سيتم حذف سجل ${pendingDelete.display_name}. المستندات القديمة ستحتفظ بالاسم المسجل داخلها.`,
+                confirmLabel: "حذف المقاول",
+                danger: true,
+              }
+            : null
+        }
+        onResult={(confirmed) => {
+          const row = pendingDelete;
+          setPendingDelete(null);
+          if (confirmed) remove(row);
+          else restoreInputInteractivity();
+        }}
+      />
+      <div className="panel-head">
+        <h2>
+          <Building2 size={19} /> إدارة المقاولين
+        </h2>
+        <div className="inline-field contractor-search">
+          <Search size={16} />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="بحث بالاسم أو ID"
+          />
+        </div>
+      </div>
+      {canManage && (
+        <form className="form-grid contractor-entry-form" onSubmit={save}>
+          {[
+            ["base_name", "اسم المقاول"],
+            ["display_name", "الاسم الظاهر"],
+            ["phone", "الهاتف"],
+            ["email", "البريد الإلكتروني"],
+            ["address", "العنوان"],
+            ["tax_no", "الرقم الضريبي"],
+          ].map(([key, label]) => (
+            <Field key={key} label={label}>
+              <input
+                required={key === "base_name"}
+                value={draft[key] || ""}
+                onChange={(event) => setDraft({ ...draft, [key]: event.target.value })}
+              />
+            </Field>
+          ))}
+          <Field label="ملاحظات">
+            <input
+              value={draft.notes || ""}
+              onChange={(event) => setDraft({ ...draft, notes: event.target.value })}
+            />
+          </Field>
+          <div className="action-row">
+            <button type="submit" className="primary" disabled={busy || !draft.base_name}>
+              <Save size={16} /> {editingId ? "حفظ التعديل" : "إضافة المقاول"}
+            </button>
+            {editingId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingId(null);
+                  setDraft(empty);
+                }}
+              >
+                إلغاء
+              </button>
+            )}
+          </div>
+        </form>
+      )}
+      <div className="table-scroll compact-table">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>المقاول</th>
+              <th>الهاتف</th>
+              <th>البريد</th>
+              <th>الرقم الضريبي</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td>{row.id}</td>
+                <td>{row.display_name}</td>
+                <td dir="ltr">{row.phone || "-"}</td>
+                <td dir="ltr">{row.email || "-"}</td>
+                <td>{row.tax_no || "-"}</td>
+                <td className="row-actions">
+                  {canManage && (
+                    <>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        onClick={() => {
+                          setEditingId(row.id);
+                          setDraft({ ...empty, ...row });
+                        }}
+                      >
+                        <Pencil size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button danger"
+                        onClick={() => setPendingDelete(row)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function ReportWorkspace({
   workflowId,
   locked = false,
@@ -5600,6 +7111,7 @@ function ReportWorkspace({
   const [previewUrl, setPreviewUrl] = useState(context.previewUrl || "");
   const [previewKey, setPreviewKey] = useState(context.previewKey || "");
   const [busy, setBusy] = useState(false);
+  const [pendingDocumentDelete, setPendingDocumentDelete] = useState(null);
   const isStatementWorkflow = currentWorkflow === "statement";
   const isContractorWorkflow = currentWorkflow === "contractor";
   const documentSearchId = firstDocumentToken(documentSearch);
@@ -6164,6 +7676,41 @@ function ReportWorkspace({
     }
   }
 
+  async function deleteSelectedDocument(document = selectedDocument) {
+    if (!document?.id) return;
+    setBusy(true);
+    try {
+      await api.request(`/api/documents/${document.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ requester_user_id: currentUser?.id }),
+      });
+      setDocuments((current) =>
+        current.filter((item) => String(item.id) !== String(document.id)),
+      );
+      setDocumentId("");
+      setDocumentSearch("");
+      setReportData(null);
+      setPreviewUrl("");
+      setPreviewKey("");
+      setContext({
+        documentId: "",
+        documentSearch: "",
+        reportData: null,
+        previewUrl: "",
+        previewKey: "",
+      });
+      setMessage(
+        `تم حذف المستند ${document.operation_no || document.document_no || document.id} وكل البنود المرتبطة به نهائياً.`,
+        { type: "success", sticky: true },
+      );
+    } catch (error) {
+      setMessage(`تعذر حذف المستند: ${error.message}`, { type: "error" });
+    } finally {
+      setBusy(false);
+      restoreInputInteractivity();
+    }
+  }
+
   async function exportReport(kind, options = {}) {
     if (!canRunReport) return;
     setBusy(true);
@@ -6188,6 +7735,25 @@ function ReportWorkspace({
         response.headers.get("Content-Disposition"),
         `${workflow.label}.${extension}`,
       );
+      if (window.priceOfferDesktop?.saveReportFile) {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const saved = await window.priceOfferDesktop.saveReportFile({
+          bytes,
+          fileName,
+          format: extension,
+          reportType: currentWorkflow || workflow.reportType,
+        });
+        if (saved?.canceled) {
+          setMessage("تم إلغاء حفظ التقرير.", { type: "warning" });
+          return;
+        }
+        if (!saved?.savedPath) throw new Error("The desktop app returned no saved file path.");
+        setMessage(
+          `تم حفظ ${kind === "pdf" ? "PDF" : "Excel XLSX"} بنجاح: ${saved.savedPath}`,
+          { type: "success", sticky: true },
+        );
+        return;
+      }
       if (await isNativeApp()) {
         if (options.share && extension === "pdf") {
           await shareNativeReport(blob, fileName);
@@ -6235,6 +7801,24 @@ function ReportWorkspace({
           : "panel report-workspace"
       }
     >
+      <ConfirmationLayer
+        dialog={
+          pendingDocumentDelete
+            ? {
+                title: "حذف المستند نهائياً",
+                message: `تحذير: سيتم حذف المستند ${pendingDocumentDelete.operation_no || pendingDocumentDelete.document_no || pendingDocumentDelete.id} وكل البنود المرتبطة به. لا يمكن التراجع عن هذا الإجراء.`,
+                confirmLabel: "حذف نهائي",
+                danger: true,
+              }
+            : null
+        }
+        onResult={(confirmed) => {
+          const document = pendingDocumentDelete;
+          setPendingDocumentDelete(null);
+          if (confirmed) deleteSelectedDocument(document);
+          else restoreInputInteractivity();
+        }}
+      />
       {busy && <LoadingOverlay compact />}
       {(!hideHeading || !locked) && (
         <div className="panel-head">
@@ -6585,6 +8169,18 @@ function ReportWorkspace({
               >
                 <Pencil size={18} /> تعديل
               </button>
+              <button
+                type="button"
+                className="danger"
+                title="حذف المستند المحدد نهائياً"
+                onClick={() => setPendingDocumentDelete(selectedDocument)}
+                disabled={
+                  !selectedDocument ||
+                  !canUser(currentUser, "can_change_status")
+                }
+              >
+                <Trash2 size={18} /> حذف المستند
+              </button>
             </>
           )}
           <button
@@ -6661,8 +8257,8 @@ function ReportWorkspace({
           </Field>
           <Field label="قيمة الخصم">
             <input
-              type="number"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               value={documentDraft.discount_value}
               onChange={(event) =>
                 setDocumentDraft({
@@ -6745,7 +8341,7 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
     ["12", "ديسمبر"],
   ];
   const unitGroups = rows.reduce((groups, row) => {
-    const key = row.unit_label || row.unit || "بدون وحدة";
+    const key = row.unit_label || row.unit || "عام";
     groups[key] = (groups[key] || 0) + Number(row.quantity || 0);
     return groups;
   }, {});
@@ -6821,6 +8417,23 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
         response.headers.get("Content-Disposition"),
         fallback,
       );
+      if (window.priceOfferDesktop?.saveReportFile) {
+        const saved = await window.priceOfferDesktop.saveReportFile({
+          bytes: new Uint8Array(await blob.arrayBuffer()),
+          fileName,
+          format: extension,
+          reportType: "productive-quantities",
+        });
+        if (saved?.canceled) {
+          setMessage?.("تم إلغاء حفظ تقرير الكميات المنتجة.");
+          return;
+        }
+        setMessage?.(`تم حفظ تقرير الكميات المنتجة: ${saved.savedPath}`, {
+          type: "success",
+          sticky: true,
+        });
+        return;
+      }
       downloadBlob(blob, fileName);
       setMessage?.(`تم تنزيل تقرير الكميات المنتجة: ${fileName}`);
     } catch (error) {
@@ -6875,9 +8488,8 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
           </div>
           <Field label="السنة">
             <input
-              type="number"
-              min="2000"
-              max="2100"
+              type="text"
+              inputMode="numeric"
               value={year}
               onChange={(event) => setYear(event.target.value)}
             />
@@ -6996,9 +8608,11 @@ function PaymentsView({
   setMessage,
   refreshAll,
   focus,
+  partyRole = "customer",
 }) {
+  const isContractorMode = partyRole === "contractor";
   const [form, setForm] = useState({
-    payment_type: "income",
+    payment_type: isContractorMode ? "out" : "income",
     party_category: "retail",
     base_party_name: "",
     project: "",
@@ -7015,8 +8629,7 @@ function PaymentsView({
   const [editingPayment, setEditingPayment] = useState(null);
   const [appliedFocusKey, setAppliedFocusKey] = useState("");
   const [busy, setBusy] = useState(false);
-  const partyOptions =
-    form.payment_type === "out" ? lookups.contractors : lookups.customers;
+  const partyOptions = isContractorMode ? lookups.contractors : lookups.customers;
   const customerNames = uniqueValues(
     (partyOptions || [])
       .filter(
@@ -7112,7 +8725,14 @@ function PaymentsView({
     async function loadPayments() {
       try {
         const data = await api.request("/api/payments?limit=2000");
-        if (!cancelled) setRecent(data.rows || []);
+        if (!cancelled)
+          setRecent(
+            (data.rows || []).filter((row) =>
+              isContractorMode
+                ? row.party_role === "contractor"
+                : row.party_role !== "contractor",
+            ),
+          );
       } catch (error) {
         if (!cancelled) setMessage(`تعذر تحميل الدفعات: ${error.message}`);
       }
@@ -7121,17 +8741,16 @@ function PaymentsView({
     return () => {
       cancelled = true;
     };
-  }, [api, refreshKey, setMessage]);
+  }, [api, refreshKey, setMessage, isContractorMode]);
 
   useEffect(() => {
     let cancelled = false;
     async function loadPaymentCustomers() {
       try {
-        const [customers, contractors] = await Promise.all([
-          api.request("/api/payment-customers?role=customer"),
-          api.request("/api/payment-customers?role=contractor"),
-        ]);
-        if (!cancelled) setPaymentCustomers([...(customers || []), ...(contractors || [])]);
+        const rows = await api.request(
+          `/api/payment-customers?role=${isContractorMode ? "contractor" : "customer"}`,
+        );
+        if (!cancelled) setPaymentCustomers(rows || []);
       } catch (error) {
         if (!cancelled)
           setMessage(`تعذر تحميل عملاء الدفعات: ${error.message}`);
@@ -7141,7 +8760,7 @@ function PaymentsView({
     return () => {
       cancelled = true;
     };
-  }, [api, refreshKey, setMessage]);
+  }, [api, refreshKey, setMessage, isContractorMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -7152,7 +8771,7 @@ function PaymentsView({
         return;
       }
       const query = new URLSearchParams({
-        role: form.payment_type === "out" ? "contractor" : "customer",
+        role: isContractorMode ? "contractor" : "customer",
         name,
       });
       if (form.party_category && form.party_category !== "unselected")
@@ -7175,7 +8794,7 @@ function PaymentsView({
     return () => {
       cancelled = true;
     };
-  }, [api, form.base_party_name, form.party_category, form.payment_type, form.project]);
+  }, [api, form.base_party_name, form.party_category, form.project, isContractorMode]);
 
   function update(key, value) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -7194,7 +8813,7 @@ function PaymentsView({
   function resetPaymentForm({ keepCustomer = true } = {}) {
     setEditingPayment(null);
     setForm((current) => ({
-      payment_type: keepCustomer ? current.payment_type : "income",
+      payment_type: isContractorMode ? "out" : "income",
       party_category: keepCustomer ? current.party_category : "retail",
       base_party_name: keepCustomer ? current.base_party_name : "",
       project: keepCustomer ? current.project : "",
@@ -7268,7 +8887,7 @@ function PaymentsView({
     }
     setBusy(true);
     try {
-      const isOut = form.payment_type === "out";
+      const isOut = isContractorMode;
       const paymentLabel = isOut ? "\u062e\u0635\u0645" : "\u062a\u062d\u0635\u064a\u0644";
       const paymentPayload = {
         ...(editingPayment || {}),
@@ -7347,23 +8966,10 @@ function PaymentsView({
         </div>
         <div className="form-grid">
           <Field label="نوع الحركة">
-            <select
-              autoFocus
-              value={form.payment_type}
-              onChange={(event) => {
-                const nextType = event.target.value;
-                setForm((current) => ({
-                  ...current,
-                  payment_type: nextType,
-                  base_party_name: "",
-                  project: "",
-                  building_unit: "",
-                }));
-              }}
-            >
-              <option value="income">تحصيل (عملاء)</option>
-              <option value="out">خصم (مقاولين)</option>
-            </select>
+            <input
+              value={isContractorMode ? "دفعة / خصم مقاول" : "تحصيل عميل"}
+              readOnly
+            />
           </Field>
           <Field label="التصنيف">
             <select
@@ -7371,7 +8977,8 @@ function PaymentsView({
               onChange={(event) => update("party_category", event.target.value)}
             >
               <option value="unselected">بدون تصنيف</option>
-              <option value="retail">فرد / مهندس</option>
+              <option value="retail">فرد</option>
+              <option value="engineer">مهندس</option>
               <option value="corporate">شركة</option>
             </select>
           </Field>
@@ -7405,8 +9012,8 @@ function PaymentsView({
           />
           <Field label="قيمة الدفعة">
             <input
-              type="number"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               value={form.amount}
               onChange={(event) => update("amount", event.target.value)}
               required
@@ -7545,6 +9152,7 @@ function EntryEditor({
   currentUser,
   refreshAll,
   onDocumentSaved,
+  scopeRole = "customer",
 }) {
   const [nextDoc, setNextDoc] = useState(null);
   const meta = documentTypeMeta(entryForm.document_type);
@@ -7603,6 +9211,7 @@ function EntryEditor({
       document_type: value,
       document_status: nextMeta.status,
       party_role: nextMeta.role,
+      ...(value === "price_offer" ? {} : { vat_terms_only: false }),
       ...(value === "contractor_certificate"
         ? {}
         : { source_customer_id: "", source_customer_name: "" }),
@@ -7636,6 +9245,7 @@ function EntryEditor({
         editorContext={editorContext}
         onCloseContext={onCloseContext}
         onDocumentSaved={onDocumentSaved}
+        scopeRole={scopeRole}
       />
     );
   }
@@ -7690,7 +9300,8 @@ function EntryEditor({
                   }
                 >
                   <option value="unselected">بدون تصنيف</option>
-                  <option value="retail">فرد / مهندس</option>
+                  <option value="retail">فرد</option>
+                  <option value="engineer">مهندس</option>
                   <option value="corporate">شركة</option>
                 </select>
               </Field>
@@ -7800,32 +9411,32 @@ function EntryEditor({
               </Field>
               <Field label="العدد">
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={entryForm.item_count || ""}
                   onChange={(event) => update("item_count", event.target.value)}
                 />
               </Field>
               <Field label="العرض سم">
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={entryForm.width_cm || ""}
                   onChange={(event) => update("width_cm", event.target.value)}
                 />
               </Field>
               <Field label="الارتفاع سم">
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={entryForm.height_cm || ""}
                   onChange={(event) => update("height_cm", event.target.value)}
                 />
               </Field>
               <Field label="كمية مباشرة">
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={entryForm.total_quantity || ""}
                   onChange={(event) =>
                     update("total_quantity", event.target.value)
@@ -7834,16 +9445,16 @@ function EntryEditor({
               </Field>
               <Field label="الفئة">
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={entryForm.rate || ""}
                   onChange={(event) => update("rate", event.target.value)}
                 />
               </Field>
               <Field label="سعر ثابت للوحدة">
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={entryForm.building_unit_price || ""}
                   onChange={(event) =>
                     update("building_unit_price", event.target.value)
@@ -7866,6 +9477,18 @@ function EntryEditor({
                   <span>{tax.label}</span>
                 </label>
               ))}
+              {entryForm.document_type === "price_offer" && (
+                <label className="check-tile vat-terms-only-tile">
+                  <input
+                    type="checkbox"
+                    checked={!!entryForm.vat_terms_only}
+                    onChange={(event) =>
+                      update(VAT_TERMS_ONLY_OPTION.key, event.target.checked)
+                    }
+                  />
+                  <span>{VAT_TERMS_ONLY_OPTION.label}</span>
+                </label>
+              )}
             </div>
           </section>
         </div>
@@ -7944,10 +9567,44 @@ const SMART_ROW_TEMPLATE = {
   building_unit_price: "",
 };
 
+const SMART_NUMERIC_CLIPBOARD_KEYS = new Set([
+  "item_count",
+  "width_cm",
+  "height_cm",
+  "total_quantity",
+  "rate",
+  "completion_ratio",
+  "building_unit_price",
+]);
+
+let smartGridRowSequence = 0;
+
+function nextSmartGridRowId(existingId = "") {
+  if (existingId) return `db:${existingId}`;
+  smartGridRowSequence += 1;
+  return `draft:${Date.now().toString(36)}:${smartGridRowSequence.toString(36)}`;
+}
+
+function normalizeSmartClipboardValue(value, key) {
+  return SMART_NUMERIC_CLIPBOARD_KEYS.has(key)
+    ? normalizeSmartNumericClipboardValue(value)
+    : String(value ?? "");
+}
+
 function smartRowFrom() {
   return {
     ...SMART_ROW_TEMPLATE,
+    _gridId: nextSmartGridRowId(),
+    _gridGhost: true,
     _touched: {},
+  };
+}
+
+function manualBlankSmartRow() {
+  return {
+    ...smartRowFrom(),
+    _gridGhost: false,
+    _manualBlank: true,
   };
 }
 
@@ -7955,6 +9612,8 @@ function smartRowFromExisting(row = {}) {
   return {
     ...SMART_ROW_TEMPLATE,
     _existingId: row.id || "",
+    _gridId: nextSmartGridRowId(row.id || ""),
+    _gridGhost: false,
     _originalBuildingUnit: row.building_unit || "",
     _originalFloorApartment: row.floor_apartment || "",
     work_type: row.work_type || "",
@@ -8176,6 +9835,301 @@ function calculateDraftRow(row, fixed) {
   };
 }
 
+function SmartCellTextInput({
+  value,
+  editSessionId = 0,
+  onDraftChange,
+  onCommit,
+  onBlur,
+  ...props
+}) {
+  const externalValue = String(value ?? "");
+  const [draftValue, setDraftValue] = useState(externalValue);
+  const lastExternalValueRef = useRef(externalValue);
+  const draftRef = useRef(externalValue);
+  const sessionRef = useRef(editSessionId);
+
+  useEffect(() => {
+    sessionRef.current = editSessionId;
+  }, [editSessionId]);
+
+  useEffect(() => {
+    if (externalValue === lastExternalValueRef.current) return;
+    lastExternalValueRef.current = externalValue;
+    draftRef.current = externalValue;
+    setDraftValue(externalValue);
+  }, [externalValue, editSessionId]);
+
+  return (
+    <input
+      {...props}
+      value={draftValue}
+      onChange={(event) => {
+        const startedAt = performanceStart();
+        const nextValue = event.target.value;
+        draftRef.current = nextValue;
+        setDraftValue(nextValue);
+        onDraftChange?.(nextValue, event, sessionRef.current);
+        logDevelopmentPerformance("Cell draft update", startedAt);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Backspace" || event.key === "Delete") {
+          event.stopPropagation();
+        }
+        props.onKeyDown?.(event);
+      }}
+      onBlur={(event) => {
+        onCommit?.(draftRef.current, event, sessionRef.current);
+        onBlur?.(event);
+      }}
+    />
+  );
+}
+
+function SmartMultilineInput({
+  value,
+  editSessionId = 0,
+  onDraftChange,
+  onCommit,
+  onBlur,
+  onPaste,
+  ...props
+}) {
+  const editorRef = useRef(null);
+  const lastExternalValueRef = useRef(null);
+  const draftRef = useRef(String(value || ""));
+  const sessionRef = useRef(editSessionId);
+
+  useEffect(() => {
+    sessionRef.current = editSessionId;
+  }, [editSessionId]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const next = String(value || "");
+    if (next === lastExternalValueRef.current) return;
+    lastExternalValueRef.current = next;
+    draftRef.current = next;
+    if (editor.innerText !== next) editor.innerText = next;
+  }, [value, editSessionId]);
+
+  return (
+    <div
+      {...props}
+      ref={editorRef}
+      className={`smart-cell-text-input ${props.className || ""}`.trim()}
+      contentEditable
+      suppressContentEditableWarning
+      role="textbox"
+      aria-multiline="true"
+      onInput={(event) => {
+        const startedAt = performanceStart();
+        const nextValue = event.currentTarget.innerText;
+        draftRef.current = nextValue;
+        onDraftChange?.(nextValue, event, sessionRef.current);
+        logDevelopmentPerformance("Cell draft update", startedAt);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Backspace" || event.key === "Delete") {
+          event.stopPropagation();
+        }
+        props.onKeyDown?.(event);
+      }}
+      onBlur={(event) => {
+        draftRef.current = event.currentTarget.innerText;
+        onCommit?.(draftRef.current, event, sessionRef.current);
+        onBlur?.(event);
+      }}
+      onPaste={(event) => onPaste?.(event)}
+    />
+  );
+}
+
+function ConfirmationLayer({ dialog, onResult }) {
+  if (!dialog) return null;
+  return (
+    <div
+      className={`confirmation-layer${dialog.danger ? " danger" : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirmation-layer-title"
+      dir="rtl"
+    >
+      <div className="confirmation-card">
+        <AlertTriangle size={48} />
+        <h2 id="confirmation-layer-title">{dialog.title || "تأكيد الإجراء"}</h2>
+        <p>{dialog.message}</p>
+        <div className="confirmation-actions">
+          <button type="button" onClick={() => onResult(false)} autoFocus>
+            إلغاء
+          </button>
+          <button
+            type="button"
+            className={dialog.danger ? "danger" : "primary"}
+            onClick={() => onResult(true)}
+          >
+            {dialog.confirmLabel || "تأكيد"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SmartTableSearchPanel({
+  initialQuery,
+  results,
+  currentIndex,
+  columnLabel,
+  onSearchChange,
+  onClose,
+  onPrevious,
+  onNext,
+  onJump,
+  onReplaceAll,
+}) {
+  const [query, setQuery] = useState(initialQuery || "");
+  const [replacement, setReplacement] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+    inputRef.current?.select();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => onSearchChange(query), 120);
+    return () => window.clearTimeout(timer);
+  }, [onSearchChange, query]);
+
+  const safeCurrentIndex =
+    results.length && currentIndex >= 0
+      ? Math.min(currentIndex, results.length - 1)
+      : 0;
+  const resultWindowStart = Math.max(
+    0,
+    Math.min(
+      safeCurrentIndex - 30,
+      Math.max(0, results.length - 80),
+    ),
+  );
+  const visibleResults = results.slice(
+    resultWindowStart,
+    resultWindowStart + 80,
+  );
+
+  function highlightedValue(result) {
+    const text = String(result.value || "");
+    const start = Math.max(0, result.matchRange?.start || 0);
+    const end = Math.max(start, result.matchRange?.end || start);
+    return (
+      <span className="smart-search-result-value">
+        {text.slice(0, start)}
+        <mark>{text.slice(start, end)}</mark>
+        {text.slice(end)}
+      </span>
+    );
+  }
+
+  return (
+    <section
+      className="smart-table-search-panel"
+      dir="rtl"
+      aria-label="بحث واستبدال في الجدول"
+    >
+      <div className="smart-search-head">
+        <strong>بحث في الجدول</strong>
+        <button
+          type="button"
+          className="icon-button"
+          title="إغلاق البحث"
+          onClick={onClose}
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <input
+        ref={inputRef}
+        data-smart-search-input="true"
+        value={query}
+        placeholder="اكتب النص أو الرقم المطلوب..."
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+            return;
+          }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (event.shiftKey) onPrevious();
+            else onNext();
+          }
+        }}
+      />
+      <label className="smart-search-replace-field">
+        <span>استبدال بـ:</span>
+        <input
+          value={replacement}
+          onChange={(event) => setReplacement(event.target.value)}
+        />
+      </label>
+      <div className="smart-search-actions">
+        <span>
+          {results.length
+            ? `${safeCurrentIndex + 1} من ${results.length}`
+            : "0 نتيجة"}
+        </span>
+        <button type="button" onClick={onPrevious} disabled={!results.length}>
+          السابق
+        </button>
+        <button type="button" onClick={onNext} disabled={!results.length}>
+          التالي
+        </button>
+        <button
+          type="button"
+          className="primary"
+          disabled={!query.trim() || !results.length}
+          onClick={() => onReplaceAll(query, replacement)}
+        >
+          استبدال الكل
+        </button>
+      </div>
+      {!!results.length && (
+        <div className="smart-search-results" role="list">
+          {visibleResults.map((result, windowIndex) => {
+            const resultIndex = resultWindowStart + windowIndex;
+            return (
+              <article
+                key={`${result.rowId}:${result.columnKey}`}
+                className={
+                  resultIndex === safeCurrentIndex ? "current-result" : ""
+                }
+                role="listitem"
+              >
+                <div>
+                  <strong>
+                    الصف {result.visibleRowNumber} —{" "}
+                    {columnLabel(result.columnKey)}
+                  </strong>
+                  {highlightedValue(result)}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onJump(result, resultIndex)}
+                >
+                  انتقال
+                </button>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SmartEntryEditor({
   api,
   lookups,
@@ -8192,29 +10146,198 @@ function SmartEntryEditor({
   editorContext,
   onCloseContext,
   onDocumentSaved,
+  scopeRole = "customer",
 }) {
+  const gridRenderStartedAt = performanceStart();
   const [rows, setRows] = useState([smartRowFrom(entryForm)]);
   const [deletedRowIds, setDeletedRowIds] = useState([]);
   const [historyRows, setHistoryRows] = useState([]);
   const [previewData, setPreviewData] = useState(null);
   const [saving, setSaving] = useState(false);
   const [activeCell, setActiveCell] = useState("");
+  const [editingCell, setEditingCell] = useState("");
+  const [activeEditSession, setActiveEditSession] = useState(0);
   const [suggestionRect, setSuggestionRect] = useState(null);
-  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [tableExpanded, setTableExpanded] = useState(false);
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
   const [rowHeight, setRowHeight] = useState(52);
+  const [columnWidths, setColumnWidths] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("smartTableColumnWidthsV2") || "{}");
+    } catch {
+      return {};
+    }
+  });
   const [rangeSelection, setRangeSelection] = useState(null);
+  const [cellMenu, setCellMenu] = useState(null);
+  const [rowMenu, setRowMenu] = useState(null);
+  const [columnMenu, setColumnMenu] = useState(null);
+  const [columnFilterQuery, setColumnFilterQuery] = useState("");
+  const [smartSort, setSmartSort] = useState(null);
+  const [smartFilters, setSmartFilters] = useState({});
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [currentSearchResultIndex, setCurrentSearchResultIndex] = useState(0);
+  const [, setSuggestionDraftVersion] = useState(0);
   const [fillPreview, setFillPreview] = useState(null);
   const [certificateInfo, setCertificateInfo] = useState(null);
+  const [confirmationDialog, setConfirmationDialog] = useState(null);
+  const [smartViewport, setSmartViewport] = useState({
+    scrollTop: 0,
+    height: 640,
+  });
   const rowHeightRef = useRef(rowHeight);
   const rowsRef = useRef(rows);
   const deletedRowIdsRef = useRef(deletedRowIds);
+  const undoStackRef = useRef(undoStack);
+  const redoStackRef = useRef(redoStack);
   const dragFillRef = useRef(null);
+  const suggestionTimerRef = useRef(null);
+  const confirmationResolverRef = useRef(null);
+  const smartClipboardRef = useRef({ text: "", grid: [] });
+  const cellDraftsRef = useRef(new Map());
+  const suggestionCommittedCellsRef = useRef(new Set());
+  const copyShortcutHandlerRef = useRef(null);
+  const pasteShortcutHandlerRef = useRef(null);
+  const historyShortcutHandlerRef = useRef(null);
+  const smartTableScrollRef = useRef(null);
+  const smartViewportFrameRef = useRef(0);
+  const suggestionDraftFrameRef = useRef(0);
+  const gridRevisionRef = useRef(0);
+  const nativeHistoryUntilRef = useRef(0);
+  const rangeSelectionRef = useRef(rangeSelection);
+  const editingCellRef = useRef(editingCell);
+  const activeEditSessionRef = useRef(activeEditSession);
+  const editingSessionCellRef = useRef("");
+  const activeCellRef = useRef(activeCell);
+  const activeSuggestionIndexRef = useRef(activeSuggestionIndex);
+  const smartViewRowsRef = useRef([]);
+  const smartSortRef = useRef(smartSort);
+  const smartFiltersRef = useRef(smartFilters);
+  const searchResultsRef = useRef(searchResults);
+  const currentSearchResultIndexRef = useRef(currentSearchResultIndex);
   const meta = documentTypeMeta(entryForm.document_type);
+
+  rangeSelectionRef.current = rangeSelection;
+  editingCellRef.current = editingCell;
+  activeEditSessionRef.current = activeEditSession;
+  activeCellRef.current = activeCell;
+  activeSuggestionIndexRef.current = activeSuggestionIndex;
+  smartSortRef.current = smartSort;
+  smartFiltersRef.current = smartFilters;
+  searchResultsRef.current = searchResults;
+  currentSearchResultIndexRef.current = currentSearchResultIndex;
+  undoStackRef.current = undoStack;
+  redoStackRef.current = redoStack;
+
+  historyShortcutHandlerRef.current = (event) => {
+    const modifier = event.ctrlKey || event.metaKey;
+    if (!modifier) return;
+    const key = String(event.key || "").toLowerCase();
+    const isSearch = event.code === "KeyF" || key === "f";
+    if (isSearch) {
+      const target = event.target;
+      const gridIsActive =
+        !!target?.closest?.(
+          ".smart-entry-table, .cell-suggestions, .smart-table-search-panel",
+        ) || !!rangeSelectionRef.current;
+      if (!gridIsActive) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (
+        editingCellRef.current &&
+        hasUncommittedSmartCellDraft(editingCellRef.current)
+      ) {
+        const separator = editingCellRef.current.indexOf(":");
+        const index = Number(editingCellRef.current.slice(0, separator));
+        const columnKey = editingCellRef.current.slice(separator + 1);
+        commitSmartCellEdit(index, columnKey);
+      }
+      window.clearTimeout(suggestionTimerRef.current);
+      updateSmartEditingCell("");
+      updateSmartActiveCell("");
+      setSuggestionRect(null);
+      updateSmartSuggestionIndex(-1);
+      setCellMenu(null);
+      setRowMenu(null);
+      setSearchOpen(true);
+      window.requestAnimationFrame(() => {
+        const searchInput = document.querySelector(
+          "[data-smart-search-input='true']",
+        );
+        searchInput?.focus({ preventScroll: true });
+        searchInput?.select?.();
+      });
+      return;
+    }
+    const isUndo =
+      (event.code === "KeyZ" || key === "z") && !event.shiftKey;
+    const isRedo =
+      event.code === "KeyY" ||
+      key === "y" ||
+      ((event.code === "KeyZ" || key === "z") && event.shiftKey);
+    if (!isUndo && !isRedo) return;
+
+    const target = event.target;
+    const insideGrid = !!target?.closest?.(
+      ".smart-entry-table, .cell-suggestions",
+    );
+    if (!insideGrid) {
+      if (isEditableFocusTarget(target)) return;
+      if (!rangeSelectionRef.current) return;
+    }
+    if (
+      editingCellRef.current &&
+      hasUncommittedSmartCellDraft(editingCellRef.current)
+    ) {
+      // The native editor owns undo while its text buffer is uncommitted.
+      nativeHistoryUntilRef.current = Date.now() + 120;
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    window.clearTimeout(suggestionTimerRef.current);
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    updateSmartSuggestionIndex(-1);
+    setCellMenu(null);
+    setRowMenu(null);
+    if (event.repeat) return;
+    if (isUndo) undoSmartTable();
+    else redoSmartTable();
+  };
+
+  useEffect(() => {
+    const handleHistoryShortcut = (event) =>
+      historyShortcutHandlerRef.current?.(event);
+    document.addEventListener("keydown", handleHistoryShortcut, true);
+    return () =>
+      document.removeEventListener("keydown", handleHistoryShortcut, true);
+  }, []);
+
+  function askForConfirmation(dialog) {
+    return new Promise((resolve) => {
+      confirmationResolverRef.current?.(false);
+      confirmationResolverRef.current = resolve;
+      setConfirmationDialog(dialog);
+    });
+  }
+
+  function settleConfirmation(result) {
+    const resolve = confirmationResolverRef.current;
+    confirmationResolverRef.current = null;
+    setConfirmationDialog(null);
+    resolve?.(result);
+    restoreInputInteractivity();
+  }
   const partyOptions =
-    entryForm.party_role === "contractor"
+    scopeRole === "contractor"
       ? lookups.contractors
       : lookups.customers;
   const sourceCustomerOptions = uniqueValues(
@@ -8228,7 +10351,9 @@ function SmartEntryEditor({
       !entryForm.party_category ||
       party.category === entryForm.party_category,
   );
-  const rowData = rows.filter(rowHasData).map(({ _touched, ...row }) => row);
+  const rowData = rows
+    .filter(rowHasData)
+    .map((row) => ({ ...row, _touched: { ...(row._touched || {}) } }));
   const isDocumentEdit = !!editorContext?.document?.id;
   const scopedHistoryRows = historyRows.filter(
     (row) =>
@@ -8300,27 +10425,59 @@ function SmartEntryEditor({
   useEffect(() => {
     rowHeightRef.current = rowHeight;
   }, [rowHeight]);
+
+  useEffect(() => {
+    localStorage.setItem("smartTableColumnWidthsV2", JSON.stringify(columnWidths));
+  }, [columnWidths]);
+
+  useLayoutEffect(() => {
+    logDevelopmentPerformance("Grid render", gridRenderStartedAt);
+  });
+
+  useLayoutEffect(() => {
+    const host = smartTableScrollRef.current;
+    if (!host) return undefined;
+    const updateViewport = () => {
+      setSmartViewport({
+        scrollTop: host.scrollTop,
+        height: host.clientHeight || 640,
+      });
+    };
+    updateViewport();
+    const observer =
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(updateViewport)
+        : null;
+    observer?.observe(host);
+    return () => observer?.disconnect();
+  }, [tableExpanded]);
   useEffect(() => {
     let cancelled = false;
     async function loadHistory() {
       const name = String(entryForm.base_party_name || "").trim();
-      if (!name) {
-        setHistoryRows([]);
-        return;
-      }
       try {
-        const query = new URLSearchParams({ customer: name, limit: "500" });
-        const data = await api.request(`/api/entries?${query.toString()}`);
+        const query = new URLSearchParams({ limit: "500" });
+        if (entryForm.party_id) query.set("party_id", String(entryForm.party_id));
+        else if (name) query.set("customer", name);
+        let data = await api.request(`/api/entries?${query.toString()}`);
+        if (!(data.rows || []).length && (entryForm.party_id || name)) {
+          data = await api.request("/api/entries?limit=500");
+        }
         if (!cancelled) setHistoryRows(data.rows || []);
       } catch {
-        if (!cancelled) setHistoryRows([]);
+        try {
+          const fallback = await api.request("/api/entries?limit=500");
+          if (!cancelled) setHistoryRows(fallback.rows || []);
+        } catch {
+          if (!cancelled) setHistoryRows([]);
+        }
       }
     }
     loadHistory();
     return () => {
       cancelled = true;
     };
-  }, [api, entryForm.base_party_name]);
+  }, [api, entryForm.base_party_name, entryForm.party_id]);
 
   useEffect(() => {
     if (!editorContext?.copyToken || !editorContext?.copyRows?.length) return;
@@ -8330,6 +10487,7 @@ function SmartEntryEditor({
       return copied;
     });
     setRows([...copiedRows, smartRowFrom()]);
+    updateSmartSelection(null);
     setDeletedRowIds([]);
     setPreviewData(null);
     setEntryDirty?.(true);
@@ -8344,12 +10502,13 @@ function SmartEntryEditor({
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
-        setActiveCell("");
+        updateSmartActiveCell("");
         setSuggestionRect(null);
-        setActiveSuggestionIndex(0);
+        updateSmartSuggestionIndex(-1);
         return;
       }
-      setTableExpanded(false);
+      // With no suggestion list open, Escape deliberately does nothing here.
+      // Expanded mode is changed only by its explicit toolbar button.
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => {
@@ -8358,18 +10517,43 @@ function SmartEntryEditor({
     };
   }, [activeCell, suggestionRect, tableExpanded]);
 
+  useEffect(
+    () => () => {
+      window.clearTimeout(suggestionTimerRef.current);
+      window.cancelAnimationFrame(smartViewportFrameRef.current);
+      window.cancelAnimationFrame(suggestionDraftFrameRef.current);
+      confirmationResolverRef.current?.(false);
+      confirmationResolverRef.current = null;
+    },
+    [],
+  );
+
   useEffect(() => {
     const closeSuggestionsFromOutside = (event) => {
       const target = event.target;
       if (target?.closest?.(".cell-combo, .cell-suggestions")) return;
-      setActiveCell("");
-      setSuggestionRect(null);
-      setActiveSuggestionIndex(0);
+      window.setTimeout(() => {
+        updateSmartEditingCell("");
+        updateSmartActiveCell("");
+        setSuggestionRect(null);
+        updateSmartSuggestionIndex(-1);
+      }, 0);
     };
     document.addEventListener("pointerdown", closeSuggestionsFromOutside, true);
     return () =>
       document.removeEventListener("pointerdown", closeSuggestionsFromOutside, true);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!editingCell || activeCell !== editingCell) return;
+    const separator = editingCell.indexOf(":");
+    const key = separator >= 0 ? editingCell.slice(separator + 1) : "";
+    if (!key || !optionsForCell(key).length) return;
+    const anchor =
+      document.querySelector(`[data-smart-cell-container="${editingCell}"]`) ||
+      document.querySelector(`[data-smart-cell="${editingCell}"]`);
+    if (anchor) positionCellSuggestions(editingCell, anchor, { resetIndex: true });
+  }, [activeCell, editingCell, historyRows.length, rows.length]);
 
   useEffect(() => {
     if (!activeCell) return undefined;
@@ -8415,19 +10599,675 @@ function SmartEntryEditor({
     entryForm.document_type === "contractor_certificate"
       ? ["work_type", ...baseSmartCellOrder]
       : baseSmartCellOrder;
+  const smartDisplayColumns = [
+    { key: "__index", label: "#", width: 52 },
+    ...(entryForm.document_type === "contractor_certificate"
+      ? [{ key: "work_type", label: "نوع الأعمال", width: 140 }]
+      : []),
+    { key: "building_unit", label: "مبنى", width: 105 },
+    { key: "floor_apartment", label: "وحدة", width: 105 },
+    { key: "description", label: "بيان", width: 240 },
+    { key: "glass_spec", label: "زجاج", width: 120 },
+    { key: "profile_spec", label: "قطاع", width: 120 },
+    { key: "color", label: "لون", width: 120 },
+    { key: "item_count", label: "عدد", width: 86 },
+    { key: "width_cm", label: "عرض سم", width: 90 },
+    { key: "height_cm", label: "ارتفاع سم", width: 90 },
+    { key: "unit_code", label: "الوحدة", width: 100 },
+    { key: "total_quantity", label: "كمية مباشرة", width: 112 },
+    { key: "rate", label: "فئة", width: 96 },
+    { key: "completion_ratio", label: "نسبة العمل %", width: 112 },
+    { key: "building_unit_price", label: "ثابت", width: 96 },
+    { key: "measurement_mode", label: "قياس", width: 104 },
+    { key: "__actions", label: "نسخ", width: 170 },
+  ];
+  const resolvedColumnWidth = (column) =>
+    Number(columnWidths[column.key] || column.width);
+  const smartTableWidth = smartDisplayColumns.reduce(
+    (sum, column) => sum + resolvedColumnWidth(column),
+    0,
+  );
+
+  function smartColumnLabel(columnKey) {
+    return (
+      smartDisplayColumns.find((column) => column.key === columnKey)?.label ||
+      columnKey
+    );
+  }
+
+  function visibleSmartCellValue(row, columnKey) {
+    if (columnKey === "unit_code") {
+      return (
+        UNITS.find((unit) => unit.value === row?.unit_code)?.label ||
+        row?.unit_code ||
+        ""
+      );
+    }
+    if (columnKey === "measurement_mode") {
+      return row?.measurement_mode === "engineering"
+        ? "هندسي"
+        : row?.measurement_mode === "standard"
+          ? "قياسي"
+          : row?.measurement_mode || "";
+    }
+    return row?.[columnKey] ?? "";
+  }
+
+  function smartColumnType(columnKey) {
+    if (SMART_NUMERIC_CLIPBOARD_KEYS.has(columnKey)) return "number";
+    return "text";
+  }
+
+  function smartFilterValue(row, columnKey) {
+    return String(visibleSmartCellValue(row, columnKey) ?? "").trim();
+  }
+
+  function smartFilterValueLabel(value) {
+    return value ? value : "القيم الفارغة";
+  }
+
+  function smartFilterOptionValues(columnKey) {
+    return [
+      ...new Set(rows.map((row) => smartFilterValue(row, columnKey))),
+    ].sort(
+      (left, right) => compareSmartCellValues(left, right, smartColumnType(columnKey)),
+    );
+  }
+
+  function compareSmartCellValues(leftValue, rightValue, type) {
+    const leftText = String(leftValue ?? "").trim();
+    const rightText = String(rightValue ?? "").trim();
+    const leftBlank = !leftText;
+    const rightBlank = !rightText;
+    if (leftBlank && rightBlank) return 0;
+    if (leftBlank) return 1;
+    if (rightBlank) return -1;
+    if (type === "number") {
+      const leftNumber = Number(normalizeSmartNumericClipboardValue(leftText));
+      const rightNumber = Number(normalizeSmartNumericClipboardValue(rightText));
+      const leftNumeric = Number.isFinite(leftNumber);
+      const rightNumeric = Number.isFinite(rightNumber);
+      if (leftNumeric && rightNumeric) return leftNumber - rightNumber;
+      if (leftNumeric) return -1;
+      if (rightNumeric) return 1;
+    }
+    return naturalTextCompare(leftText, rightText);
+  }
+
+  const activeSmartFilterKeys = Object.keys(smartFilters).filter((columnKey) =>
+    Array.isArray(smartFilters[columnKey]),
+  );
+  const smartViewRows = useMemo(() => {
+    const startedAt = performanceStart();
+    const filters = smartFilters || {};
+    const sorted = smartSort?.key && smartSort?.direction;
+    const entries = rows.map((row, index) => ({ row, index }));
+    const ghostEntries = entries.filter(
+      ({ row }) => row._gridGhost && !rowHasData(row),
+    );
+    const dataEntries = entries.filter(
+      ({ row }) => !(row._gridGhost && !rowHasData(row)),
+    );
+    const filtered = dataEntries.filter(({ row }) =>
+      Object.entries(filters).every(([columnKey, selectedValues]) => {
+        if (!Array.isArray(selectedValues)) return true;
+        return selectedValues.includes(smartFilterValue(row, columnKey));
+      }),
+    );
+    if (sorted) {
+      const directionFactor = smartSort.direction === "desc" ? -1 : 1;
+      filtered.sort((left, right) => {
+        const leftValue = smartFilterValue(left.row, smartSort.key);
+        const rightValue = smartFilterValue(right.row, smartSort.key);
+        const leftBlank = !leftValue;
+        const rightBlank = !rightValue;
+        if (leftBlank && rightBlank) return left.index - right.index;
+        if (leftBlank) return 1;
+        if (rightBlank) return -1;
+        const result = compareSmartCellValues(
+          leftValue,
+          rightValue,
+          smartColumnType(smartSort.key),
+        );
+        return result * directionFactor || left.index - right.index;
+      });
+    }
+    const nextViewRows = [...filtered, ...ghostEntries];
+    if (activeSmartFilterKeys.length || sorted) {
+      logDevelopmentPerformance(
+        `Smart table view ${nextViewRows.length} rows`,
+        startedAt,
+      );
+    }
+    return nextViewRows;
+  }, [rows, smartFilters, smartSort, activeSmartFilterKeys.length]);
+  smartViewRowsRef.current = smartViewRows;
+
+  function currentSmartViewRowList() {
+    return smartViewRowsRef.current.map((entry) => entry.row);
+  }
+
+  function smartViewEntryForIndex(visualIndex) {
+    return smartViewRowsRef.current[visualIndex] || null;
+  }
+
+  function smartActualIndexForPoint(point) {
+    if (!point) return -1;
+    return rowsRef.current.findIndex(
+      (row) => String(row?._gridId || "") === String(point.rowId || ""),
+    );
+  }
+
+  function smartCellPointFromViewIndex(visualIndex, key) {
+    const entry = smartViewEntryForIndex(visualIndex);
+    return entry?.row?._gridId && smartCellOrder.includes(key)
+      ? { rowId: entry.row._gridId, columnKey: key }
+      : null;
+  }
+
+  function openSmartColumnMenu(event, column) {
+    if (!column || column.key.startsWith("__")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const visualViewport = window.visualViewport;
+    const viewportLeft = visualViewport?.offsetLeft || 0;
+    const viewportTop = visualViewport?.offsetTop || 0;
+    const viewportWidth = visualViewport?.width || window.innerWidth;
+    const viewportHeight = visualViewport?.height || window.innerHeight;
+    const viewportRight = viewportLeft + viewportWidth;
+    const viewportBottom = viewportTop + viewportHeight;
+    const openerRect = event.currentTarget?.getBoundingClientRect?.();
+    const menuWidth = Math.min(380, Math.max(320, viewportWidth - 16));
+    const availableBelow = openerRect
+      ? viewportBottom - openerRect.bottom - 12
+      : viewportHeight - event.clientY - 12;
+    const availableAbove = openerRect
+      ? openerRect.top - viewportTop - 12
+      : event.clientY - viewportTop - 12;
+    const openAbove = availableBelow < 300 && availableAbove > availableBelow;
+    const maxHeight = Math.max(
+      180,
+      Math.min(
+        560,
+        viewportHeight - 16,
+        Math.max(openAbove ? availableAbove : availableBelow, 260),
+      ),
+    );
+    const preferredLeft = openerRect
+      ? openerRect.right - menuWidth
+      : event.clientX - menuWidth + 18;
+    const preferredTop = openerRect
+      ? openAbove
+        ? openerRect.top - maxHeight - 6
+        : openerRect.bottom + 6
+      : event.clientY;
+    setCellMenu(null);
+    setRowMenu(null);
+    setColumnFilterQuery("");
+    setColumnMenu({
+      key: column.key,
+      left: Math.max(
+        viewportLeft + 8,
+        Math.min(preferredLeft, viewportRight - menuWidth - 8),
+      ),
+      top: Math.max(
+        viewportTop + 8,
+        Math.min(preferredTop, viewportBottom - maxHeight - 8),
+      ),
+      maxHeight,
+    });
+  }
+
+  function applySmartColumnSort(columnKey, direction) {
+    setSmartSort({ key: columnKey, direction });
+  }
+
+  function clearSmartColumnSort(columnKey) {
+    setSmartSort((current) =>
+      current?.key === columnKey ? null : current,
+    );
+  }
+
+  function setSmartColumnFilter(columnKey, selectedValues) {
+    const allValues = smartFilterOptionValues(columnKey);
+    setSmartFilters((current) => {
+      const next = { ...current };
+      if (
+        selectedValues.length === allValues.length &&
+        selectedValues.every((value) => allValues.includes(value))
+      ) {
+        delete next[columnKey];
+      } else {
+        next[columnKey] = selectedValues;
+      }
+      return next;
+    });
+  }
+
+  function toggleSmartColumnFilterValue(columnKey, value) {
+    const allValues = smartFilterOptionValues(columnKey);
+    const currentValues = Array.isArray(smartFiltersRef.current[columnKey])
+      ? smartFiltersRef.current[columnKey]
+      : allValues;
+    const selected = new Set(currentValues);
+    if (selected.has(value)) selected.delete(value);
+    else selected.add(value);
+    setSmartColumnFilter(columnKey, [...selected]);
+  }
+
+  function selectAllSmartColumnFilter(columnKey) {
+    setSmartColumnFilter(columnKey, smartFilterOptionValues(columnKey));
+  }
+
+  function clearSmartColumnFilter(columnKey) {
+    setSmartFilters((current) => {
+      const next = { ...current };
+      delete next[columnKey];
+      return next;
+    });
+  }
+
+  function resetSmartTableView() {
+    setSmartSort(null);
+    setSmartFilters({});
+    setColumnMenu(null);
+    setColumnFilterQuery("");
+  }
+
+  const columnMenuColumn = columnMenu
+    ? smartDisplayColumns.find((column) => column.key === columnMenu.key)
+    : null;
+  const columnMenuOptions = columnMenuColumn
+    ? smartFilterOptionValues(columnMenuColumn.key)
+    : [];
+  const columnMenuSelectedValues = columnMenuColumn
+    ? Array.isArray(smartFilters[columnMenuColumn.key])
+      ? smartFilters[columnMenuColumn.key]
+      : columnMenuOptions
+    : [];
+  const columnMenuSelectedSet = new Set(columnMenuSelectedValues);
+  const shownColumnMenuOptions = columnMenuOptions.filter((value) =>
+    value &&
+    normalizeArabic(smartFilterValueLabel(value)).includes(
+      normalizeArabic(columnFilterQuery),
+    ),
+  );
+  const columnMenuHasBlankValue = columnMenuOptions.includes("");
 
   useEffect(() => {
-    const copySmartRange = (event) => {
+    if (!searchOpen || !String(searchQuery || "").trim()) {
+      setSearchResults([]);
+      setCurrentSearchResultIndex(0);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const startedAt = performanceStart();
+      const searchableRows = currentSmartViewRowList().map((row) => {
+        const searchable = { _gridId: row._gridId };
+        for (const columnKey of smartCellOrder) {
+          searchable[columnKey] = visibleSmartCellValue(row, columnKey);
+        }
+        return searchable;
+      });
+      const nextResults = findSmartTableMatches({
+        rows: searchableRows,
+        columnOrder: smartCellOrder,
+        searchText: searchQuery,
+      });
+      if (cancelled) return;
+      const currentResult =
+        searchResultsRef.current[currentSearchResultIndexRef.current];
+      const preservedIndex = currentResult
+        ? nextResults.findIndex(
+            (result) =>
+              result.rowId === currentResult.rowId &&
+              result.columnKey === currentResult.columnKey,
+          )
+        : -1;
+      setSearchResults(nextResults);
+      setCurrentSearchResultIndex(
+        preservedIndex >= 0
+          ? preservedIndex
+          : Math.min(
+              currentSearchResultIndexRef.current,
+              Math.max(0, nextResults.length - 1),
+            ),
+      );
+      logDevelopmentPerformance(
+        `Search ${rows.length} rows`,
+        startedAt,
+        `${nextResults.length} matches`,
+      );
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    entryForm.document_type,
+    rows,
+    searchOpen,
+    searchQuery,
+    smartFilters,
+    smartSort,
+  ]);
+
+  function closeSmartTableSearch() {
+    setSearchOpen(false);
+    window.requestAnimationFrame(() => {
+      const focus = rangeSelectionRef.current?.focusCell;
+      if (focus) focusSmartCellPoint(focus);
+    });
+  }
+
+  function jumpToSmartSearchResult(result, resultIndex) {
+    if (!result) return;
+    const latestIndex = rowsRef.current.findIndex(
+      (row) => row._gridId === result.rowId,
+    );
+    if (latestIndex < 0 || !smartCellOrder.includes(result.columnKey)) return;
+    window.clearTimeout(suggestionTimerRef.current);
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    setCellMenu(null);
+    setRowMenu(null);
+    const selection = selectionForCells(
+      latestIndex,
+      result.columnKey,
+      latestIndex,
+      result.columnKey,
+    );
+    updateSmartSelection(selection);
+    currentSearchResultIndexRef.current = resultIndex;
+    setCurrentSearchResultIndex(resultIndex);
+    focusSmartCellPoint(selection?.focusCell);
+  }
+
+  function navigateSmartSearchResults(direction) {
+    if (!searchResults.length) return;
+    const nextIndex =
+      (currentSearchResultIndexRef.current + direction + searchResults.length) %
+      searchResults.length;
+    jumpToSmartSearchResult(searchResults[nextIndex], nextIndex);
+  }
+
+  function resolvedDropdownReplacement(columnKey, nextVisibleValue) {
+    if (columnKey === "unit_code") {
+      const normalized = normalizeArabic(nextVisibleValue);
+      return UNITS.find(
+        (unit) =>
+          normalizeArabic(unit.label) === normalized ||
+          normalizeArabic(unit.value) === normalized,
+      )?.value;
+    }
+    if (columnKey === "measurement_mode") {
+      const normalized = normalizeArabic(nextVisibleValue);
+      if (["قياسي", "standard"].some((value) => normalizeArabic(value) === normalized))
+        return "standard";
+      if (["هندسي", "engineering"].some((value) => normalizeArabic(value) === normalized))
+        return "engineering";
+    }
+    return undefined;
+  }
+
+  async function replaceAllSmartSearch(query, replacement) {
+    const searchableRows = rowsRef.current.map((row) => {
+      const searchable = { _gridId: row._gridId };
+      for (const columnKey of smartCellOrder) {
+        searchable[columnKey] = visibleSmartCellValue(row, columnKey);
+      }
+      return searchable;
+    });
+    const latestMatches = findSmartTableMatches({
+      rows: searchableRows,
+      columnOrder: smartCellOrder,
+      searchText: query,
+    });
+    if (!latestMatches.length) {
+      setMessage("لا توجد نتائج قابلة للاستبدال.");
+      return;
+    }
+    const matchKeys = new Set(
+      latestMatches.map((match) => `${match.rowId}:${match.columnKey}`),
+    );
+    const patches = new Map();
+    let changedCells = 0;
+    let replacedOccurrences = 0;
+    for (const row of rowsRef.current) {
+      const patch = {};
+      for (const columnKey of smartCellOrder) {
+        if (!matchKeys.has(`${row._gridId}:${columnKey}`)) continue;
+        const visibleValue = visibleSmartCellValue(row, columnKey);
+        const replaced = replaceSmartSearchMatches(
+          visibleValue,
+          query,
+          replacement,
+        );
+        if (!replaced.replacements) continue;
+        let nextValue = replaced.value;
+        if (["unit_code", "measurement_mode"].includes(columnKey)) {
+          const resolved = resolvedDropdownReplacement(columnKey, nextValue);
+          if (resolved === undefined) continue;
+          nextValue = resolved;
+        } else if (SMART_NUMERIC_CLIPBOARD_KEYS.has(columnKey)) {
+          const normalized = normalizeSmartNumericClipboardValue(nextValue);
+          if (
+            normalized &&
+            !/^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(normalized)
+          ) {
+            continue;
+          }
+          nextValue = normalized;
+        }
+        if (String(row[columnKey] ?? "") === String(nextValue ?? "")) continue;
+        patch[columnKey] = nextValue;
+        changedCells += 1;
+        replacedOccurrences += replaced.replacements;
+      }
+      if (Object.keys(patch).length) patches.set(row._gridId, patch);
+    }
+    if (!changedCells) {
+      setMessage("لا توجد نتائج قابلة للاستبدال.");
+      return;
+    }
+    if (
+      changedCells > 1 &&
+      !(await askForConfirmation({
+        title: "استبدال الكل",
+        message: `سيتم استبدال النص في ${changedCells} خلية.`,
+        confirmLabel: "استبدال الكل",
+      }))
+    ) {
+      return;
+    }
+    const startedAt = performanceStart();
+    recordSmartHistory();
+    const nextRows = normalizeSmartRows(
+      rowsRef.current.map((row) => {
+        const patch = patches.get(row._gridId);
+        if (!patch) return row;
+        return {
+          ...row,
+          ...patch,
+          _gridGhost: false,
+          _manualBlank: false,
+          _touched: {
+            ...(row._touched || {}),
+            ...touchedPatch(Object.keys(patch)),
+          },
+        };
+      }),
+    );
+    rowsRef.current = nextRows;
+    markGridMutation();
+    setRows(nextRows);
+    setPreviewData(null);
+    setEntryDirty?.(true);
+    setMessage(
+      `تم الاستبدال في ${changedCells} خلية (${replacedOccurrences} تطابق).`,
+    );
+    logDevelopmentPerformance(
+      `Replace all ${changedCells} cells`,
+      startedAt,
+    );
+  }
+
+  function smartCellPoint(index, key, list = rowsRef.current) {
+    const row = list[index];
+    if (!row?._gridId || !smartCellOrder.includes(key)) return null;
+    return { rowId: row._gridId, columnKey: key };
+  }
+
+  function smartCellIndexes(point, list = currentSmartViewRowList()) {
+    if (!point) return null;
+    const lookup = list === rowsRef.current ? list : list || currentSmartViewRowList();
+    const rowIndex = lookup.findIndex(
+      (row) => String(row?._gridId || "") === String(point.rowId || ""),
+    );
+    const columnIndex = smartCellOrder.indexOf(point.columnKey);
+    return rowIndex >= 0 && columnIndex >= 0
+      ? { rowIndex, columnIndex }
+      : null;
+  }
+
+  function updateSmartSelection(next) {
+    const resolved =
+      typeof next === "function" ? next(rangeSelectionRef.current) : next;
+    rangeSelectionRef.current = resolved || null;
+    setRangeSelection(resolved || null);
+  }
+
+  function updateSmartEditingCell(next) {
+    const previous = editingCellRef.current;
+    const resolved =
+      typeof next === "function" ? next(editingCellRef.current) : next;
+    if ((resolved || "") !== previous) {
+      const nextSession = activeEditSessionRef.current + 1;
+      activeEditSessionRef.current = nextSession;
+      editingSessionCellRef.current = resolved || "";
+      setActiveEditSession(nextSession);
+    }
+    editingCellRef.current = resolved || "";
+    setEditingCell(resolved || "");
+  }
+
+  function updateSmartActiveCell(next) {
+    const resolved =
+      typeof next === "function" ? next(activeCellRef.current) : next;
+    activeCellRef.current = resolved || "";
+    setActiveCell(resolved || "");
+  }
+
+  function updateSmartSuggestionIndex(next) {
+    const resolved =
+      typeof next === "function"
+        ? next(activeSuggestionIndexRef.current)
+        : next;
+    const numeric = Number(resolved);
+    activeSuggestionIndexRef.current = Number.isFinite(numeric) ? numeric : -1;
+    setActiveSuggestionIndex(activeSuggestionIndexRef.current);
+  }
+
+  function selectionForCells(
+    anchorRow,
+    anchorKey,
+    focusRow = anchorRow,
+    focusKey = anchorKey,
+  ) {
+    const anchorCell = smartCellPoint(anchorRow, anchorKey);
+    const focusCell = smartCellPoint(focusRow, focusKey);
+    return anchorCell && focusCell ? { anchorCell, focusCell } : null;
+  }
+
+  copyShortcutHandlerRef.current = (event) => {
       const active = document.activeElement;
       if (!active?.closest?.(".smart-entry-table")) return;
+      if (hasSelectedTextInsideEditor(event.target || active)) return;
       const textValue = selectedRangeText();
       if (!textValue) return;
+      rememberSmartClipboard(textValue);
       event.preventDefault();
+      event.stopPropagation();
       event.clipboardData?.setData("text/plain", textValue);
-    };
+  };
+
+  pasteShortcutHandlerRef.current = (event) => {
+      if (editingCell) return;
+      const active = document.activeElement;
+      const activeTable = active?.closest?.(".smart-entry-table");
+      if (isEditableFocusTarget(active) && !activeTable) return;
+      const range = normalizedRange();
+      if (!range) return;
+      const textValue =
+        event.clipboardData?.getData("text/plain") ||
+        smartClipboardRef.current.text ||
+        "";
+      if (!textValue) return;
+      const startEntry = smartViewRowsRef.current[range.rowStart];
+      if (!startEntry) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pasteSmartClipboardText(
+        textValue,
+        startEntry.index,
+        smartCellOrder[range.colStart],
+        { destinationRange: range },
+      );
+      setCellMenu(null);
+      setRowMenu(null);
+  };
+
+  useEffect(() => {
+    const copySmartRange = (event) =>
+      copyShortcutHandlerRef.current?.(event);
+    const pasteIntoSelectedRange = (event) =>
+      pasteShortcutHandlerRef.current?.(event);
     document.addEventListener("copy", copySmartRange);
-    return () => document.removeEventListener("copy", copySmartRange);
-  }, [rangeSelection, smartCellOrder, rows]);
+    document.addEventListener("paste", pasteIntoSelectedRange);
+    return () => {
+      document.removeEventListener("copy", copySmartRange);
+      document.removeEventListener("paste", pasteIntoSelectedRange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!rowMenu && !cellMenu && !columnMenu) return undefined;
+    const close = (event) => {
+      const target = event?.target;
+      if (
+        target?.closest?.(
+          ".smart-row-context-menu, .smart-cell-context-menu, .smart-column-menu, .smart-column-menu-button",
+        )
+      ) {
+        return;
+      }
+      setCellMenu(null);
+      setRowMenu(null);
+      setColumnMenu(null);
+    };
+    const closeOnViewportChange = () => {
+      setCellMenu(null);
+      setRowMenu(null);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") {
+        setCellMenu(null);
+        setRowMenu(null);
+      }
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnViewportChange);
+    window.addEventListener("scroll", closeOnViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnViewportChange);
+      window.removeEventListener("scroll", closeOnViewportChange, true);
+    };
+  }, [cellMenu, rowMenu, columnMenu]);
 
   useEffect(() => {
     let cancelled = false;
@@ -8503,6 +11343,7 @@ function SmartEntryEditor({
       if (cancelled || !existingRows.length) return;
       const loadedRows = existingRows.map(smartRowFromExisting);
       setRows([...loadedRows, smartRowFrom()]);
+      updateSmartSelection(null);
       setDeletedRowIds([]);
       setPreviewData(null);
       setEntryDirty?.(false);
@@ -8528,53 +11369,110 @@ function SmartEntryEditor({
     }));
   }
 
-  function smartSnapshot() {
+  function smartSnapshot(
+    snapshotRows = rowsRef.current,
+    snapshotSelection = rangeSelectionRef.current,
+  ) {
     return {
-      rows: cloneSmartRows(rowsRef.current),
+      rows: cloneSmartRows(snapshotRows),
       deletedRowIds: [...deletedRowIdsRef.current],
       rowHeight: rowHeightRef.current,
+      selection: snapshotSelection
+        ? {
+            anchorCell: { ...snapshotSelection.anchorCell },
+            focusCell: { ...snapshotSelection.focusCell },
+          }
+        : null,
     };
   }
 
-  function recordSmartHistory() {
-    const snapshot = smartSnapshot();
-    setUndoStack((current) => [...current.slice(-59), snapshot]);
+  function recordSmartHistory(snapshotRows = rowsRef.current) {
+    const snapshot = smartSnapshot(snapshotRows);
+    const nextUndo = [...undoStackRef.current.slice(-59), snapshot];
+    undoStackRef.current = nextUndo;
+    redoStackRef.current = [];
+    setUndoStack(nextUndo);
     setRedoStack([]);
   }
 
   function applySmartSnapshot(snapshot) {
     if (!snapshot) return;
-    setRows(cloneSmartRows(snapshot.rows || [smartRowFrom()]));
-    setDeletedRowIds([...(snapshot.deletedRowIds || [])]);
+    const nextRows = cloneSmartRows(snapshot.rows || [smartRowFrom()]);
+    const nextDeletedRowIds = [...(snapshot.deletedRowIds || [])];
+    rowsRef.current = nextRows;
+    deletedRowIdsRef.current = nextDeletedRowIds;
+    markGridMutation();
+    setRows(nextRows);
+    setDeletedRowIds(nextDeletedRowIds);
     setRowHeight(snapshot.rowHeight || 52);
+    updateSmartSelection(snapshot.selection || null);
+    if (snapshot.selection?.focusCell) {
+      focusSmartCellPoint(snapshot.selection.focusCell);
+    }
     setPreviewData(null);
     setEntryDirty?.(true);
     restoreInputInteractivity();
   }
 
   function undoSmartTable() {
-    if (!undoStack.length) return;
+    const stack = undoStackRef.current;
+    if (!stack.length) return;
     const current = smartSnapshot();
-    const previous = undoStack[undoStack.length - 1];
-    setUndoStack((stack) => stack.slice(0, -1));
-    setRedoStack((stack) => [...stack.slice(-59), current]);
+    const previous = stack[stack.length - 1];
+    const nextUndo = stack.slice(0, -1);
+    const nextRedo = [...redoStackRef.current.slice(-59), current];
+    undoStackRef.current = nextUndo;
+    redoStackRef.current = nextRedo;
+    setUndoStack(nextUndo);
+    setRedoStack(nextRedo);
     applySmartSnapshot(previous);
   }
 
   function redoSmartTable() {
-    if (!redoStack.length) return;
+    const stack = redoStackRef.current;
+    if (!stack.length) return;
     const current = smartSnapshot();
-    const next = redoStack[redoStack.length - 1];
-    setRedoStack((stack) => stack.slice(0, -1));
-    setUndoStack((stack) => [...stack.slice(-59), current]);
+    const next = stack[stack.length - 1];
+    const nextRedo = stack.slice(0, -1);
+    const nextUndo = [...undoStackRef.current.slice(-59), current];
+    redoStackRef.current = nextRedo;
+    undoStackRef.current = nextUndo;
+    setRedoStack(nextRedo);
+    setUndoStack(nextUndo);
     applySmartSnapshot(next);
   }
 
   function normalizeSmartRows(nextRows) {
-    const normalized = cloneSmartRows(nextRows);
-    if (!normalized.length) normalized.push(smartRowFrom());
-    if (normalized.every((row) => rowHasData(row))) normalized.push(smartRowFrom());
-    return normalized;
+    const normalized = cloneSmartRows(nextRows).map((row) => ({
+      ...row,
+      _gridId: row._gridId || nextSmartGridRowId(row._existingId || ""),
+      _gridGhost: !(
+        rowHasData(row) ||
+        row._existingId ||
+        row._manualBlank ||
+        hasExplicitSmartValue(row)
+      ),
+    }));
+    const activeOrPersisted = normalized.filter(
+      (row) =>
+        rowHasData(row) ||
+        row._existingId ||
+        row._manualBlank ||
+        hasExplicitSmartValue(row),
+    );
+    const reusableGhost = normalized.find(
+      (row) =>
+        !rowHasData(row) &&
+        !row._existingId &&
+        !row._manualBlank &&
+        !hasExplicitSmartValue(row),
+    );
+    activeOrPersisted.push(
+      reusableGhost
+        ? { ...reusableGhost, _gridGhost: true }
+        : smartRowFrom(),
+    );
+    return activeOrPersisted;
   }
 
   function lastActiveRowIndex(list = rowsRef.current) {
@@ -8588,10 +11486,37 @@ function SmartEntryEditor({
     return keys.reduce((acc, key) => ({ ...acc, [key]: true }), {});
   }
 
+  function markGridMutation() {
+    gridRevisionRef.current += 1;
+    return gridRevisionRef.current;
+  }
+
   function updateFixed(patch) {
     setPreviewData(null);
     setEntryDirty?.(true);
     setEntryForm((current) => ({ ...current, ...patch }));
+    const rowFieldKeys = ["work_type", "building_unit", "floor_apartment"];
+    const changedRowKeys = rowFieldKeys.filter((key) =>
+      Object.prototype.hasOwnProperty.call(patch, key),
+    );
+    if (changedRowKeys.length) {
+      const nextRows = rowsRef.current.map((row) => {
+        if (!rowHasData(row)) return row;
+        const rowPatch = {};
+        for (const key of changedRowKeys) rowPatch[key] = patch[key];
+        return {
+          ...row,
+          ...rowPatch,
+          _touched: {
+            ...(row._touched || {}),
+            ...touchedPatch(changedRowKeys),
+          },
+        };
+      });
+      rowsRef.current = nextRows;
+      markGridMutation();
+      setRows(nextRows);
+    }
   }
 
   function changeDocumentType(value) {
@@ -8607,13 +11532,18 @@ function SmartEntryEditor({
       certificate_no: "",
       work_type: "",
       work_types: [],
+      ...(value === "price_offer" ? {} : { vat_terms_only: false }),
       ...(value === "contractor_certificate"
         ? {}
         : { source_customer_id: "", source_customer_name: "" }),
     });
     if (!isDocumentEdit) {
       recordSmartHistory();
-      setRows([smartRowFrom()]);
+      const nextRows = [smartRowFrom()];
+      rowsRef.current = nextRows;
+      markGridMutation();
+      setRows(nextRows);
+      updateSmartSelection(null);
     }
   }
 
@@ -8628,146 +11558,75 @@ function SmartEntryEditor({
   function updateRow(index, key, value) {
     if (String(rowsRef.current[index]?.[key] || "") === String(value || ""))
       return;
+    const startedAt = performanceStart();
     recordSmartHistory();
     setPreviewData(null);
     setEntryDirty?.(true);
-    setRows((current) => {
-      const copyKeys = [
-        "building_unit",
-        "floor_apartment",
-        "glass_spec",
-        "profile_spec",
-        "color",
-        "rate",
-        "completion_ratio",
-        "unit_code",
-        "measurement_mode",
-      ];
-      const next = current.map((row, rowIndex) => {
-        if (rowIndex !== index) return row;
-        const patch = {
-          [key]: value,
-          _touched: { ...(row._touched || {}), [key]: true },
-        };
-        if (key === "description") {
-          const defaults = defaultsForDescription(value, current, index);
-          if (defaults) {
-            for (const copyKey of copyKeys) {
-              if (!row[copyKey] && defaults[copyKey]) {
-                patch[copyKey] = defaults[copyKey];
-                patch._touched[copyKey] = true;
-              }
+    const current = rowsRef.current;
+    const copyKeys = [
+      "building_unit",
+      "floor_apartment",
+      "glass_spec",
+      "profile_spec",
+      "color",
+      "rate",
+      "completion_ratio",
+      "unit_code",
+      "measurement_mode",
+    ];
+    const next = current.map((row, rowIndex) => {
+      if (rowIndex !== index) return row;
+      const patch = {
+        [key]: value,
+        _gridGhost: false,
+        _manualBlank: false,
+        _touched: { ...(row._touched || {}), [key]: true },
+      };
+      if (key === "description") {
+        const defaults = defaultsForDescription(value, current, index);
+        if (defaults) {
+          for (const copyKey of copyKeys) {
+            if (!row[copyKey] && defaults[copyKey]) {
+              patch[copyKey] = defaults[copyKey];
+              patch._touched[copyKey] = true;
             }
           }
         }
-        return { ...row, ...patch };
-      });
-      if (index === next.length - 1 && rowHasData(next[index])) {
-        next.push(smartRowFrom());
       }
-      return next;
+      return { ...row, ...patch };
     });
+    if (index === next.length - 1 && rowHasData(next[index])) {
+      next.push(smartRowFrom());
+    }
+    rowsRef.current = next;
+    markGridMutation();
+    setRows(next);
+    logDevelopmentPerformance("Cell commit", startedAt);
   }
 
-  function focusCell(rowIndex, colKey) {
-    window.setTimeout(() => {
-      const target = document.querySelector(`[data-smart-cell="${rowIndex}:${colKey}"]`);
-      target?.focus();
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        target.select();
-        openCellSuggestions(`${rowIndex}:${colKey}`, target);
-      }
-    }, 0);
-  }
-
-  function ensureNextRow(index, force = false) {
-    if (index + 1 < rows.length || (!force && !rowHasData(rows[index]))) return;
-    setRows((current) => [
-      ...current,
-      smartRowFrom(),
-    ]);
-  }
-
-  function handleCellKeyDown(event, index, key) {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
-      event.preventDefault();
-      undoSmartTable();
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
-      event.preventDefault();
-      redoSmartTable();
-      return;
-    }
-    if (event.key === "Enter") {
-      if (event.shiftKey) return;
-      event.preventDefault();
-      const nextIndex = index + 1;
-      ensureNextRow(index);
-      focusCell(nextIndex, key);
-      return;
-    }
-    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key))
-      return;
-    event.preventDefault();
-    const columnIndex = smartCellOrder.indexOf(key);
-    if (event.shiftKey) {
-      const nextRow =
-        event.key === "ArrowDown"
-          ? Math.min(rows.length - 1, index + 1)
-          : event.key === "ArrowUp"
-            ? Math.max(0, index - 1)
-            : index;
-      const nextColumnIndex =
-        event.key === "ArrowLeft"
-          ? Math.min(smartCellOrder.length - 1, columnIndex + 1)
-          : event.key === "ArrowRight"
-            ? Math.max(0, columnIndex - 1)
-            : columnIndex;
-      setRangeSelection((current) => ({
-        startRow: current?.startRow ?? index,
-        startKey: current?.startKey ?? key,
-        endRow: nextRow,
-        endKey: smartCellOrder[nextColumnIndex] || key,
-      }));
-      return;
-    }
-    if (event.key === "ArrowDown") {
-      ensureNextRow(index);
-      focusCell(index + 1, key);
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      focusCell(Math.max(0, index - 1), key);
-      return;
-    }
-    const nextColumnIndex =
-      event.key === "ArrowLeft"
-        ? Math.min(smartCellOrder.length - 1, columnIndex + 1)
-        : Math.max(0, columnIndex - 1);
-    focusCell(index, smartCellOrder[nextColumnIndex] || key);
-  }
-
-  function normalizedRange(selection = rangeSelection) {
-    if (!selection) return null;
-    const startColumn = smartCellOrder.indexOf(selection.startKey);
-    const endColumn = smartCellOrder.indexOf(selection.endKey);
-    if (startColumn < 0 || endColumn < 0) return null;
+  function normalizedRange(selection = rangeSelectionRef.current) {
+    if (!selection?.anchorCell || !selection?.focusCell) return null;
+    const anchor = smartCellIndexes(selection.anchorCell);
+    const focus = smartCellIndexes(selection.focusCell);
+    if (!anchor || !focus) return null;
     return {
-      rowStart: Math.min(selection.startRow, selection.endRow),
-      rowEnd: Math.max(selection.startRow, selection.endRow),
-      colStart: Math.min(startColumn, endColumn),
-      colEnd: Math.max(startColumn, endColumn),
+      rowStart: Math.min(anchor.rowIndex, focus.rowIndex),
+      rowEnd: Math.max(anchor.rowIndex, focus.rowIndex),
+      colStart: Math.min(anchor.columnIndex, focus.columnIndex),
+      colEnd: Math.max(anchor.columnIndex, focus.columnIndex),
     };
   }
 
   function isCellSelected(index, key) {
     const range = normalizedRange();
     if (!range) return false;
-    const column = smartCellOrder.indexOf(key);
+    const point = smartCellPoint(index, key);
+    const indexes = smartCellIndexes(point);
+    if (!indexes) return false;
+    const column = indexes.columnIndex;
     return (
-      index >= range.rowStart &&
-      index <= range.rowEnd &&
+      indexes.rowIndex >= range.rowStart &&
+      indexes.rowIndex <= range.rowEnd &&
       column >= range.colStart &&
       column <= range.colEnd
     );
@@ -8777,68 +11636,373 @@ function SmartEntryEditor({
     const range = normalizedRange();
     if (!range) return "";
     const lines = [];
+    const viewRows = currentSmartViewRowList();
     for (let rowIndex = range.rowStart; rowIndex <= range.rowEnd; rowIndex += 1) {
+      const row = viewRows[rowIndex];
+      if (!row) continue;
       const values = [];
       for (let colIndex = range.colStart; colIndex <= range.colEnd; colIndex += 1) {
-        values.push(rowsRef.current[rowIndex]?.[smartCellOrder[colIndex]] ?? "");
+        values.push(row?.[smartCellOrder[colIndex]] ?? "");
       }
       lines.push(values.join("\t"));
     }
     return lines.join("\n");
   }
 
-  function parseClipboardGrid(textValue) {
-    const textGrid = String(textValue || "").replace(/\r/g, "");
-    const lines = textGrid.split("\n");
-    if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-    return lines.map((line) => line.split("\t"));
+  function rememberSmartClipboard(textValue) {
+    const text = String(textValue || "");
+    if (!text) return;
+    smartClipboardRef.current = {
+      text,
+      grid: parseSmartClipboardGrid(text),
+    };
   }
 
-  function applySmartGrid(index, key, grid) {
-    if (!grid.length || !grid[0]?.length) return false;
+  function pasteSmartClipboardText(
+    textValue,
+    index,
+    key,
+    { destinationRange = null } = {},
+  ) {
+    const parseStartedAt = performanceStart();
+    const grid = parseSmartClipboardGrid(textValue);
+    logDevelopmentPerformance(
+      "Clipboard parse",
+      parseStartedAt,
+      `${grid.length} rows`,
+    );
+    if (!grid.length) return false;
+    return applySmartGrid(index, key, grid, { destinationRange });
+  }
+
+  function applySmartGrid(index, key, grid, { destinationRange = null } = {}) {
+    const startedAt = performanceStart();
+    const appliedGrid = expandSmartClipboardGrid(grid, destinationRange);
+    if (!appliedGrid.length || !appliedGrid[0]?.length) return false;
     const startColumn = smartCellOrder.indexOf(key);
     if (startColumn < 0) return false;
     recordSmartHistory();
     setPreviewData(null);
     setEntryDirty?.(true);
-    setRows((current) => {
-      const next = cloneSmartRows(current);
-      while (next.length < index + grid.length) next.push(smartRowFrom());
-      grid.forEach((line, rowOffset) => {
-        const rowIndex = index + rowOffset;
-        if (!next[rowIndex]) next[rowIndex] = smartRowFrom();
-        const rowPatch = {};
-        const touched = { ...(next[rowIndex]._touched || {}) };
-        line.forEach((value, colOffset) => {
-          const targetKey = smartCellOrder[startColumn + colOffset];
-          if (!targetKey) return;
-          rowPatch[targetKey] = value;
-          touched[targetKey] = true;
-        });
-        next[rowIndex] = { ...next[rowIndex], ...rowPatch, _touched: touched };
-      });
-      return normalizeSmartRows(next);
-    });
-    const endColumn = Math.min(
-      smartCellOrder.length - 1,
-      startColumn + Math.max(...grid.map((line) => line.length)) - 1,
-    );
-    setRangeSelection({
+    const result = applySmartClipboardGridToRows({
+      rows: rowsRef.current,
       startRow: index,
       startKey: key,
-      endRow: index + grid.length - 1,
-      endKey: smartCellOrder[endColumn] || key,
+      columnOrder: smartCellOrder,
+      grid: appliedGrid,
+      createRow: smartRowFrom,
+      normalizeValue: normalizeSmartClipboardValue,
     });
+    if (!result) return false;
+    const normalized = normalizeSmartRows(result.rows);
+    rowsRef.current = normalized;
+    markGridMutation();
+    setRows(normalized);
+    const endColumn = Math.min(
+      smartCellOrder.length - 1,
+      startColumn + Math.max(...appliedGrid.map((line) => line.length)) - 1,
+    );
+    updateSmartSelection(
+      selectionForCells(
+        index,
+        key,
+        index + appliedGrid.length - 1,
+        smartCellOrder[endColumn] || key,
+      ),
+    );
+    setCellMenu(null);
+    setRowMenu(null);
+    logDevelopmentPerformance(
+      `Paste ${appliedGrid.length} rows locally`,
+      startedAt,
+    );
     return true;
+  }
+
+  function openSmartCellMenu(event, index, key) {
+    if (hasSelectedTextInsideEditor(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const row = rowsRef.current[index];
+    if (!row?._gridId || !smartCellOrder.includes(key)) return;
+    if (
+      editingCellRef.current &&
+      hasUncommittedSmartCellDraft(editingCellRef.current)
+    ) {
+      const separator = editingCellRef.current.indexOf(":");
+      commitSmartCellEdit(
+        Number(editingCellRef.current.slice(0, separator)),
+        editingCellRef.current.slice(separator + 1),
+      );
+    }
+    window.clearTimeout(suggestionTimerRef.current);
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    updateSmartSuggestionIndex(-1);
+    if (!isCellSelected(index, key)) {
+      updateSmartSelection(selectionForCells(index, key));
+    }
+    const menuWidth = 188;
+    const menuHeight = 138;
+    setRowMenu(null);
+    setCellMenu({
+      rowId: row._gridId,
+      key,
+      left: Math.max(
+        8,
+        Math.min(event.clientX, window.innerWidth - menuWidth - 8),
+      ),
+      top: Math.max(
+        8,
+        Math.min(event.clientY, window.innerHeight - menuHeight - 8),
+      ),
+    });
+  }
+
+  function cellMenuTargetRange() {
+    if (!cellMenu) return null;
+    const index = rowsRef.current.findIndex(
+      (row) => row._gridId === cellMenu.rowId,
+    );
+    const columnIndex = smartCellOrder.indexOf(cellMenu.key);
+    if (index < 0 || columnIndex < 0) return null;
+    const selected = normalizedRange();
+    const cellPoint = smartCellPoint(index, cellMenu.key);
+    const cellViewIndexes = smartCellIndexes(cellPoint);
+    if (
+      selected &&
+      cellViewIndexes &&
+      cellViewIndexes.rowIndex >= selected.rowStart &&
+      cellViewIndexes.rowIndex <= selected.rowEnd &&
+      columnIndex >= selected.colStart &&
+      columnIndex <= selected.colEnd
+    ) {
+      return selected;
+    }
+    return {
+      rowStart: cellViewIndexes?.rowIndex ?? index,
+      rowEnd: cellViewIndexes?.rowIndex ?? index,
+      colStart: columnIndex,
+      colEnd: columnIndex,
+    };
+  }
+
+  async function copySmartCellMenuContent() {
+    const range = cellMenuTargetRange();
+    if (!range) {
+      setCellMenu(null);
+      return;
+    }
+    const previousSelection = rangeSelectionRef.current;
+    updateSmartSelection(
+      selectionForCells(
+        range.rowStart,
+        smartCellOrder[range.colStart],
+        range.rowEnd,
+        smartCellOrder[range.colEnd],
+      ),
+    );
+    const textValue = selectedRangeText();
+    if (textValue) {
+      rememberSmartClipboard(textValue);
+      await copyTextToClipboard(textValue);
+    }
+    if (!previousSelection) updateSmartSelection(null);
+    setCellMenu(null);
+    restoreInputInteractivity();
+  }
+
+  async function pasteSmartCellMenuContent() {
+    const range = cellMenuTargetRange();
+    if (!range) {
+      setCellMenu(null);
+      return;
+    }
+    try {
+      const systemText = navigator.clipboard?.readText
+        ? await navigator.clipboard.readText().catch(() => "")
+        : "";
+      const textValue = systemText || smartClipboardRef.current.text || "";
+      if (!textValue) {
+        setMessage("الحافظة فارغة.");
+        return;
+      }
+      pasteSmartClipboardText(
+        textValue,
+        range.rowStart,
+        smartCellOrder[range.colStart],
+        { destinationRange: range },
+      );
+    } catch {
+      setMessage("تعذر قراءة الحافظة. استخدم Ctrl+V بعد تحديد الخلية.");
+    } finally {
+      setCellMenu(null);
+      restoreInputInteractivity();
+    }
+  }
+
+  function clearSmartCellMenuContent() {
+    const range = cellMenuTargetRange();
+    if (!range) {
+      setCellMenu(null);
+      return;
+    }
+    recordSmartHistory();
+    setPreviewData(null);
+    setEntryDirty?.(true);
+    const viewRows = currentSmartViewRowList();
+    const selectedRowIds = new Set();
+    for (let rowIndex = range.rowStart; rowIndex <= range.rowEnd; rowIndex += 1) {
+      const row = viewRows[rowIndex];
+      if (row?._gridId) selectedRowIds.add(row._gridId);
+    }
+    const nextRows = rowsRef.current.map((row, rowIndex) => {
+      if (!selectedRowIds.has(row._gridId)) return row;
+      const patch = {};
+      const touched = { ...(row._touched || {}) };
+      for (
+        let columnIndex = range.colStart;
+        columnIndex <= range.colEnd;
+        columnIndex += 1
+      ) {
+        const columnKey = smartCellOrder[columnIndex];
+        patch[columnKey] = "";
+        touched[columnKey] = true;
+      }
+      const nextRow = {
+        ...row,
+        ...patch,
+        _gridGhost: false,
+        _touched: touched,
+      };
+      return {
+        ...nextRow,
+        _manualBlank: !rowHasData(nextRow),
+      };
+    });
+    rowsRef.current = nextRows;
+    markGridMutation();
+    setRows(nextRows);
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    setCellMenu(null);
+    restoreInputInteractivity();
+  }
+
+  function openSmartRowMenu(event, row) {
+    event.preventDefault();
+    event.stopPropagation();
+    window.clearTimeout(suggestionTimerRef.current);
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    const latestIndex = rowsRef.current.findIndex(
+      (candidate) => candidate._gridId === row._gridId,
+    );
+    if (latestIndex >= 0) {
+      updateSmartSelection(
+        selectionForCells(
+          latestIndex,
+          smartCellOrder[0],
+          latestIndex,
+          smartCellOrder[smartCellOrder.length - 1],
+        ),
+      );
+    }
+    const menuWidth = 248;
+    const menuHeight = 146;
+    setCellMenu(null);
+    setRowMenu({
+      rowId: row._gridId,
+      left: Math.max(
+        8,
+        Math.min(event.clientX, window.innerWidth - menuWidth - 8),
+      ),
+      top: Math.max(
+        8,
+        Math.min(event.clientY, window.innerHeight - menuHeight - 8),
+      ),
+    });
+  }
+
+  function insertEmptySmartRow(targetRowId, placement) {
+    const insertion = insertSmartRowRelative({
+      rows: rowsRef.current,
+      targetRowId,
+      placement,
+      createRow: manualBlankSmartRow,
+    });
+    if (!insertion) {
+      setRowMenu(null);
+      return;
+    }
+    const startedAt = performanceStart();
+    recordSmartHistory();
+    setPreviewData(null);
+    setEntryDirty?.(true);
+    const insertedRow = insertion.row;
+    const nextRows = normalizeSmartRows(insertion.rows);
+    const normalizedInsertIndex = nextRows.findIndex(
+      (row) => row._gridId === insertedRow._gridId,
+    );
+    rowsRef.current = nextRows;
+    markGridMutation();
+    setRows(nextRows);
+    const nextSelection = selectionForCells(
+      normalizedInsertIndex,
+      smartCellOrder[0],
+      normalizedInsertIndex,
+      smartCellOrder[0],
+    );
+    updateSmartSelection(nextSelection);
+    setRowMenu(null);
+    focusSmartCellPoint(nextSelection.focusCell);
+    logDevelopmentPerformance("Insert empty row", startedAt);
+  }
+
+  async function pasteIntoCurrentSmartSelection() {
+    try {
+      const systemText = navigator.clipboard?.readText
+        ? await navigator.clipboard.readText().catch(() => "")
+        : "";
+      const textValue = systemText || smartClipboardRef.current.text || "";
+      if (!textValue) {
+        setMessage("الحافظة فارغة.");
+        return;
+      }
+      const range = normalizedRange();
+      if (!range) {
+        setMessage("حدد خلية أولاً للصق البيانات.");
+        return;
+      }
+      pasteSmartClipboardText(
+        textValue,
+        range.rowStart,
+        smartCellOrder[range.colStart],
+        { destinationRange: range },
+      );
+    } catch {
+      setMessage("تعذر قراءة الحافظة. استخدم Ctrl+V بعد تحديد الخلية.");
+    } finally {
+      restoreInputInteractivity();
+    }
+  }
+
+  async function deleteSmartRowFromMenu() {
+    const targetRowId = rowMenu?.rowId;
+    setRowMenu(null);
+    if (!targetRowId) return;
+    await deleteSmartRowById(targetRowId, { ignoreSelection: true });
   }
 
   function handleSmartPaste(event, index, key) {
     const textValue = event.clipboardData?.getData("text/plain") || "";
     if (!textValue.includes("\t") && !textValue.includes("\n")) return;
-    const grid = parseClipboardGrid(textValue);
-    if (grid.length <= 1 && (grid[0] || []).length <= 1) return;
     event.preventDefault();
-    applySmartGrid(index, key, grid);
+    event.stopPropagation();
+    pasteSmartClipboardText(textValue, index, key);
     restoreInputInteractivity(event.currentTarget);
   }
 
@@ -8855,16 +12019,10 @@ function SmartEntryEditor({
     "completion_ratio",
     "measurement_mode",
   ];
-  const fieldCopyDownKeys = new Set([
-    "width_cm",
-    "height_cm",
-    "item_count",
-    "total_quantity",
-    "rate",
-    "building_unit_price",
-  ]);
+  const fieldCopyDownKeys = new Set(smartCellOrder);
 
-  function copyRowSpecDown(index) {
+  async function copyRowSpecDown(index) {
+    dismissSmartCellUi();
     const source = rowsRef.current[index];
     const lastIndex = lastActiveRowIndex();
     if (!source || index >= lastIndex) {
@@ -8872,75 +12030,91 @@ function SmartEntryEditor({
       restoreInputInteractivity();
       return;
     }
-    if (
-      !window.confirm(
-        "سيتم نسخ بيانات هذا الصف إلى الصفوف التالية مع الحفاظ على المقاسات والكميات. هل تريد المتابعة؟",
-      )
-    ) {
+    if (!(await askForConfirmation({
+      title: "نسخ مواصفات الصف للأسفل",
+      message:
+        "سيتم نسخ بيانات هذا الصف إلى الصفوف التالية مع الحفاظ على المقاسات والكميات.",
+      confirmLabel: "نسخ للأسفل",
+    }))) {
       restoreInputInteractivity();
       return;
     }
     recordSmartHistory();
     setPreviewData(null);
     setEntryDirty?.(true);
-    setRows((current) =>
-      current.map((row, rowIndex) => {
-        if (rowIndex <= index || rowIndex > lastIndex || !rowHasData(row)) return row;
-        const patch = {};
-        for (const key of specCopyKeys) {
-          if (!smartCellOrder.includes(key)) continue;
-          patch[key] = source[key] || "";
-        }
-        return {
-          ...row,
-          ...patch,
-          _touched: {
-            ...(row._touched || {}),
-            ...touchedPatch(Object.keys(patch)),
-          },
-        };
-      }),
-    );
+    const nextRows = rowsRef.current.map((row, rowIndex) => {
+      if (rowIndex <= index || rowIndex > lastIndex || !rowHasData(row))
+        return row;
+      const patch = {};
+      for (const key of specCopyKeys) {
+        if (!smartCellOrder.includes(key)) continue;
+        patch[key] = source[key] ?? "";
+      }
+      return {
+        ...row,
+        ...patch,
+        _touched: {
+          ...(row._touched || {}),
+          ...touchedPatch(Object.keys(patch)),
+        },
+      };
+    });
+    rowsRef.current = nextRows;
+    markGridMutation();
+    setRows(nextRows);
     restoreInputInteractivity();
   }
 
-  function copyFullRowToBottom(index) {
+  async function copyFullRowToBottom(index) {
+    dismissSmartCellUi();
     const source = rowsRef.current[index];
     if (!source || !rowHasData(source)) {
       setMessage("اختر صفاً يحتوي على بيانات أولاً.");
       restoreInputInteractivity();
       return;
     }
-    if (
-      !window.confirm(
-        "سيتم نسخ الصف بالكامل إلى صف جديد في نهاية الجدول. هل تريد المتابعة؟",
-      )
-    ) {
+    if (!(await askForConfirmation({
+      title: "نسخ الصف بالكامل",
+      message: "سيتم نسخ الصف بالكامل إلى صف جديد في نهاية الجدول.",
+      confirmLabel: "نسخ الصف",
+    }))) {
       restoreInputInteractivity();
       return;
     }
     recordSmartHistory();
     setPreviewData(null);
     setEntryDirty?.(true);
-    setRows((current) => {
-      const cleanSource = { ...source };
-      delete cleanSource._existingId;
-      delete cleanSource._originalBuildingUnit;
-      delete cleanSource._originalFloorApartment;
-      const copied = {
-        ...cleanSource,
-        _touched: touchedPatch(smartCellOrder),
-      };
-      const withoutTrailingGhost =
-        current.length && !rowHasData(current[current.length - 1])
-          ? current.slice(0, -1)
-          : current;
-      return [...cloneSmartRows(withoutTrailingGhost), copied, smartRowFrom()];
-    });
+    const cleanSource = { ...source };
+    delete cleanSource._existingId;
+    delete cleanSource._gridId;
+    delete cleanSource._originalBuildingUnit;
+    delete cleanSource._originalFloorApartment;
+    const copied = {
+      ...cleanSource,
+      _gridId: nextSmartGridRowId(),
+      _gridGhost: false,
+      _manualBlank: false,
+      _touched: touchedPatch(smartCellOrder),
+    };
+    const withoutTrailingGhost =
+      rowsRef.current.length &&
+      rowsRef.current.at(-1)?._gridGhost &&
+      !rowHasData(rowsRef.current.at(-1))
+        ? rowsRef.current.slice(0, -1)
+        : rowsRef.current;
+    const nextRows = [
+      ...cloneSmartRows(withoutTrailingGhost),
+      copied,
+      smartRowFrom(),
+    ];
+    rowsRef.current = nextRows;
+    markGridMutation();
+    setRows(nextRows);
     restoreInputInteractivity();
   }
 
-  function copyFieldDown(index, key) {
+  async function copyFieldDown(index, key) {
+    dismissSmartCellUi();
     const source = rowsRef.current[index];
     const lastIndex = lastActiveRowIndex();
     if (!source || index >= lastIndex) {
@@ -8948,60 +12122,65 @@ function SmartEntryEditor({
       restoreInputInteractivity();
       return;
     }
-    if (
-      !window.confirm(
-        "سيتم نسخ قيمة هذا الحقل إلى نفس العمود في الصفوف التالية. هل تريد المتابعة؟",
-      )
-    ) {
-      restoreInputInteractivity();
-      return;
-    }
     recordSmartHistory();
     setPreviewData(null);
     setEntryDirty?.(true);
-    setRows((current) =>
-      current.map((row, rowIndex) => {
-        if (rowIndex <= index || rowIndex > lastIndex || !rowHasData(row)) return row;
-        return {
-          ...row,
-          [key]: source[key] || "",
-          _touched: { ...(row._touched || {}), [key]: true },
-        };
-      }),
-    );
+    const nextRows = rowsRef.current.map((row, rowIndex) => {
+      if (rowIndex <= index || rowIndex > lastIndex || !rowHasData(row))
+        return row;
+      return {
+        ...row,
+        [key]: source[key] ?? "",
+        _touched: { ...(row._touched || {}), [key]: true },
+      };
+    });
+    rowsRef.current = nextRows;
+    markGridMutation();
+    setRows(nextRows);
     restoreInputInteractivity();
   }
 
-  function applyDragFill(sourceIndex, targetIndex) {
+  async function applyDragFill(sourceIndex, targetIndex) {
     if (targetIndex <= sourceIndex) return;
     const source = rowsRef.current[sourceIndex];
     if (!source || !rowHasData(source)) return;
-    if (
-      !window.confirm(
-        `سيتم نسخ الصف ${sourceIndex + 1} إلى الصفوف حتى ${targetIndex + 1}. هل تريد المتابعة؟`,
-      )
-    ) {
+    if (!(await askForConfirmation({
+      title: "تعبئة الصفوف للأسفل",
+      message: `سيتم نسخ الصف ${sourceIndex + 1} إلى الصفوف حتى ${targetIndex + 1}.`,
+      confirmLabel: "تعبئة الصفوف",
+    }))) {
       restoreInputInteractivity();
       return;
     }
     recordSmartHistory();
     setPreviewData(null);
     setEntryDirty?.(true);
-    setRows((current) => {
-      const next = cloneSmartRows(current);
-      while (next.length <= targetIndex) next.push(smartRowFrom());
-      for (let rowIndex = sourceIndex + 1; rowIndex <= targetIndex; rowIndex += 1) {
-        next[rowIndex] = {
-          ...next[rowIndex],
-          ...source,
-          _existingId: next[rowIndex]._existingId,
-          _touched: touchedPatch(smartCellOrder),
-        };
-        delete next[rowIndex]._originalBuildingUnit;
-        delete next[rowIndex]._originalFloorApartment;
-      }
-      return normalizeSmartRows(next);
-    });
+    const next = cloneSmartRows(rowsRef.current);
+    while (next.length <= targetIndex) next.push(smartRowFrom());
+    for (
+      let rowIndex = sourceIndex + 1;
+      rowIndex <= targetIndex;
+      rowIndex += 1
+    ) {
+      const targetIdentity = {
+        _existingId: next[rowIndex]._existingId,
+        _gridId: next[rowIndex]._gridId,
+      };
+      next[rowIndex] = {
+        ...next[rowIndex],
+        ...source,
+        ...targetIdentity,
+        _gridGhost: false,
+        _manualBlank: false,
+        _touched: touchedPatch(smartCellOrder),
+      };
+      delete next[rowIndex]._originalBuildingUnit;
+      delete next[rowIndex]._originalFloorApartment;
+    }
+    const normalized = normalizeSmartRows(next);
+    rowsRef.current = normalized;
+    markGridMutation();
+    setRows(normalized);
     restoreInputInteractivity();
   }
 
@@ -9053,9 +12232,32 @@ function SmartEntryEditor({
     document.addEventListener("pointerup", finish);
   }
 
+  function beginColumnResize(key, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const column = smartDisplayColumns.find((item) => item.key === key);
+    if (!column) return;
+    const startX = event.clientX;
+    const startWidth = resolvedColumnWidth(column);
+    const move = (moveEvent) => {
+      const nextWidth = Math.min(
+        520,
+        Math.max(key === "__index" ? 48 : 68, startWidth + startX - moveEvent.clientX),
+      );
+      setColumnWidths((current) => ({ ...current, [key]: nextWidth }));
+    };
+    const finish = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", finish);
+      restoreInputInteractivity();
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", finish);
+  }
+
   function positionCellSuggestions(cellKey, target, { resetIndex = false } = {}) {
-    setActiveCell(cellKey);
-    if (resetIndex) setActiveSuggestionIndex(0);
+    updateSmartActiveCell(cellKey);
+    if (resetIndex) updateSmartSuggestionIndex(-1);
     if (!target?.getBoundingClientRect) return;
     const rect = target.getBoundingClientRect();
     const visualViewport = window.visualViewport;
@@ -9096,55 +12298,289 @@ function SmartEntryEditor({
     positionCellSuggestions(cellKey, target, { resetIndex: true });
   }
 
-  function applyCellSuggestion(index, key, value) {
-    updateRow(index, key, value);
-    setActiveCell("");
+  function openCellSuggestionsFromFocus(cellKey, target) {
+    window.clearTimeout(suggestionTimerRef.current);
+    const delayUntil = Number(target?.dataset?.suggestionDelayUntil || 0);
+    if (delayUntil > Date.now()) {
+      suggestionTimerRef.current = window.setTimeout(() => {
+        if (document.activeElement === target) {
+          delete target.dataset.suggestionDelayUntil;
+          openCellSuggestions(cellKey, target);
+        }
+      }, delayUntil - Date.now());
+      return;
+    }
+    delete target?.dataset?.suggestionDelayUntil;
+    openCellSuggestions(cellKey, target);
+  }
+
+  function applyCellSuggestion(
+    index,
+    key,
+    value,
+    { moveDown = true, sessionId = activeEditSessionRef.current } = {},
+  ) {
+    const cellKey = `${index}:${key}`;
+    if (!isCurrentSmartEditSession(cellKey, sessionId)) return;
+    const target = document.querySelector(`[data-smart-cell="${cellKey}"]`);
+    const committedValue = String(value ?? "");
+    window.clearTimeout(suggestionTimerRef.current);
+    cellDraftsRef.current.set(cellKey, committedValue);
+    suggestionCommittedCellsRef.current.add(cellKey);
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement
+    ) {
+      target.value = committedValue;
+    } else if (target?.isContentEditable) {
+      target.innerText = committedValue;
+    }
+    flushSync(() => {
+      updateRow(index, key, committedValue);
+    });
+    const committedTarget = document.querySelector(`[data-smart-cell="${cellKey}"]`);
+    if (
+      committedTarget instanceof HTMLInputElement ||
+      committedTarget instanceof HTMLTextAreaElement
+    ) {
+      committedTarget.value = committedValue;
+    } else if (committedTarget?.isContentEditable) {
+      committedTarget.innerText = committedValue;
+    }
+    updateSmartActiveCell("");
     setSuggestionRect(null);
-    ensureNextRow(index, true);
-    focusCell(index + 1, key);
+    updateSmartSuggestionIndex(-1);
+    if (moveDown) {
+      moveSmartCellDown(index, key);
+    } else {
+      updateSmartEditingCell(cellKey);
+      updateSmartSelection(selectionForCells(index, key));
+      focusCellContainer(index, key);
+    }
   }
 
   function closeCellSuggestions() {
     window.setTimeout(() => {
-      setActiveCell("");
+      updateSmartActiveCell("");
       setSuggestionRect(null);
-      setActiveSuggestionIndex(0);
+      updateSmartSuggestionIndex(-1);
     }, 180);
   }
 
-  function handleSuggestionKeyDown(event, index, key, shownOptions) {
-    if (!shownOptions.length || activeCell !== `${index}:${key}`) {
-      handleCellKeyDown(event, index, key);
-      return;
+  function dismissSmartCellUi() {
+    window.clearTimeout(suggestionTimerRef.current);
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    updateSmartSuggestionIndex(-1);
+  }
+
+  function smartCellDraftValue(index, key) {
+    const cellKey = `${index}:${key}`;
+    if (cellDraftsRef.current.has(cellKey)) {
+      return cellDraftsRef.current.get(cellKey);
     }
-    if (event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey)) {
+    const editor = document.querySelector(`[data-smart-cell="${cellKey}"]`);
+    if (
+      editor instanceof HTMLInputElement ||
+      editor instanceof HTMLTextAreaElement ||
+      editor instanceof HTMLSelectElement
+    ) {
+      return editor.value;
+    }
+    if (editor?.isContentEditable) return editor.innerText;
+    return rowsRef.current[index]?.[key] ?? "";
+  }
+
+  function rememberSmartCellDraft(index, key, value, target) {
+    const cellKey = `${index}:${key}`;
+    suggestionCommittedCellsRef.current.delete(cellKey);
+    cellDraftsRef.current.set(cellKey, String(value ?? ""));
+    updateSmartSuggestionIndex(-1);
+    if (Date.now() < nativeHistoryUntilRef.current) return;
+    if (optionsForCell(key).length) {
+      if (activeCellRef.current !== cellKey || !suggestionRect) {
+        openCellSuggestions(cellKey, target);
+      }
+      window.cancelAnimationFrame(suggestionDraftFrameRef.current);
+      suggestionDraftFrameRef.current = window.requestAnimationFrame(() => {
+        setSuggestionDraftVersion((current) => current + 1);
+      });
+    }
+  }
+
+  function isCurrentSmartEditSession(cellKey, sessionId) {
+    if (sessionId === undefined || sessionId === null) return true;
+    return (
+      Number(sessionId) === activeEditSessionRef.current &&
+      editingSessionCellRef.current === cellKey
+    );
+  }
+
+  function commitSmartCellEdit(index, key, draftValue, options = {}) {
+    const cellKey = `${index}:${key}`;
+    if (!isCurrentSmartEditSession(cellKey, options.sessionId)) {
+      return rowsRef.current[index]?.[key] ?? "";
+    }
+    if (suggestionCommittedCellsRef.current.has(cellKey)) {
+      suggestionCommittedCellsRef.current.delete(cellKey);
+      cellDraftsRef.current.delete(cellKey);
+      return rowsRef.current[index]?.[key] ?? "";
+    }
+    const value =
+      draftValue !== undefined ? String(draftValue ?? "") : smartCellDraftValue(index, key);
+    cellDraftsRef.current.delete(cellKey);
+    updateRow(index, key, value);
+    return value;
+  }
+
+  function finishSmartCellEdit(index, key, {
+    draftValue,
+    event,
+    navigation = "none",
+    arrow = "",
+    sessionId = activeEditSessionRef.current,
+  } = {}) {
+    const cellKey = `${index}:${key}`;
+    if (!isCurrentSmartEditSession(cellKey, sessionId)) return false;
+    if (event) {
       event.preventDefault();
-      setActiveSuggestionIndex((current) => (current + 1) % shownOptions.length);
-      return;
+      event.stopPropagation();
     }
-    if (event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)) {
-      event.preventDefault();
-      setActiveSuggestionIndex(
-        (current) => (current - 1 + shownOptions.length) % shownOptions.length,
-      );
-      return;
+    const value =
+      draftValue !== undefined
+        ? draftValue
+        : smartDraftValueFromKeyboardTarget(event, cellKey);
+    commitSmartCellEdit(index, key, value, { sessionId });
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    updateSmartSuggestionIndex(-1);
+    if (navigation === "down") {
+      moveSmartCellDown(index, key);
+      return true;
     }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setActiveCell("");
-      setSuggestionRect(null);
-      return;
+    if (navigation === "arrow" && arrow) {
+      selectSmartCellByArrow(index, key, arrow, event?.shiftKey);
+      return true;
     }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      applyCellSuggestion(
-        index,
-        key,
-        shownOptions[Math.min(activeSuggestionIndex, shownOptions.length - 1)],
-      );
-      return;
+    updateSmartEditingCell("");
+    updateSmartSelection(selectionForCells(index, key));
+    focusCellContainer(index, key);
+    return true;
+  }
+
+  function hasUncommittedSmartCellDraft(cellKey = editingCellRef.current) {
+    const separator = String(cellKey || "").indexOf(":");
+    if (separator <= 0) return false;
+    const index = Number(cellKey.slice(0, separator));
+    const key = cellKey.slice(separator + 1);
+    if (!Number.isInteger(index) || !smartCellOrder.includes(key)) return false;
+    return (
+      String(smartCellDraftValue(index, key) ?? "") !==
+      String(rowsRef.current[index]?.[key] ?? "")
+    );
+  }
+
+  function rowsWithCommittedSmartEditorBuffer(list = rowsRef.current) {
+    const cellKey = editingCellRef.current;
+    const separator = cellKey.indexOf(":");
+    if (separator <= 0) return cloneSmartRows(list);
+    const index = Number(cellKey.slice(0, separator));
+    const key = cellKey.slice(separator + 1);
+    if (
+      !Number.isInteger(index) ||
+      !smartCellOrder.includes(key) ||
+      !list[index]
+    ) {
+      return cloneSmartRows(list);
     }
-    handleCellKeyDown(event, index, key);
+    const value = smartCellDraftValue(index, key);
+    const next = cloneSmartRows(list);
+    const row = next[index];
+    const patch = {
+      [key]: value ?? "",
+      _gridGhost: false,
+      _touched: { ...(row._touched || {}), [key]: true },
+    };
+    if (key === "description") {
+      const defaults = defaultsForDescription(value, next, index);
+      if (defaults) {
+        for (const copyKey of [
+          "building_unit",
+          "floor_apartment",
+          "glass_spec",
+          "profile_spec",
+          "color",
+          "rate",
+          "completion_ratio",
+          "unit_code",
+          "measurement_mode",
+        ]) {
+          if (!row[copyKey] && defaults[copyKey]) {
+            patch[copyKey] = defaults[copyKey];
+            patch._touched[copyKey] = true;
+          }
+        }
+      }
+    }
+    next[index] = { ...row, ...patch };
+    return next;
+  }
+
+  function copySelectedRangeDown() {
+    const selection = rangeSelectionRef.current;
+    const range = normalizedRange();
+    if (!range || range.rowEnd <= range.rowStart) {
+      return false;
+    }
+    const committedRows = rowsWithCommittedSmartEditorBuffer();
+    const viewRows = currentSmartViewRowList();
+    const sourceViewRow = viewRows[range.rowStart];
+    if (!sourceViewRow?._gridId) return false;
+    const sourceRow =
+      committedRows.find((row) => row._gridId === sourceViewRow._gridId) ||
+      sourceViewRow;
+    const targetRowIds = new Set();
+    for (let rowIndex = range.rowStart + 1; rowIndex <= range.rowEnd; rowIndex += 1) {
+      const row = viewRows[rowIndex];
+      if (row?._gridId) targetRowIds.add(row._gridId);
+    }
+    if (!targetRowIds.size) return false;
+    const copyKeys = smartCellOrder.slice(range.colStart, range.colEnd + 1);
+    const normalized = normalizeSmartRows(
+      committedRows.map((row) => {
+        if (!targetRowIds.has(row._gridId)) return row;
+        const patch = {};
+        for (const columnKey of copyKeys) {
+          patch[columnKey] = sourceRow[columnKey] ?? "";
+        }
+        return {
+          ...row,
+          ...patch,
+          _gridGhost: false,
+          _manualBlank: false,
+          _touched: {
+            ...(row._touched || {}),
+            ...touchedPatch(copyKeys),
+          },
+        };
+      }),
+    );
+    recordSmartHistory(committedRows);
+    setPreviewData(null);
+    setEntryDirty?.(true);
+    rowsRef.current = normalized;
+    markGridMutation();
+    setRows(normalized);
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    updateSmartSuggestionIndex(-1);
+    focusSmartCellPoint(
+      selection?.focusCell ||
+        smartCellPointFromViewIndex(range.rowStart, smartCellOrder[range.colStart]),
+    );
+    return true;
   }
 
   function handleCloseEditor() {
@@ -9152,6 +12588,7 @@ function SmartEntryEditor({
     setDeletedRowIds([]);
     setSaving(false);
     setRows([smartRowFrom(variantEntryDefaults())]);
+    updateSmartSelection(null);
     setEditingId?.(null);
     setEntryDirty?.(false);
     (onCloseContext || onBack)?.({ force: true });
@@ -9173,26 +12610,26 @@ function SmartEntryEditor({
     }
     const missing = [];
     if (!entryForm.document_type) missing.push("نوع المستند");
-    if (!entryForm.party_category) missing.push("تصنيف العميل");
-    if (!String(entryForm.base_party_name || "").trim())
+    if (!isDocumentEdit && !entryForm.party_category) missing.push("تصنيف العميل");
+    if (!isDocumentEdit && !String(entryForm.base_party_name || "").trim())
       missing.push("اسم العميل/المقاول");
-    if (!String(entryForm.project || "").trim()) missing.push("المشروع");
-    if (
+    if (!isDocumentEdit && !String(entryForm.project || "").trim()) missing.push("المشروع");
+    if (!isDocumentEdit &&
       entryForm.document_type !== "contractor_certificate" &&
       !String(entryForm.work_type || "").trim()
     )
       missing.push("نوع الأعمال");
-    if (
+    if (!isDocumentEdit &&
       entryForm.document_type === "contractor_certificate" &&
       !selectedWorkTypes.length
     )
       missing.push("نوع أعمال واحد على الأقل");
-    if (
+    if (!isDocumentEdit &&
       entryForm.document_type === "contractor_certificate" &&
       !String(entryForm.certificate_no || "").trim()
     )
       missing.push("رقم المستخلص");
-    if (!String(entryForm.entry_date || "").trim()) missing.push("التاريخ");
+    if (!isDocumentEdit && !String(entryForm.entry_date || "").trim()) missing.push("التاريخ");
     if (missing.length)
       return `لا يمكن الحفظ قبل استكمال البيانات الرئيسية: ${missing.join("، ")}`;
     return "";
@@ -9204,7 +12641,7 @@ function SmartEntryEditor({
       setMessage(validation);
       return null;
     }
-    if (!rowData.length) {
+    if (!rowData.length && !isDocumentEdit) {
       setMessage(
         "لا يمكن الحفظ أو المعاينة بدون إدخال بند واحد على الأقل في الجدول.",
       );
@@ -9222,8 +12659,12 @@ function SmartEntryEditor({
         {
           ...row,
           id: `draft-${index + 1}`,
-          building_unit: row.building_unit || entryForm.building_unit,
-          floor_apartment: row.floor_apartment || entryForm.floor_apartment,
+          building_unit: row._touched?.building_unit
+            ? row.building_unit || ""
+            : row.building_unit || entryForm.building_unit,
+          floor_apartment: row._touched?.floor_apartment
+            ? row.floor_apartment || ""
+            : row.floor_apartment || entryForm.floor_apartment,
           entry_date: entryForm.entry_date,
           work_type: row.work_type || entryForm.work_type,
         },
@@ -9270,6 +12711,8 @@ function SmartEntryEditor({
           : entryForm.document_type === "contractor_certificate"
             ? "contractor"
             : "offer",
+      vat_enabled: !!entryForm.vat_enabled,
+      vat_terms_only: !!entryForm.vat_terms_only,
       operation_no: entryForm.operation_no || nextDoc?.operation_no || "Auto",
       serial: entryForm.serial || nextDoc?.next_no || "",
       party:
@@ -9277,7 +12720,9 @@ function SmartEntryEditor({
           ? `شركة ${entryForm.base_party_name}`
           : entryForm.party_category === "unselected"
             ? entryForm.base_party_name
-            : `م. ${entryForm.base_party_name}`,
+            : entryForm.party_category === "engineer"
+              ? `م. ${entryForm.base_party_name}`
+              : entryForm.base_party_name,
       project: entryForm.project,
       building_unit: documentLocation,
       overall_work_type: uniqueValues(calculatedRows.map((row) => row.work_type)).join("، "),
@@ -9320,72 +12765,96 @@ function SmartEntryEditor({
     const preview = previewData || buildPreview();
     if (!preview) return;
     const rowsToSave = (preview.rows || []).filter(rowHasData);
-    if (!rowsToSave.length) {
+    if (!rowsToSave.length && !isDocumentEdit) {
       setMessage("Cannot save a document without at least one real item row.");
       return;
     }
     const documentLocation = singleDocumentLocation(entryForm, rowsToSave);
     const targetNo = entryForm.operation_no || nextDoc?.operation_no || "Auto";
-    if (
-      !window.confirm(
-        `Save ${rowsToSave.length} item(s) under document ${targetNo}? The document number will be fixed after saving.`,
-      )
-    ) {
+    if (!(await askForConfirmation({
+      title: "اعتماد وحفظ المستند",
+      message: `سيتم حفظ ${rowsToSave.length} بند تحت المستند ${targetNo}. يثبت رقم المستند بعد الحفظ.`,
+      confirmLabel: "حفظ المستند",
+    }))) {
       restoreInputInteractivity();
       return;
     }
     setSaving(true);
     try {
+      const saveRevision = gridRevisionRef.current;
       let documentId = entryForm.document_id || "";
       let operationNo = documentId ? entryForm.operation_no || "" : "";
       let serial = documentId ? entryForm.serial || "" : "";
       let firstSaved = null;
       let lastSaved = null;
-      for (const id of deletedRowIds) {
-        await api.request(`/api/entries/${id}`, { method: "DELETE" });
-      }
-      for (const row of rowsToSave) {
+      let batchSavedRows = [];
+      const emptiedExistingRowIds = rows
+        .filter((row) => row._existingId && !rowHasData(row))
+        .map((row) => row._existingId);
+      const deleteIds = [
+        ...new Set([...deletedRowIds, ...emptiedExistingRowIds]),
+      ];
+      const batchRows = rowsToSave.map((row) => {
         const existingId = row._existingId;
         const {
           _existingId,
+          _gridId,
+          _gridGhost,
+          _manualBlank,
           _touched,
           _originalBuildingUnit,
           _originalFloorApartment,
           id: _draftId,
           ...cleanRow
         } = row;
-        const path = existingId ? `/api/entries/${existingId}` : "/api/entries";
-        const savedBuildingUnit =
-          existingId && !_touched?.building_unit && !cleanRow.building_unit
-            ? _originalBuildingUnit || entryForm.building_unit
-            : cleanRow.building_unit || entryForm.building_unit;
-        const savedFloorApartment =
-          existingId && !_touched?.floor_apartment && !cleanRow.floor_apartment
-            ? _originalFloorApartment || entryForm.floor_apartment
-            : cleanRow.floor_apartment || entryForm.floor_apartment;
-        const saved = await api.request(path, {
-          method: existingId ? "PUT" : "POST",
-          body: JSON.stringify({
+        const savedBuildingUnit = _touched?.building_unit
+          ? cleanRow.building_unit || ""
+          : cleanRow.building_unit || _originalBuildingUnit || entryForm.building_unit || "";
+        const savedFloorApartment = _touched?.floor_apartment
+          ? cleanRow.floor_apartment || ""
+          : cleanRow.floor_apartment ||
+            _originalFloorApartment ||
+            entryForm.floor_apartment ||
+            "";
+        return {
+          client_row_id: _gridId,
+          existing_id: existingId || null,
+          data: {
             ...entryForm,
             ...cleanRow,
-            document_id: documentId,
-            serial: documentId ? serial : "",
-            operation_no: documentId ? operationNo : "",
             customer_name: entryForm.base_party_name,
             customer_display_name: "",
             building_unit: savedBuildingUnit,
             floor_apartment: savedFloorApartment,
             created_by: currentUser?.display_name,
             updated_by: currentUser?.display_name,
+          },
+        };
+      });
+      if (batchRows.length || deleteIds.length) {
+        const batchStartedAt = performanceStart();
+        const batch = await api.request("/api/entries/batch", {
+          method: "POST",
+          body: JSON.stringify({
+            document_id: documentId,
+            operation_no: operationNo,
+            serial,
+            delete_ids: deleteIds,
+            rows: batchRows,
           }),
         });
-        if (!saved || !saved.id)
-          throw new Error("Server saved no row. Please retry after refresh.");
-        if (!firstSaved) firstSaved = saved;
-        lastSaved = saved;
-        documentId = saved.document_id || documentId;
-        operationNo = saved.operation_no || operationNo;
-        serial = saved.serial || serial;
+        const savedRows = batch?.rows || [];
+        batchSavedRows = savedRows;
+        firstSaved = savedRows[0] || null;
+        lastSaved = savedRows.at(-1) || null;
+        documentId = batch?.document_id || firstSaved?.document_id || documentId;
+        operationNo =
+          batch?.operation_no || firstSaved?.operation_no || operationNo;
+        serial = batch?.serial || firstSaved?.serial || serial;
+        logDevelopmentPerformance(
+          `Persistence batch ${batchRows.length} rows`,
+          batchStartedAt,
+        );
       }
       let updatedDocument = null;
       if (documentId) {
@@ -9434,19 +12903,58 @@ function SmartEntryEditor({
         document_type: entryForm.document_type,
         document_status: meta.status,
         party_role: meta.role,
-        party_category: entryForm.party_category || "retail",
+        party_category: entryForm.party_category || "unselected",
       });
       setMessage(
         `Saved document ${operationNo || ""} with ${rowsToSave.length} item(s).`,
       );
-      setEntryForm(resetEntry);
-      setRows([smartRowFrom(resetEntry)]);
-      setDeletedRowIds([]);
-      setPreviewData(null);
-      setEditingId(null);
-      setEntryDirty?.(false);
-      await refreshAll?.();
-      onDocumentSaved?.(savedDocument);
+      const saveFinishedWithoutNewEdits =
+        gridRevisionRef.current === saveRevision;
+      if (saveFinishedWithoutNewEdits) {
+        const resetRows = [smartRowFrom(resetEntry)];
+        setEntryForm(resetEntry);
+        rowsRef.current = resetRows;
+        setRows(resetRows);
+        updateSmartSelection(null);
+        deletedRowIdsRef.current = [];
+        setDeletedRowIds([]);
+        setPreviewData(null);
+        setEditingId(null);
+        setEntryDirty?.(false);
+      } else {
+        const savedIdByGridId = new Map(
+          batchSavedRows
+            .filter(Boolean)
+            .map((saved) => [saved.client_row_id, saved.id]),
+        );
+        const reconciledRows = rowsRef.current.map((row) => ({
+          ...row,
+          _existingId:
+            savedIdByGridId.get(row._gridId) || row._existingId || "",
+        }));
+        rowsRef.current = reconciledRows;
+        setRows(reconciledRows);
+        const savedDeleteIds = new Set(deleteIds.map(Number));
+        const remainingDeletedIds = deletedRowIdsRef.current.filter(
+          (id) => !savedDeleteIds.has(Number(id)),
+        );
+        deletedRowIdsRef.current = remainingDeletedIds;
+        setDeletedRowIds(remainingDeletedIds);
+        setEntryForm((current) => ({
+          ...current,
+          document_id: documentId,
+          operation_no: operationNo,
+          serial,
+        }));
+        setEntryDirty?.(true);
+        setMessage(
+          "تم حفظ النسخة المرسلة، والتعديلات التي أُدخلت أثناء الحفظ ما زالت غير محفوظة.",
+        );
+      }
+      if (saveFinishedWithoutNewEdits) {
+        await refreshAll?.();
+        onDocumentSaved?.(savedDocument);
+      }
     } catch (error) {
       setMessage(`Could not save document: ${error.message}`);
     } finally {
@@ -9469,103 +12977,716 @@ function SmartEntryEditor({
     );
   }
 
-  function deleteSmartRow(index) {
-    const isLastRow = index === rows.length - 1;
-    if (!isLastRow && !window.confirm("حذف هذا البند نهائياً من المستند؟")) {
+  async function deleteSmartSelection(fallbackIndex = null) {
+    const range = normalizedRange();
+    const viewRows = currentSmartViewRowList();
+    const selectedRowIds = new Set();
+    for (let rowIndex = range?.rowStart ?? 0; rowIndex <= (range?.rowEnd ?? -1); rowIndex += 1) {
+      const row = viewRows[rowIndex];
+      if (row?._gridId) selectedRowIds.add(row._gridId);
+    }
+    if (
+      !range ||
+      (fallbackIndex !== null &&
+        !selectedRowIds.has(rowsRef.current[fallbackIndex]?._gridId))
+    ) {
+      return false;
+    }
+    const fullRowsSelected =
+      range.colStart === 0 && range.colEnd === smartCellOrder.length - 1;
+    if (!fullRowsSelected) {
+      recordSmartHistory();
+      setPreviewData(null);
+      setEntryDirty?.(true);
+      const nextRows = normalizeSmartRows(
+        rowsRef.current.map((row, rowIndex) => {
+          if (!selectedRowIds.has(row._gridId)) return row;
+          const patch = {};
+          const touched = { ...(row._touched || {}) };
+          for (let column = range.colStart; column <= range.colEnd; column += 1) {
+            const key = smartCellOrder[column];
+            patch[key] = "";
+            touched[key] = true;
+          }
+          return { ...row, ...patch, _touched: touched };
+        }),
+      );
+      rowsRef.current = nextRows;
+      markGridMutation();
+      setRows(nextRows);
+      updateSmartActiveCell("");
+      setSuggestionRect(null);
       restoreInputInteractivity();
-      return;
+      return true;
+    }
+    const selectedIndexes = new Set();
+    rowsRef.current.forEach((row, index) => {
+      if (selectedRowIds.has(row._gridId) && rowHasData(row)) selectedIndexes.add(index);
+    });
+    if (!selectedIndexes.size) return true;
+    if (!(await askForConfirmation({
+      title: "حذف الصفوف المحددة",
+      message: `سيتم حذف ${selectedIndexes.size} صف محدد من المستند عند الحفظ.`,
+      confirmLabel: "حذف الصفوف",
+      danger: true,
+    }))) {
+      restoreInputInteractivity();
+      return true;
     }
     recordSmartHistory();
     setPreviewData(null);
     setEntryDirty?.(true);
-    const removed = rows[index];
-    if (!isLastRow && removed?._existingId)
-      setDeletedRowIds((ids) =>
-        ids.includes(removed._existingId) ? ids : [...ids, removed._existingId],
-      );
-    setRows((current) => {
-      if (index === current.length - 1) return current.map((row, rowIndex) =>
-        rowIndex === index ? smartRowFrom() : row,
-      );
-      if (current.length <= 1) return [smartRowFrom()];
-      const next = current.filter((_, rowIndex) => rowIndex !== index);
-      return next.some((row) => !rowHasData(row))
-        ? next
-        : [...next, smartRowFrom()];
-    });
+    const ids = [...selectedIndexes]
+      .map((index) => rowsRef.current[index]?._existingId)
+      .filter(Boolean);
+    if (ids.length) {
+      const nextDeletedIds = [
+        ...new Set([...deletedRowIdsRef.current, ...ids]),
+      ];
+      deletedRowIdsRef.current = nextDeletedIds;
+      setDeletedRowIds(nextDeletedIds);
+    }
+    const nextRows = normalizeSmartRows(
+      rowsRef.current.filter((_, rowIndex) => !selectedIndexes.has(rowIndex)),
+    );
+    rowsRef.current = nextRows;
+    markGridMutation();
+    setRows(nextRows);
+    const nextIndex = Math.min(range.rowStart, nextRows.length - 1);
+    const nextSelection = selectionForCells(
+      nextIndex,
+      smartCellOrder[range.colStart] || smartCellOrder[0],
+    );
+    updateSmartSelection(nextSelection);
+    updateSmartEditingCell("");
+    focusSmartCellPoint(nextSelection?.focusCell);
     restoreInputInteractivity();
+    return true;
+  }
+
+  function focusCellContainer(index, key, attempt = 0) {
+    window.requestAnimationFrame(() => {
+      const target = document.querySelector(
+        `[data-smart-cell-container="${index}:${key}"]`,
+      );
+      if (!target && attempt < 2) {
+        const scrollHost = smartTableScrollRef.current;
+        if (scrollHost) {
+          const visualIndex = smartViewRowsRef.current.findIndex(
+            (entry) => entry.index === index,
+          );
+          const scrollIndex = visualIndex >= 0 ? visualIndex : index;
+          scrollHost.scrollTop = Math.max(
+            0,
+            scrollIndex * Math.max(42, rowHeightRef.current) -
+              scrollHost.clientHeight / 2,
+          );
+          setSmartViewport({
+            scrollTop: scrollHost.scrollTop,
+            height: scrollHost.clientHeight || 640,
+          });
+        }
+        focusCellContainer(index, key, attempt + 1);
+        return;
+      }
+      target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      target?.focus({ preventScroll: true });
+    });
+  }
+
+  function focusSmartCellPoint(point) {
+    const rowIndex = smartActualIndexForPoint(point);
+    if (rowIndex < 0) return;
+    focusCellContainer(rowIndex, point.columnKey);
+  }
+
+  function moveSmartCellDown(index, key) {
+    const currentPoint = smartCellPoint(index, key);
+    const currentVisual = smartCellIndexes(currentPoint);
+    const viewRows = currentSmartViewRowList();
+    const nextVisualIndex =
+      currentVisual?.rowIndex === undefined ? -1 : currentVisual.rowIndex + 1;
+    let nextIndex =
+      nextVisualIndex >= 0 && nextVisualIndex < smartViewRowsRef.current.length
+        ? smartViewRowsRef.current[nextVisualIndex].index
+        : index + 1;
+    window.clearTimeout(suggestionTimerRef.current);
+    if (nextIndex >= rowsRef.current.length) {
+      const next = [...rowsRef.current];
+      while (next.length <= nextIndex) next.push(smartRowFrom());
+      const normalized = normalizeSmartRows(next);
+      rowsRef.current = normalized;
+      flushSync(() => setRows(normalized));
+      nextIndex = Math.min(nextIndex, normalized.length - 1);
+    } else if (viewRows.length && nextVisualIndex >= viewRows.length) {
+      nextIndex = Math.min(rowsRef.current.length - 1, nextIndex);
+    }
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    updateSmartSuggestionIndex(-1);
+    updateSmartSelection(selectionForCells(nextIndex, key));
+    focusCellContainer(nextIndex, key);
+  }
+
+  function selectSmartCell(index, key, extend = false) {
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    const destination = smartCellPoint(index, key);
+    updateSmartSelection((current) =>
+      smartSelectionAfterNavigation({
+        selection: current,
+        destination,
+        extendSelection: extend,
+      }),
+    );
+    focusCellContainer(index, key);
+  }
+
+  function beginSmartCellEdit(index, key, replacement) {
+    const cellKey = `${index}:${key}`;
+    suggestionCommittedCellsRef.current.delete(cellKey);
+    cellDraftsRef.current.set(
+      cellKey,
+      String(
+        replacement !== undefined
+          ? replacement
+          : rowsRef.current[index]?.[key] ?? "",
+      ),
+    );
+    updateSmartEditingCell(cellKey);
+    const sessionId = activeEditSessionRef.current;
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      if (
+        sessionId !== activeEditSessionRef.current ||
+        editingSessionCellRef.current !== cellKey
+      ) {
+        return;
+      }
+      const target = document.querySelector(`[data-smart-cell="${cellKey}"]`);
+      target?.focus({ preventScroll: true });
+      const anchor =
+        document.querySelector(`[data-smart-cell-container="${cellKey}"]`) ||
+        target;
+      if (replacement !== undefined && anchor && optionsForCell(key).length) {
+        positionCellSuggestions(cellKey, anchor, { resetIndex: true });
+      }
+      if (target instanceof HTMLInputElement) {
+        target.setSelectionRange?.(target.value.length, target.value.length);
+      }
+      if (target?.isContentEditable) {
+        const selection = window.getSelection?.();
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        range.collapse(false);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+    }));
+  }
+
+  function smartCellFromKeyboardEvent(event) {
+    const container = event.target?.closest?.("[data-smart-cell-container]");
+    const encoded = container?.getAttribute?.("data-smart-cell-container") || "";
+    const separator = encoded.indexOf(":");
+    if (separator > 0) {
+      const index = Number(encoded.slice(0, separator));
+      const key = encoded.slice(separator + 1);
+      if (Number.isInteger(index) && smartCellOrder.includes(key)) {
+        return { index, key, cellKey: `${index}:${key}` };
+      }
+    }
+    const focus = smartCellIndexes(rangeSelectionRef.current?.focusCell);
+    if (!focus) return null;
+    const focusPoint = rangeSelectionRef.current?.focusCell;
+    const key = focusPoint?.columnKey || smartCellOrder[focus.columnIndex];
+    const index = smartActualIndexForPoint(focusPoint);
+    if (index < 0) return null;
+    return { index, key, cellKey: `${index}:${key}` };
+  }
+
+  function shownSuggestionsForCell(index, key) {
+    const options = optionsForCell(key);
+    const typed = normalizeArabic(smartCellDraftValue(index, key) || "");
+    const matching = options.filter(
+      (option) => !typed || normalizeArabic(option).includes(typed),
+    );
+    return (typed ? matching : options).slice(0, 8);
+  }
+
+  function smartDraftValueFromKeyboardTarget(event, cellKey) {
+    const target = event?.target;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement
+    ) {
+      return target.value;
+    }
+    if (target?.isContentEditable) return target.innerText;
+    const editor = document.querySelector(`[data-smart-cell="${cellKey}"]`);
+    if (
+      editor instanceof HTMLInputElement ||
+      editor instanceof HTMLTextAreaElement ||
+      editor instanceof HTMLSelectElement
+    ) {
+      return editor.value;
+    }
+    if (editor?.isContentEditable) return editor.innerText;
+    return undefined;
+  }
+
+  function selectSmartCellByArrow(index, key, arrow, extend = false) {
+    const selection = rangeSelectionRef.current || selectionForCells(index, key);
+    const viewRows = currentSmartViewRowList();
+    const currentFocus = smartCellIndexes(selection?.focusCell) || {
+      rowIndex: Math.max(
+        0,
+        viewRows.findIndex(
+          (row) => row._gridId === rowsRef.current[index]?._gridId,
+        ),
+      ),
+      columnIndex: smartCellOrder.indexOf(key),
+    };
+    const nextRow =
+      arrow === "ArrowDown"
+        ? Math.min(viewRows.length - 1, currentFocus.rowIndex + 1)
+        : arrow === "ArrowUp"
+          ? Math.max(0, currentFocus.rowIndex - 1)
+          : currentFocus.rowIndex;
+    const nextColumn =
+      arrow === "ArrowLeft"
+        ? Math.min(smartCellOrder.length - 1, currentFocus.columnIndex + 1)
+        : arrow === "ArrowRight"
+          ? Math.max(0, currentFocus.columnIndex - 1)
+          : currentFocus.columnIndex;
+    const destination = smartCellPointFromViewIndex(
+      nextRow,
+      smartCellOrder[nextColumn],
+    );
+    const nextSelection = smartSelectionAfterNavigation({
+      selection,
+      destination,
+      extendSelection: extend,
+    });
+    updateSmartSelection(nextSelection);
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    updateSmartSuggestionIndex(-1);
+    focusSmartCellPoint(nextSelection?.focusCell);
+  }
+
+  function handleGridKeyDown(event) {
+    const cell = smartCellFromKeyboardEvent(event);
+    if (!cell) return;
+    const { index, key, cellKey } = cell;
+    const controlPressed = event.ctrlKey || event.metaKey;
+    const arrowKey = [
+      "ArrowDown",
+      "ArrowUp",
+      "ArrowLeft",
+      "ArrowRight",
+    ].includes(event.key);
+    const isEditing = editingCellRef.current === cellKey;
+    const selection =
+      rangeSelectionRef.current || selectionForCells(index, key);
+
+    if (isSmartFillDownShortcut(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) copySelectedRangeDown();
+      return;
+    }
+
+    if (controlPressed && arrowKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      updateSmartEditingCell("");
+      updateSmartActiveCell("");
+      setSuggestionRect(null);
+      const focusCell = selection?.focusCell || smartCellPoint(index, key);
+      const destination = findSmartCtrlArrowDestination({
+        rows: rowsRef.current,
+        columnOrder: smartCellOrder,
+        focusCell,
+        direction: event.key,
+      });
+      const nextSelection = smartSelectionAfterNavigation({
+        selection,
+        destination,
+        extendSelection: event.shiftKey,
+      });
+      updateSmartSelection(nextSelection);
+      focusSmartCellPoint(nextSelection?.focusCell);
+      return;
+    }
+
+    if (controlPressed && event.key.toLowerCase() === "c") {
+      if (!hasSelectedTextInsideEditor(event.target)) {
+        const selectedText = selectedRangeText();
+        if (selectedText) {
+          event.preventDefault();
+          event.stopPropagation();
+          rememberSmartClipboard(selectedText);
+          copyTextToClipboard(selectedText).catch(() => {});
+        }
+      }
+      return;
+    }
+
+    const shownOptions = shownSuggestionsForCell(index, key);
+    const suggestionsOpen =
+      isEditing &&
+      activeCellRef.current === cellKey &&
+      shownOptions.length > 0;
+    const hasExplicitSuggestion =
+      suggestionsOpen &&
+      activeSuggestionIndexRef.current >= 0 &&
+      activeSuggestionIndexRef.current < shownOptions.length;
+
+    if (isEditing) {
+      if (
+        suggestionsOpen &&
+        (event.key === "ArrowDown" ||
+          event.key === "ArrowUp")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        const delta =
+          event.key === "ArrowUp" ? -1 : 1;
+        updateSmartSuggestionIndex(
+          (current) => {
+            if (current < 0) return delta > 0 ? 0 : shownOptions.length - 1;
+            return (current + delta + shownOptions.length) % shownOptions.length;
+          },
+        );
+        return;
+      }
+      if (event.key === "Enter") {
+        if (event.repeat) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        const sessionId = activeEditSessionRef.current;
+        if (hasExplicitSuggestion) {
+          event.preventDefault();
+          event.stopPropagation();
+          applyCellSuggestion(
+            index,
+            key,
+            shownOptions[activeSuggestionIndexRef.current],
+            { moveDown: true, sessionId },
+          );
+        } else {
+          finishSmartCellEdit(index, key, {
+            event,
+            draftValue: smartDraftValueFromKeyboardTarget(event, cellKey),
+            navigation: "down",
+            sessionId,
+          });
+        }
+        return;
+      }
+      if (SMART_NUMERIC_CLIPBOARD_KEYS.has(key) && arrowKey) {
+        if (event.repeat) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        finishSmartCellEdit(index, key, {
+          event,
+          draftValue: smartDraftValueFromKeyboardTarget(event, cellKey),
+          navigation: "arrow",
+          arrow: event.key,
+          sessionId: activeEditSessionRef.current,
+        });
+        return;
+      }
+      if (event.key === "Escape") {
+        finishSmartCellEdit(index, key, {
+          event,
+          draftValue: smartDraftValueFromKeyboardTarget(event, cellKey),
+          sessionId: activeEditSessionRef.current,
+        });
+        return;
+      }
+      if (event.key === "Tab" && !suggestionsOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        const sessionId = activeEditSessionRef.current;
+        if (!isCurrentSmartEditSession(cellKey, sessionId)) return;
+        commitSmartCellEdit(
+          index,
+          key,
+          smartDraftValueFromKeyboardTarget(event, cellKey),
+          { sessionId },
+        );
+        const columnIndex = smartCellOrder.indexOf(key);
+        const nextColumn = event.shiftKey
+          ? Math.max(0, columnIndex - 1)
+          : Math.min(smartCellOrder.length - 1, columnIndex + 1);
+        selectSmartCell(index, smartCellOrder[nextColumn], false);
+      }
+      // In edit mode all unhandled arrows remain native caret/text navigation.
+      return;
+    }
+
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteSmartSelection(index);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      moveSmartCellDown(index, key);
+      return;
+    }
+    if (event.key === "F2") {
+      event.preventDefault();
+      return;
+    }
+    if (
+      event.key.length === 1 &&
+      !controlPressed &&
+      !event.altKey
+    ) {
+      event.preventDefault();
+      beginSmartCellEdit(
+        index,
+        key,
+        ["unit_code", "measurement_mode"].includes(key)
+          ? undefined
+          : event.key,
+      );
+      return;
+    }
+    if (!arrowKey) return;
+
+    event.preventDefault();
+    selectSmartCellByArrow(index, key, event.key, event.shiftKey);
+  }
+
+  async function deleteSmartRowById(rowId, { ignoreSelection = false } = {}) {
+    dismissSmartCellUi();
+    const initialIndex = rowsRef.current.findIndex(
+      (row) => row._gridId === rowId,
+    );
+    if (initialIndex < 0) return;
+    const selectedRange = normalizedRange();
+    const hasRealRangeSelection =
+      selectedRange &&
+      (selectedRange.rowStart !== selectedRange.rowEnd ||
+        selectedRange.colStart !== selectedRange.colEnd);
+    if (
+      !ignoreSelection &&
+      hasRealRangeSelection &&
+      initialIndex >= selectedRange.rowStart &&
+      initialIndex <= selectedRange.rowEnd &&
+      (await deleteSmartSelection(initialIndex))
+    ) {
+      return;
+    }
+    const removed = rowsRef.current[initialIndex];
+    const isEmptyDraftRow = !rowHasData(removed) && !removed?._existingId;
+    if (!isEmptyDraftRow && !(await askForConfirmation({
+      title: "هل تريد حذف هذا الصف؟",
+      message: "سيتم حذف هذا الصف نهائياً من المستند عند الحفظ.",
+      confirmLabel: "حذف",
+      danger: true,
+    }))) {
+      restoreInputInteractivity();
+      return;
+    }
+    const index = rowsRef.current.findIndex((row) => row._gridId === rowId);
+    if (index < 0) {
+      restoreInputInteractivity();
+      return;
+    }
+    const latestRemoved = rowsRef.current[index];
+    recordSmartHistory();
+    setPreviewData(null);
+    setEntryDirty?.(true);
+    if (latestRemoved?._existingId) {
+      const nextDeletedIds = deletedRowIdsRef.current.includes(latestRemoved._existingId)
+        ? deletedRowIdsRef.current
+        : [...deletedRowIdsRef.current, latestRemoved._existingId];
+      deletedRowIdsRef.current = nextDeletedIds;
+      setDeletedRowIds(nextDeletedIds);
+    }
+    const removal = removeSmartRowById(rowsRef.current, rowId);
+    if (!removal) {
+      restoreInputInteractivity();
+      return;
+    }
+    const nextRows = normalizeSmartRows(removal.rows);
+    rowsRef.current = nextRows;
+    markGridMutation();
+    setRows(nextRows);
+    const nextIndex = Math.min(index, nextRows.length - 1);
+    const nextSelection = selectionForCells(
+      nextIndex,
+      smartCellOrder[0],
+    );
+    updateSmartSelection(nextSelection);
+    focusSmartCellPoint(nextSelection?.focusCell);
+    restoreInputInteractivity();
+  }
+
+  async function deleteSmartRow(index) {
+    const rowId = rowsRef.current[index]?._gridId;
+    if (rowId) await deleteSmartRowById(rowId);
   }
 
   const rowInput = (index, key, extra = {}) => {
     const { list: _unusedList, ...inputProps } = extra;
     const value = rows[index][key] || "";
+    const numericCell = SMART_NUMERIC_CLIPBOARD_KEYS.has(key);
+    const cellInputProps = { ...inputProps };
+    if (numericCell || cellInputProps.type === "number") {
+      delete cellInputProps.step;
+      delete cellInputProps.min;
+      delete cellInputProps.max;
+      cellInputProps.type = "text";
+      cellInputProps.inputMode = "decimal";
+      cellInputProps.onWheel = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      };
+    }
     const options = optionsForCell(key);
-    const typed = normalizeArabic(value);
-    const shownOptions = options
-      .filter((option) => !typed || normalizeArabic(option).includes(typed))
-      .slice(0, 8);
     const cellKey = `${index}:${key}`;
-    const showSuggestions = activeCell === cellKey && shownOptions.length > 0;
-    const highlightedSuggestionIndex = shownOptions.length
-      ? Math.min(activeSuggestionIndex, shownOptions.length - 1)
-      : 0;
+    const cellEditSessionId = editingCell === cellKey ? activeEditSession : 0;
+    const editorValue =
+      editingCell === cellKey && cellDraftsRef.current.has(cellKey)
+        ? cellDraftsRef.current.get(cellKey)
+        : value;
+    const typed = normalizeArabic(editorValue);
+    const matchingOptions = options.filter(
+      (option) => !typed || normalizeArabic(option).includes(typed),
+    );
+    const shownOptions = (typed ? matchingOptions : options).slice(0, 8);
+    const showSuggestions =
+      editingCell === cellKey && activeCell === cellKey && shownOptions.length > 0;
+    const highlightedSuggestionIndex =
+      activeSuggestionIndex >= 0 && activeSuggestionIndex < shownOptions.length
+        ? activeSuggestionIndex
+        : -1;
     const multiline = [
       "description",
       "glass_spec",
       "profile_spec",
       "color",
     ].includes(key);
-    const InputTag = multiline ? "textarea" : "input";
+    const focusHandlers = {
+      onFocus: (event) => {
+        updateSmartSelection(selectionForCells(index, key));
+        if (
+          editingCellRef.current === cellKey &&
+          activeCellRef.current === cellKey
+        ) {
+          openCellSuggestionsFromFocus(cellKey, event.currentTarget);
+        }
+      },
+      onClick: (event) => {
+        window.clearTimeout(suggestionTimerRef.current);
+        delete event.currentTarget.dataset.suggestionDelayUntil;
+      },
+      onDoubleClick: (event) => {
+        event.stopPropagation();
+        window.clearTimeout(suggestionTimerRef.current);
+        delete event.currentTarget.dataset.suggestionDelayUntil;
+      },
+      onBlur: closeCellSuggestions,
+    };
     return (
       <div
         className={`cell-combo${isCellSelected(index, key) ? " selected-cell" : ""}${fieldCopyDownKeys.has(key) ? " copyable-cell" : ""}`}
-        title="Suggestions open on one click or Tab focus. Use Tab, Shift+Tab, Arrow Up, or Arrow Down to browse."
-        onPointerDown={() =>
-          setRangeSelection({
-            startRow: index,
-            startKey: key,
-            endRow: index,
-            endKey: key,
-          })
-        }
+        data-smart-cell-container={cellKey}
+        data-suggestion-options-count={options.length}
+        data-suggestions-open={showSuggestions ? "true" : "false"}
+        tabIndex={0}
+        aria-expanded={showSuggestions}
+        aria-label={`${smartDisplayColumns.find((column) => column.key === key)?.label || key}، الصف ${index + 1}`}
+        onContextMenu={(event) => openSmartCellMenu(event, index, key)}
+        onPointerDown={(event) => {
+          if (event.button === 2) return;
+          if (event.target.closest?.(".cell-copy-down-button")) return;
+          if (editingCell === cellKey) return;
+          event.preventDefault();
+          selectSmartCell(index, key, event.shiftKey);
+        }}
+        onDoubleClick={(event) => {
+          if (event.target.closest?.(".cell-copy-down-button")) return;
+          event.preventDefault();
+          beginSmartCellEdit(index, key);
+        }}
         onPointerEnter={(event) => {
           if (event.buttons !== 1 || !rangeSelection) return;
-          setRangeSelection((current) => ({
-            startRow: current?.startRow ?? index,
-            startKey: current?.startKey ?? key,
-            endRow: index,
-            endKey: key,
-          }));
+          const destination = smartCellPoint(index, key);
+          updateSmartSelection((current) =>
+            smartSelectionAfterNavigation({
+              selection: current,
+              destination,
+              extendSelection: true,
+            }),
+          );
         }}
       >
-        <InputTag
-          {...inputProps}
-          data-smart-cell={cellKey}
-          value={value}
-          data-smart-cell-anchor={cellKey}
-          onFocus={(event) => {
-            setRangeSelection({
-              startRow: index,
-              startKey: key,
-              endRow: index,
-              endKey: key,
-            });
-            openCellSuggestions(cellKey, event.currentTarget);
-          }}
-          onClick={(event) => openCellSuggestions(cellKey, event.currentTarget)}
-          onDoubleClick={(event) => {
-            event.stopPropagation();
-            openCellSuggestions(cellKey, event.currentTarget);
-          }}
-          onChange={(event) => {
-            openCellSuggestions(cellKey, event.currentTarget);
-            updateRow(index, key, event.target.value);
-          }}
-          onPaste={(event) => handleSmartPaste(event, index, key)}
-          onKeyDown={(event) => handleSuggestionKeyDown(event, index, key, shownOptions)}
-          autoComplete="off"
-          dir={extra.dir || "auto"}
-        />
+        {multiline ? (
+          <SmartMultilineInput
+            data-smart-cell={cellKey}
+            data-smart-cell-anchor={cellKey}
+            data-cell-editing={editingCell === cellKey ? "true" : "false"}
+            tabIndex={editingCell === cellKey ? 0 : -1}
+            editSessionId={cellEditSessionId}
+            value={editorValue}
+            {...focusHandlers}
+            onDraftChange={(nextValue, event) => {
+              rememberSmartCellDraft(
+                index,
+                key,
+                nextValue,
+                event.currentTarget,
+              );
+            }}
+            onCommit={(draftValue, _event, sessionId) =>
+              commitSmartCellEdit(index, key, draftValue, { sessionId })
+            }
+            onPaste={(event) => handleSmartPaste(event, index, key)}
+            autoComplete="off"
+            dir={extra.dir || "auto"}
+          />
+        ) : (
+          <SmartCellTextInput
+            {...cellInputProps}
+            data-smart-cell={cellKey}
+            value={editorValue}
+            data-smart-cell-anchor={cellKey}
+            data-cell-editing={editingCell === cellKey ? "true" : "false"}
+            tabIndex={editingCell === cellKey ? 0 : -1}
+            editSessionId={cellEditSessionId}
+            {...focusHandlers}
+            onDraftChange={(nextValue, event) => {
+              delete event.currentTarget.dataset.suggestionDelayUntil;
+              rememberSmartCellDraft(
+                index,
+                key,
+                nextValue,
+                event.currentTarget,
+              );
+            }}
+            onCommit={(draftValue, _event, sessionId) =>
+              commitSmartCellEdit(index, key, draftValue, { sessionId })
+            }
+            onPaste={(event) => handleSmartPaste(event, index, key)}
+            autoComplete="off"
+            dir={extra.dir || "auto"}
+          />
+        )}
         {fieldCopyDownKeys.has(key) && (
           <button
             type="button"
@@ -9583,19 +13704,16 @@ function SmartEntryEditor({
             <ArrowDown size={12} />
           </button>
         )}
-        {showSuggestions && (
+        {showSuggestions && suggestionRect && createPortal(
           <div
             className="cell-suggestions"
-            style={
-              suggestionRect
-                ? {
-                    top: `${suggestionRect.top}px`,
-                    left: `${suggestionRect.left}px`,
-                    width: `${suggestionRect.width}px`,
-                    maxHeight: `${suggestionRect.maxHeight || 240}px`,
-                  }
-                : undefined
-            }
+            data-owner-cell={cellKey}
+            style={{
+              "--cell-suggestion-top": `${suggestionRect.top}px`,
+              "--cell-suggestion-left": `${suggestionRect.left}px`,
+              "--cell-suggestion-width": `${suggestionRect.width}px`,
+              "--cell-suggestion-max-height": `${suggestionRect.maxHeight || 240}px`,
+            }}
             onPointerDown={(event) => event.preventDefault()}
             onMouseDown={(event) => event.preventDefault()}
           >
@@ -9604,10 +13722,9 @@ function SmartEntryEditor({
                 key={option}
                 type="button"
                 className={optionIndex === highlightedSuggestionIndex ? "active" : ""}
-                onPointerEnter={() => setActiveSuggestionIndex(optionIndex)}
                 onPointerDown={(event) => {
                   event.preventDefault();
-                  applyCellSuggestion(index, key, option);
+                  applyCellSuggestion(index, key, option, { moveDown: false });
                 }}
                 onMouseDown={(event) => {
                   event.preventDefault();
@@ -9616,33 +13733,305 @@ function SmartEntryEditor({
                 {option}
               </button>
             ))}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     );
   };
 
   const rowSelect = (index, key, children) => (
-    <select
-      data-smart-cell={`${index}:${key}`}
-      value={rows[index][key] || ""}
-      onFocus={() =>
-        setRangeSelection({
-          startRow: index,
-          startKey: key,
-          endRow: index,
-          endKey: key,
-        })
-      }
-      onChange={(event) => updateRow(index, key, event.target.value)}
-      onKeyDown={(event) => handleCellKeyDown(event, index, key)}
+    <div
+      className={`cell-combo copyable-cell${isCellSelected(index, key) ? " selected-cell" : ""}`}
+      data-smart-cell-container={`${index}:${key}`}
+      tabIndex={0}
+      onContextMenu={(event) => openSmartCellMenu(event, index, key)}
+      onPointerDown={(event) => {
+        if (event.button === 2) return;
+        if (event.target.closest?.(".cell-copy-down-button")) return;
+        if (editingCell === `${index}:${key}`) return;
+        event.preventDefault();
+        selectSmartCell(index, key, event.shiftKey);
+      }}
+      onDoubleClick={(event) => {
+        if (event.target.closest?.(".cell-copy-down-button")) return;
+        event.preventDefault();
+        beginSmartCellEdit(index, key);
+      }}
     >
-      {children}
-    </select>
+      <select
+        data-smart-cell={`${index}:${key}`}
+        data-cell-editing={editingCell === `${index}:${key}` ? "true" : "false"}
+        tabIndex={editingCell === `${index}:${key}` ? 0 : -1}
+        value={rows[index][key] || ""}
+        onFocus={() =>
+          updateSmartSelection(selectionForCells(index, key))
+        }
+        onChange={(event) => updateRow(index, key, event.target.value)}
+        onBlur={() =>
+          updateSmartEditingCell((current) =>
+            current === `${index}:${key}` ? "" : current,
+          )
+        }
+      >
+        {children}
+      </select>
+      <button
+        type="button"
+        className="cell-copy-down-button"
+        title="نسخ قيمة هذا الحقل إلى الصفوف التالية"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          copyFieldDown(index, key);
+        }}
+      >
+        <ArrowDown size={12} />
+      </button>
+    </div>
   );
+
+  function handleSmartViewportScroll(event) {
+    const host = event.currentTarget;
+    window.cancelAnimationFrame(smartViewportFrameRef.current);
+    smartViewportFrameRef.current = window.requestAnimationFrame(() => {
+      setSmartViewport((current) => {
+        const next = {
+          scrollTop: host.scrollTop,
+          height: host.clientHeight || current.height,
+        };
+        return Math.abs(current.scrollTop - next.scrollTop) < 1 &&
+          current.height === next.height
+          ? current
+          : next;
+      });
+    });
+  }
+
+  const virtualizeSmartRows = smartViewRows.length > 200;
+  const virtualRowHeight = Math.max(42, rowHeight);
+  const virtualOverscan = 8;
+  const virtualStart = virtualizeSmartRows
+    ? Math.max(
+        0,
+        Math.floor(smartViewport.scrollTop / virtualRowHeight) -
+          virtualOverscan,
+      )
+    : 0;
+  const virtualEnd = virtualizeSmartRows
+    ? Math.min(
+        smartViewRows.length,
+        Math.ceil(
+          (smartViewport.scrollTop + smartViewport.height) / virtualRowHeight,
+        ) + virtualOverscan,
+      )
+    : smartViewRows.length;
+  const visibleSmartRows = smartViewRows
+    .slice(virtualStart, virtualEnd)
+    .map((entry, offset) => ({
+      row: entry.row,
+      index: entry.index,
+      displayIndex: virtualStart + offset,
+    }));
+  const topVirtualSpacerHeight = virtualStart * virtualRowHeight;
+  const bottomVirtualSpacerHeight =
+    (smartViewRows.length - virtualEnd) * virtualRowHeight;
 
   return (
     <div className="page-stack">
+      <ConfirmationLayer
+        dialog={confirmationDialog}
+        onResult={settleConfirmation}
+      />
+      {cellMenu && createPortal(
+        <div
+          className="smart-cell-context-menu"
+          role="menu"
+          dir="rtl"
+          style={{ left: `${cellMenu.left}px`, top: `${cellMenu.top}px` }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={copySmartCellMenuContent}
+          >
+            <Copy size={16} /> نسخ المحتوى
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={pasteSmartCellMenuContent}
+          >
+            <ClipboardList size={16} /> لصق
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="danger"
+            onClick={clearSmartCellMenuContent}
+          >
+            <Trash2 size={16} /> مسح
+          </button>
+        </div>,
+        document.body,
+      )}
+      {rowMenu && createPortal(
+        <div
+          className="smart-row-context-menu"
+          role="menu"
+          dir="rtl"
+          style={{ left: `${rowMenu.left}px`, top: `${rowMenu.top}px` }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => insertEmptySmartRow(rowMenu.rowId, "above")}
+          >
+            <Plus size={16} /> إضافة صف فارغ بالأعلى
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => insertEmptySmartRow(rowMenu.rowId, "below")}
+          >
+            <Plus size={16} /> إضافة صف فارغ بالأسفل
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="danger"
+            onClick={deleteSmartRowFromMenu}
+          >
+            <Trash2 size={16} /> حذف هذا الصف
+          </button>
+        </div>,
+        document.body,
+      )}
+      {columnMenuColumn && createPortal(
+        <div
+          className="smart-column-menu"
+          role="menu"
+          dir="rtl"
+          style={{
+            left: `${columnMenu.left}px`,
+            top: `${columnMenu.top}px`,
+            "--smart-column-menu-max-height": `${columnMenu.maxHeight || 520}px`,
+          }}
+          onContextMenu={(event) => event.preventDefault()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
+        >
+          <div className="smart-column-menu-head">
+            <strong>{columnMenuColumn.label}</strong>
+            <button
+              type="button"
+              className="smart-column-menu-close"
+              aria-label="إغلاق"
+              onClick={() => setColumnMenu(null)}
+            >
+              ×
+            </button>
+          </div>
+          <div className="smart-column-menu-section smart-column-menu-sort">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() =>
+                applySmartColumnSort(columnMenuColumn.key, "asc")
+              }
+            >
+              <span aria-hidden="true">↑</span>
+              {smartColumnType(columnMenuColumn.key) === "number"
+                ? "ترتيب من الأصغر إلى الأكبر"
+                : "ترتيب من أ إلى ي"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() =>
+                applySmartColumnSort(columnMenuColumn.key, "desc")
+              }
+            >
+              <span aria-hidden="true">↓</span>
+              {smartColumnType(columnMenuColumn.key) === "number"
+                ? "ترتيب من الأكبر إلى الأصغر"
+                : "ترتيب من ي إلى أ"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => clearSmartColumnSort(columnMenuColumn.key)}
+            >
+              مسح الترتيب
+            </button>
+          </div>
+          <div className="smart-column-menu-section smart-column-menu-search">
+            <input
+              type="text"
+              value={columnFilterQuery}
+              onChange={(event) => setColumnFilterQuery(event.target.value)}
+              placeholder="بحث في القيم..."
+              autoComplete="off"
+            />
+            <label className="smart-column-menu-check smart-column-menu-check-all">
+              <input
+                type="checkbox"
+                checked={columnMenuSelectedValues.length === columnMenuOptions.length}
+                onChange={(event) => {
+                  if (event.target.checked) {
+                    selectAllSmartColumnFilter(columnMenuColumn.key);
+                  } else {
+                    setSmartColumnFilter(columnMenuColumn.key, []);
+                  }
+                }}
+              />
+              <span>تحديد الكل</span>
+            </label>
+            {columnMenuHasBlankValue && (
+              <label className="smart-column-menu-check">
+                <input
+                  type="checkbox"
+                  checked={columnMenuSelectedSet.has("")}
+                  onChange={() =>
+                    toggleSmartColumnFilterValue(columnMenuColumn.key, "")
+                  }
+                />
+                <span>{smartFilterValueLabel("")}</span>
+              </label>
+            )}
+          </div>
+          <div className="smart-column-menu-values">
+            {shownColumnMenuOptions.map((value) => (
+              <label key={value || "__blank__"} className="smart-column-menu-check">
+                <input
+                  type="checkbox"
+                  checked={columnMenuSelectedSet.has(value)}
+                  onChange={() =>
+                    toggleSmartColumnFilterValue(columnMenuColumn.key, value)
+                  }
+                />
+                <span>{smartFilterValueLabel(value)}</span>
+              </label>
+            ))}
+          </div>
+          <div className="smart-column-menu-footer">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => clearSmartColumnFilter(columnMenuColumn.key)}
+            >
+              مسح عامل التصفية
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
       <form
         className="panel entry-editor smart-entry"
         onSubmit={(event) => event.preventDefault()}
@@ -9671,7 +14060,11 @@ function SmartEntryEditor({
                 disabled={!!APP_VARIANT.forcedDocumentType}
                 onChange={(event) => changeDocumentType(event.target.value)}
               >
-                {DOCUMENT_TYPES.map((item) => (
+                {DOCUMENT_TYPES.filter((item) =>
+                  scopeRole === "contractor"
+                    ? item.value === "contractor_certificate"
+                    : item.value !== "contractor_certificate",
+                ).map((item) => (
                   <option key={item.value} value={item.value}>
                     {item.label}
                   </option>
@@ -9680,13 +14073,12 @@ function SmartEntryEditor({
             </Field>
             <Field label="الطرف">
               <select
-                value={entryForm.party_role}
-                onChange={(event) =>
-                  updateFixed({ party_role: event.target.value })
-                }
+                value={scopeRole}
+                disabled
               >
-                <option value="customer">عميل</option>
-                <option value="contractor">مقاول</option>
+                <option value={scopeRole}>
+                  {scopeRole === "contractor" ? "مقاول" : "عميل"}
+                </option>
               </select>
             </Field>
             <Field label="تصنيف العميل">
@@ -9697,7 +14089,8 @@ function SmartEntryEditor({
                 }
               >
                 <option value="unselected">بدون تصنيف</option>
-                <option value="retail">فرد / مهندس</option>
+                <option value="retail">فرد</option>
+                <option value="engineer">مهندس</option>
                 <option value="corporate">شركة</option>
               </select>
             </Field>
@@ -9800,6 +14193,28 @@ function SmartEntryEditor({
                 }
               />
             </Field>
+            <Field label="رقم المستند">
+              <input
+                dir="ltr"
+                value={entryForm.operation_no || ""}
+                placeholder={nextDoc?.operation_no || "Auto"}
+                readOnly
+                aria-readonly="true"
+                title="رقم المستند يُنشأ تلقائياً ولا يمكن تعديله"
+              />
+            </Field>
+            <Field label="الرقم التسلسلي">
+              <input
+                type="text"
+                inputMode="numeric"
+                dir="ltr"
+                value={entryForm.serial || ""}
+                placeholder={nextDoc?.next_no || ""}
+                readOnly
+                aria-readonly="true"
+                title="الرقم التسلسلي يُنشأ تلقائياً ولا يمكن تعديله"
+              />
+            </Field>
             <Field label="الحالة">
               <select
                 value={entryForm.document_status || meta.status}
@@ -9827,8 +14242,8 @@ function SmartEntryEditor({
             </Field>
             <Field label="قيمة الخصم">
               <input
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 value={entryForm.discount_value || ""}
                 onChange={(event) =>
                   updateFixed({ discount_value: event.target.value })
@@ -9853,6 +14268,21 @@ function SmartEntryEditor({
                 <span>{tax.label}</span>
               </label>
             ))}
+            {entryForm.document_type === "price_offer" && (
+              <label
+                className="check-tile vat-terms-only-tile"
+                title="يضيف شرط أن الأسعار شاملة ضريبة 14% إلى التقرير، بدون إضافة الضريبة إلى الحساب"
+              >
+                <input
+                  type="checkbox"
+                  checked={!!entryForm.vat_terms_only}
+                  onChange={(event) =>
+                    updateFixed({ vat_terms_only: event.target.checked })
+                  }
+                />
+                <span>{VAT_TERMS_ONLY_OPTION.label}</span>
+              </label>
+            )}
           </div>
         </section>
 
@@ -9863,6 +14293,15 @@ function SmartEntryEditor({
             <h3>بنود المستند</h3>
             <div className="section-title-actions">
               <ItemReadyBadge count={rowData.length} />
+              <button
+                type="button"
+                className="icon-button"
+                title="لصق بيانات الحافظة في النطاق المحدد"
+                aria-label="لصق بيانات الحافظة في النطاق المحدد"
+                onClick={pasteIntoCurrentSmartSelection}
+              >
+                <ClipboardList size={17} />
+              </button>
               <button
                 type="button"
                 className="icon-button expand-table-button"
@@ -9881,37 +14320,136 @@ function SmartEntryEditor({
               </button>
             </div>
           </div>
-          <div className="table-scroll smart-table-scroll">
+          {searchOpen && (
+            <SmartTableSearchPanel
+              initialQuery={searchQuery}
+              results={searchResults}
+              currentIndex={currentSearchResultIndex}
+              columnLabel={smartColumnLabel}
+              onSearchChange={setSearchQuery}
+              onClose={closeSmartTableSearch}
+              onPrevious={() => navigateSmartSearchResults(-1)}
+              onNext={() => navigateSmartSearchResults(1)}
+              onJump={jumpToSmartSearchResult}
+              onReplaceAll={replaceAllSmartSearch}
+            />
+          )}
+          {(smartSort || activeSmartFilterKeys.length > 0) && (
+            <div className="smart-table-view-actions">
+              <span>
+                {smartViewRows.length} صف ظاهر من {rows.length}
+              </span>
+              <button type="button" onClick={() => setSmartFilters({})}>
+                مسح جميع عوامل التصفية
+              </button>
+              <button type="button" onClick={() => setSmartSort(null)}>
+                مسح جميع الترتيبات
+              </button>
+              <button type="button" onClick={resetSmartTableView}>
+                إعادة ضبط العرض
+              </button>
+            </div>
+          )}
+          <div
+            className="table-scroll smart-table-scroll"
+            ref={smartTableScrollRef}
+            onScroll={handleSmartViewportScroll}
+          >
             <table
               className="smart-entry-table"
-              style={{ "--smart-row-height": `${rowHeight}px` }}
+              onKeyDown={handleGridKeyDown}
+              style={{
+                "--smart-row-height": `${rowHeight}px`,
+                width: `${smartTableWidth}px`,
+                minWidth: `${smartTableWidth}px`,
+              }}
             >
+              <colgroup>
+                {smartDisplayColumns.map((column) => (
+                  <col
+                    key={column.key}
+                    style={{ width: `${resolvedColumnWidth(column)}px` }}
+                  />
+                ))}
+              </colgroup>
               <thead>
                 <tr>
-                  <th className="smart-row-index-head">#</th>
-                  {entryForm.document_type === "contractor_certificate" && <th>نوع الأعمال</th>}
-                  <th>مبنى</th>
-                  <th>وحدة</th>
-                  <th>بيان</th>
-                  <th>زجاج</th>
-                  <th>قطاع</th>
-                  <th>لون</th>
-                  <th>عدد</th>
-                  <th>عرض سم</th>
-                  <th>ارتفاع سم</th>
-                  <th>الوحدة</th>
-                  <th>كمية مباشرة</th>
-                  <th>فئة</th>
-                  <th>نسبة العمل %</th>
-                  <th>ثابت</th>
-                  <th>قياس</th>
-                  <th>نسخ</th>
+                  {smartDisplayColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      className={
+                        [
+                          column.key === "__index"
+                            ? "smart-row-index-head"
+                            : "",
+                          column.key === "__actions"
+                            ? "smart-row-actions-head"
+                            : "",
+                          smartSort?.key === column.key ? "is-sorted" : "",
+                          Array.isArray(smartFilters[column.key])
+                            ? "is-filtered"
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")
+                      }
+                    >
+                      <div className="smart-column-head-content">
+                        <span>{column.label}</span>
+                        {smartSort?.key === column.key && (
+                          <span className="smart-column-state">
+                            {smartSort.direction === "asc" ? "↑" : "↓"}
+                          </span>
+                        )}
+                        {Array.isArray(smartFilters[column.key]) && (
+                          <span className="smart-column-state">🔽</span>
+                        )}
+                        {!column.key.startsWith("__") && (
+                          <button
+                            type="button"
+                            className="smart-column-menu-button"
+                            title={`ترتيب وتصفية عمود ${column.label}`}
+                            aria-label={`Sort and filter ${column.label}`}
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => openSmartColumnMenu(event, column)}
+                          >
+                            <ArrowDown size={12} />
+                          </button>
+                        )}
+                      </div>
+                      {!column.key.startsWith("__") && (
+                        <button
+                          type="button"
+                          className="column-resize-handle"
+                          title={`اسحب لتغيير عرض عمود ${column.label}`}
+                          aria-label={`Resize ${column.label} column`}
+                          onPointerDown={(event) =>
+                            beginColumnResize(column.key, event)
+                          }
+                        />
+                      )}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, index) => (
+                {topVirtualSpacerHeight > 0 && (
                   <tr
-                    key={index}
+                    className="smart-virtual-spacer"
+                    aria-hidden="true"
+                  >
+                    <td
+                      colSpan={smartDisplayColumns.length}
+                      style={{ height: `${topVirtualSpacerHeight}px` }}
+                    />
+                  </tr>
+                )}
+                {visibleSmartRows.map(({ row, index, displayIndex }) => (
+                  <tr
+                    key={row._gridId}
                     data-smart-row-index={index}
                     className={[
                       rowHasData(row) ? "" : "ghost-row",
@@ -9924,8 +14462,35 @@ function SmartEntryEditor({
                       .filter(Boolean)
                       .join(" ")}
                   >
-                    <td className="smart-row-index-cell">
-                      <span>{index + 1}</span>
+                    <td
+                      className="smart-row-index-cell"
+                      title="انقر لتحديد الصف بالكامل، واستخدم Shift لتحديد عدة صفوف"
+                      onContextMenu={(event) => openSmartRowMenu(event, row)}
+                      onPointerDown={(event) => {
+                        if (event.button === 2) return;
+                        if (event.target.closest?.(".row-resize-handle")) return;
+                        event.preventDefault();
+                        updateSmartEditingCell("");
+                        updateSmartActiveCell("");
+                        setSuggestionRect(null);
+                        updateSmartSelection((current) => {
+                          const currentAnchor = smartCellIndexes(current?.anchorCell);
+                          const anchorEntry =
+                            event.shiftKey && currentAnchor
+                              ? smartViewEntryForIndex(currentAnchor.rowIndex)
+                              : null;
+                          const anchorRow = anchorEntry?.index ?? index;
+                          return selectionForCells(
+                            anchorRow,
+                            smartCellOrder[0],
+                            index,
+                            smartCellOrder[smartCellOrder.length - 1],
+                          );
+                        });
+                        focusCellContainer(index, smartCellOrder[0]);
+                      }}
+                    >
+                      <span>{displayIndex + 1}</span>
                       <button
                         type="button"
                         className="row-resize-handle"
@@ -10069,6 +14634,17 @@ function SmartEntryEditor({
                     </td>
                   </tr>
                 ))}
+                {bottomVirtualSpacerHeight > 0 && (
+                  <tr
+                    className="smart-virtual-spacer"
+                    aria-hidden="true"
+                  >
+                    <td
+                      colSpan={smartDisplayColumns.length}
+                      style={{ height: `${bottomVirtualSpacerHeight}px` }}
+                    />
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -10171,6 +14747,9 @@ function InlineDocumentEditor({
     flags[tax.key] = (data.rows || []).some((row) => !!row[tax.key]);
     return flags;
   }, {});
+  initialTaxFlags.vat_terms_only = (data.rows || []).some(
+    (row) => !!row.vat_terms_only,
+  );
   const [main, setMain] = useState({
     operation_no: data.operation_no || "",
     party: data.party || party?.display_name || "",
@@ -10198,6 +14777,7 @@ function InlineDocumentEditor({
         patch[tax.key] = main[tax.key] ? 1 : 0;
         return patch;
       }, {});
+      taxPatch.vat_terms_only = main.vat_terms_only ? 1 : 0;
       const documentPatch = {
         project: main.project,
         building_unit: main.building_unit,
@@ -10347,8 +14927,8 @@ function InlineDocumentEditor({
           </Field>
           <Field label="قيمة الخصم">
             <input
-              type="number"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               value={main.discount_value || ""}
               onChange={(event) =>
                 setMain({ ...main, discount_value: event.target.value })
@@ -10369,6 +14949,21 @@ function InlineDocumentEditor({
               <span>{tax.label}</span>
             </label>
           ))}
+          {(document?.document_type === "price_offer" || data.type === "offer") && (
+            <label
+              className="check-tile vat-terms-only-tile"
+              title="يضيف شرط أن الأسعار شاملة ضريبة 14% إلى التقرير، بدون إضافة الضريبة إلى الحساب"
+            >
+              <input
+                type="checkbox"
+                checked={!!main.vat_terms_only}
+                onChange={(event) =>
+                  setMain({ ...main, vat_terms_only: event.target.checked })
+                }
+              />
+              <span>{VAT_TERMS_ONLY_OPTION.label}</span>
+            </label>
+          )}
         </div>
         <div className="form-actions">
           <button
@@ -10456,8 +15051,8 @@ function InlineDocumentEditor({
                   </td>
                   <td>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={row.item_count || ""}
                       onChange={(event) =>
                         updateRow(row.id, { item_count: event.target.value })
@@ -10466,8 +15061,8 @@ function InlineDocumentEditor({
                   </td>
                   <td>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={row.width_cm || ""}
                       onChange={(event) =>
                         updateRow(row.id, { width_cm: event.target.value })
@@ -10476,8 +15071,8 @@ function InlineDocumentEditor({
                   </td>
                   <td>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={row.height_cm || ""}
                       onChange={(event) =>
                         updateRow(row.id, { height_cm: event.target.value })
@@ -10486,8 +15081,8 @@ function InlineDocumentEditor({
                   </td>
                   <td>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={row.total_quantity || ""}
                       onChange={(event) =>
                         updateRow(row.id, {
@@ -10498,8 +15093,8 @@ function InlineDocumentEditor({
                   </td>
                   <td>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={row.rate || ""}
                       onChange={(event) =>
                         updateRow(row.id, { rate: event.target.value })
@@ -10508,8 +15103,8 @@ function InlineDocumentEditor({
                   </td>
                   <td>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       min="0"
                       max="100"
                       value={row.completion_ratio || ""}
@@ -10551,6 +15146,87 @@ function InlineDocumentEditor({
   );
 }
 
+function previewQuantityParts(rows = []) {
+  const totals = { sqm: 0, lm: 0, count: 0 };
+  for (const row of rows || []) {
+    const unit = normalizeClientUnitCode(row.unit_code || row.unit);
+    totals[unit] += num(row.quantity);
+  }
+  return [
+    totals.sqm
+      ? { value: money(totals.sqm), unit: "م²" }
+      : null,
+    totals.lm
+      ? { value: money(totals.lm), unit: "م.ط" }
+      : null,
+    totals.count
+      ? { prefix: "بالعدد", value: money(totals.count), unit: "" }
+      : null,
+  ].filter(Boolean);
+}
+
+function previewItemCount(rows = []) {
+  return (rows || []).reduce((total, row) => {
+    const unit = normalizeClientUnitCode(row.unit_code || row.unit);
+    return unit === "sqm" || unit === "lm"
+      ? total + num(row.item_count)
+      : total;
+  }, 0);
+}
+
+function ReportTotalCard({
+  label,
+  subLabel = "",
+  value,
+  monetary = true,
+  unit = "",
+  parts = null,
+  className = "",
+}) {
+  const valueParts = Array.isArray(parts)
+    ? parts
+    : [{ value: monetary ? formatMonetaryTotal(value) : value, unit }];
+  return (
+    <span
+      className={`report-total-card${className ? ` ${className}` : ""}`}
+      dir="rtl"
+    >
+      <span className="report-total-card__label">
+        {label}
+        {subLabel && (
+          <em className="preview-sub-label">({subLabel})</em>
+        )}
+      </span>
+      <strong className="report-total-card__value">
+        {valueParts.map((part, index) => (
+          <React.Fragment
+            key={`${part.prefix || ""}-${part.value}-${part.unit || ""}-${index}`}
+          >
+            {index > 0 && (
+              <span className="report-total-value-separator" aria-hidden="true">
+                -
+              </span>
+            )}
+            <span className="report-total-value-part">
+              {part.prefix && (
+                <span className="report-total-prefix" dir="rtl">
+                  {part.prefix}
+                </span>
+              )}
+              <bdi dir="ltr">{part.value}</bdi>
+              {part.unit && (
+                <span className="report-total-unit" dir="rtl">
+                  {part.unit}
+                </span>
+              )}
+            </span>
+          </React.Fragment>
+        ))}
+      </strong>
+    </span>
+  );
+}
+
 function DocumentPreview({
   data,
   onEditRow,
@@ -10577,6 +15253,9 @@ function DocumentPreview({
       (row) =>
         !row.is_payment && (row.completion_percent || row.completion_ratio),
     );
+  const showVatInclusiveRate =
+    ["offer", "price_offer"].includes(data.type) &&
+    (!!data.vat_enabled || rows.some((row) => !!row.vat_enabled));
   const realGrossTotal = Number(
     data.totals?.real_gross_total || data.totals?.real_debit || 0,
   );
@@ -10611,7 +15290,10 @@ function DocumentPreview({
     data.type === "contractor" && Number(data.project_selection_count || 0) !== 1;
   const moneyOrBlank = (value) =>
     Number(value || 0) ? money(value) : "";
+  const quantityParts = previewQuantityParts(rows);
+  const itemCountTotal = previewItemCount(rows);
   const reportBlocks = buildReportRowBlocks(rows, data.subtotal_mode || "none");
+  const previewBranding = data.branding || {};
   const itemTableColumnCount =
     9 +
     (showContractorProjectColumn ? 1 : 0) +
@@ -10620,15 +15302,29 @@ function DocumentPreview({
     (!readOnly ? 1 : 0);
   const subtotalLabelColSpan =
     4 + (showContractorProjectColumn ? 1 : 0) + (showDimensions ? 1 : 0);
-  const previewProject = projectWithLocation(
-    data.project,
-    singleDocumentLocation(data, rows),
-  );
+  const previewProject = reportProjectHeading(data.project, rows, data);
   return (
-    <div className="document-preview">
+    <div
+      className="document-preview"
+      style={{
+        "--preview-brand-color": previewBranding.companyNameColor || "var(--accent)",
+        "--preview-line-color": previewBranding.lineColor || "var(--line)",
+        "--preview-head-bg": previewBranding.tableHeaderBg || "var(--surface-2)",
+        "--preview-head-text": previewBranding.tableHeaderText || "var(--text)",
+      }}
+    >
       <div className="doc-head">
         <div>
-          <img src={appLogo} alt={APP_NAME} />
+          <img
+            src={previewBranding.logoDataUri || appLogo}
+            alt={previewBranding.companyNameEn || APP_NAME}
+          />
+          {(previewBranding.companyNameEn || previewBranding.companyNameAr) && (
+            <div className="preview-company-name">
+              <strong>{previewBranding.companyNameEn}</strong>
+              <span>{previewBranding.companyNameAr}</span>
+            </div>
+          )}
           <h2>{data.title}</h2>
           <p>
             {text(data.party)} / {text(previewProject)}
@@ -10641,93 +15337,95 @@ function DocumentPreview({
         </div>
       </div>
 
-      <div className="totals">
-        {statementRows.length && data.totals?.quantity ? (
-          <span>
-            الكمية <strong>{money(data.totals.quantity)}</strong>
-          </span>
-        ) : null}
-        {hasWorkRateTotal ? (
-          <>
-            <span>
-              قبل نسبة العمل <strong>{money(realGrossTotal)}</strong>
-            </span>
-            <span>
-              بعد نسبة العمل <strong>{money(workGrossTotal)}</strong>
-            </span>
-          </>
-        ) : (
-          <span>
-            الإجمالي
-            {hasTaxOrDiscount && (
-              <em className="preview-sub-label">
-                ({beforeAdjustmentLabel})
-              </em>
-            )}
-            <strong>
-              {money(data.totals?.gross_total || data.totals?.debit)}
-            </strong>
-          </span>
-        )}
-        {statementRows.length || paymentRows.length ? (
-          <>
+      <div className="totals report-totals-container">
+        <div className="totals-row totals-primary">
+          {!statementRows.length && quantityParts.length > 0 && (
+            <ReportTotalCard
+              label="الكمية"
+              parts={quantityParts}
+              monetary={false}
+            />
+          )}
+          {!statementRows.length && itemCountTotal > 0 && (
+            <ReportTotalCard
+              label="العدد"
+              value={money(itemCountTotal)}
+              monetary={false}
+            />
+          )}
+          {statementRows.length && data.totals?.quantity ? (
+            <ReportTotalCard
+              label="الكمية"
+              value={money(data.totals.quantity)}
+              monetary={false}
+            />
+          ) : null}
+          {hasWorkRateTotal ? (
+            <>
+              <ReportTotalCard label="قبل نسبة العمل" value={realGrossTotal} />
+              <ReportTotalCard label="بعد نسبة العمل" value={workGrossTotal} />
+            </>
+          ) : hasTaxOrDiscount || hasPayments ? (
+            <ReportTotalCard
+              label="الإجمالي"
+              subLabel={hasTaxOrDiscount ? beforeAdjustmentLabel : ""}
+              value={data.totals?.gross_total || data.totals?.debit}
+            />
+          ) : (
+            <ReportTotalCard
+              label="الصافي"
+              value={data.totals?.net_total}
+              className="emphasis"
+            />
+          )}
+        </div>
+        {(hasTaxOrDiscount || hasPayments) && (
+          <div className="totals-row totals-secondary">
             {taxBreakdown.map((tax) => (
-              <span key={tax.key || tax.label}>
-                {tax.label} <strong>{money(tax.amount)}</strong>
-              </span>
+              <ReportTotalCard
+                key={tax.key || tax.label}
+                label={tax.label}
+                value={tax.amount}
+              />
             ))}
             {data.discount_label && (
-              <span>
-                {data.discount_label}{" "}
-                <strong>{money(data.totals?.discount_amount)}</strong>
-              </span>
+              <ReportTotalCard
+                label={data.discount_label}
+                value={data.totals?.discount_amount}
+                className="discount"
+              />
             )}
-            {hasTaxOrDiscount && Number(data.totals?.credit || 0) !== 0 && (
-              <span>
-                الإجمالي
-                <em className="preview-sub-label">({afterAdjustmentLabel})</em>
-                <strong>
-                  {money(
+            {hasPayments &&
+              hasTaxOrDiscount &&
+              Number(data.totals?.credit || 0) !== 0 && (
+                <ReportTotalCard
+                  label="الإجمالي"
+                  subLabel={afterAdjustmentLabel}
+                  value={
                     Number(data.totals?.net_total || 0) +
-                      Number(data.totals?.credit || 0),
-                  )}
-                </strong>
-              </span>
+                    Number(data.totals?.credit || 0)
+                  }
+                />
+              )}
+            {hasPayments && (
+              <ReportTotalCard label="التحصيل" value={data.totals?.credit} />
             )}
-            <span>
-              التحصيل <strong>{money(data.totals?.credit)}</strong>
-            </span>
-          </>
-        ) : (
-          taxBreakdown.map((tax) => (
-            <span key={tax.key || tax.label}>
-              {tax.label} <strong>{money(tax.amount)}</strong>
-            </span>
-          ))
+            <ReportTotalCard
+              label={
+                hasPayments
+                  ? data.type === "contractor"
+                    ? "إجمالي المستحق"
+                    : "الرصيد"
+                  : "الإجمالي"
+              }
+              subLabel={
+                hasTaxOrDiscount && !hasPayments ? afterAdjustmentLabel : ""
+              }
+              value={data.totals?.net_total}
+              className="emphasis"
+            />
+          </div>
         )}
-        {!statementRows.length &&
-          !paymentRows.length &&
-          data.discount_label && (
-            <span>
-              {data.discount_label}{" "}
-              <strong>{money(data.totals?.discount_amount)}</strong>
-            </span>
-          )}
-        <span>
-          {hasPayments
-            ? data.type === "contractor"
-              ? "إجمالي المستحق"
-              : "الرصيد"
-            : hasTaxOrDiscount
-              ? "الإجمالي"
-              : "الصافي"}
-          {hasTaxOrDiscount && !hasPayments && (
-            <em className="preview-sub-label">
-              ({afterAdjustmentLabel})
-            </em>
-          )}
-          <strong>{money(data.totals?.net_total)}</strong>
-        </span>
       </div>
 
       {data.summaryRows?.length > 0 && <SummaryTable rows={data.summaryRows} />}
@@ -10910,7 +15608,14 @@ function DocumentPreview({
                         {text(formatCompletionPercent(row) || "")}
                       </td>
                     )}
-                    <td>{money(row.rate)}</td>
+                    <td className="preview-rate-cell">
+                      <span>{money(row.rate)}</span>
+                      {showVatInclusiveRate && Number(row.rate || 0) !== 0 && (
+                        <small className="preview-vat-rate" dir="ltr">
+                          ({money(Number(row.rate || 0) * 1.14)}) <em>VAT</em>
+                        </small>
+                      )}
+                    </td>
                     <td>{money(row.gross_total)}</td>
                     {showCompletion && (
                       <td>{money(row.work_gross_total || row.gross_total)}</td>
@@ -10979,6 +15684,68 @@ function SummaryTable({ rows }) {
   );
 }
 
+function ManagerEventCenter({ events = [], onAction }) {
+  return (
+    <section className="panel manager-event-center">
+      <details open={events.length > 0}>
+        <summary>
+          <span>
+            <Bell size={18} /> التنبيهات والعروض
+          </span>
+          <strong>{events.length}</strong>
+        </summary>
+        <div className="manager-event-list">
+          {!events.length && (
+            <div className="empty-state">لا توجد تنبيهات نشطة حالياً.</div>
+          )}
+          {events.map((event) => {
+            const style = event.style || {};
+            return (
+              <article
+                key={event.id}
+                className={`manager-event-card ${event.event_type}${event.seen ? " seen" : ""}`}
+                style={{
+                  backgroundColor: style.backgroundColor || style.background || undefined,
+                  color: style.color || style.textColor || undefined,
+                  borderColor: style.borderColor || style.accentColor || undefined,
+                }}
+              >
+                <div className="manager-event-card-head">
+                  <span>{event.event_type === "offer" ? "عرض" : event.event_type === "warning" ? "تحذير" : "معلومة"}</span>
+                  <small>{event.created_at ? formatUserDateTime(event.created_at) : ""}</small>
+                </div>
+                <h3>{event.title}</h3>
+                <p>{event.message}</p>
+                {event.event_type === "offer" &&
+                  (event.offer_price || event.offer_details) && (
+                    <div className="manager-offer-details">
+                      {event.offer_price && <strong>{event.offer_price}</strong>}
+                      {event.offer_details && <span>{event.offer_details}</span>}
+                    </div>
+                  )}
+                <div className="manager-event-actions">
+                  {!event.seen && (
+                    <button type="button" onClick={() => onAction?.(event.id, "seen")}>
+                      <Check size={16} /> تمت القراءة
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => onAction?.(event.id, "dismiss")}
+                  >
+                    <X size={16} /> إخفاء
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </details>
+    </section>
+  );
+}
+
 function SettingsView({
   api,
   currentUser,
@@ -10998,7 +15765,13 @@ function SettingsView({
   createBackup,
   setMessage,
   busy,
+  updateInfo,
+  checkingUpdate,
+  checkForUpdates,
+  openUpdateDownload,
   subscriptionOnly = false,
+  managerEvents = [],
+  onManagerEventAction,
 }) {
   const [password, setPassword] = useState("");
   const [retailTerms, setRetailTerms] = useState(
@@ -11034,6 +15807,8 @@ function SettingsView({
   const [serverStatusLoading, setServerStatusLoading] = useState(false);
   const [serverStatusExpanded, setServerStatusExpanded] = useState(true);
   const [serverBusy, setServerBusy] = useState(false);
+  const [desktopSettings, setDesktopSettings] = useState(null);
+  const [desktopSettingsBusy, setDesktopSettingsBusy] = useState(false);
   const [companyProfileDraft, setCompanyProfileDraft] = useState(
     bootstrap?.company || {
       company_name: "",
@@ -11093,6 +15868,12 @@ function SettingsView({
   const canEditTerms = canUser(currentUser, "can_edit_terms");
   const canEditTableStyles = canUser(currentUser, "can_edit_table_styles");
   const canEditServerSettings = canEditCompanySettings || adminUnlocked;
+  const activeConnectionMode =
+    desktopSettings?.connectionMode ||
+    localStorage.getItem("priceOfferConnectionMode") ||
+    window.priceOfferDesktop?.connectionMode ||
+    (isLoopbackApiBase(apiBase) ? "local" : "remote");
+  const isRemoteServerConnection = activeConnectionMode === "remote";
   const dashboardSummary = bootstrap?.summary || {};
   const documentStatuses = bootstrap?.docs || [];
   const managerSubscriptionPlans = useMemo(
@@ -11121,6 +15902,50 @@ function SettingsView({
     !!activeManagerSubscription &&
     !!managerSubscriptionStatus?.has_access &&
     !managerSubscriptionCancelsAtPeriodEnd;
+
+  useEffect(() => {
+    let cancelled = false;
+    window.priceOfferDesktop?.getDesktopSettings?.()
+      .then((settings) => {
+        if (!cancelled) setDesktopSettings(settings);
+      })
+      .catch(() => {});
+    const unsubscribe = window.priceOfferDesktop?.onDesktopSettingsChanged?.(
+      (settings) => {
+        if (!cancelled) setDesktopSettings(settings);
+      },
+    );
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, []);
+
+  async function updateDesktopSetting(key, value) {
+    if (!window.priceOfferDesktop?.updateDesktopSettings) return;
+    setDesktopSettingsBusy(true);
+    try {
+      const settings = await window.priceOfferDesktop.updateDesktopSettings({
+        [key]: value,
+      });
+      setDesktopSettings(settings);
+      setMessage("تم حفظ إعدادات تشغيل التطبيق.", { type: "success" });
+    } catch (error) {
+      setMessage(`تعذر حفظ إعدادات تشغيل التطبيق: ${error.message}`);
+    } finally {
+      setDesktopSettingsBusy(false);
+    }
+  }
+
+  async function chooseReportSaveDirectory() {
+    const picked = await window.priceOfferDesktop?.chooseDirectory?.();
+    if (!picked) return;
+    await updateDesktopSetting("reportSaveDirectory", picked);
+    setMessage(`تم تعيين مجلد حفظ التقارير: ${picked}`, {
+      type: "success",
+    });
+  }
+
   function updateBranding(key, value) {
     setBrandingDraft((current) => ({ ...current, [key]: value }));
   }
@@ -11149,7 +15974,31 @@ function SettingsView({
     async (notify = false) => {
       setServerStatusLoading(true);
       try {
-        const data = await api.request("/api/admin/server-status");
+        let data;
+        if (isRemoteServerConnection) {
+          if (window.priceOfferDesktop?.getConnectionStatus) {
+            data = await window.priceOfferDesktop.getConnectionStatus(apiBase);
+          } else {
+            const connected = !!(await probeApiBase(apiBase));
+            data = {
+              ok: connected,
+              connected,
+              serverUrl: apiBase,
+              text: [
+                "Accounting Management client connection status",
+                `Generated: ${new Date().toISOString()}`,
+                "Connection mode: REMOTE SERVER / TUNNEL",
+                `Configured server: ${apiBase}`,
+                "Pinned server: Yes (no automatic local-server fallback)",
+                `API health: ${connected ? "Connected" : "Unavailable"}`,
+                "Database: Managed by the remote server; no local database path is required.",
+                "PowerShell diagnostics are available in the Windows desktop app.",
+              ].join("\n"),
+            };
+          }
+        } else {
+          data = await api.request("/api/admin/server-status");
+        }
         setServerStatus(data);
         if (notify) setMessage("تم تحديث حالة السيرفر.", { type: "success" });
       } catch (error) {
@@ -11161,7 +16010,7 @@ function SettingsView({
         setServerStatusLoading(false);
       }
     },
-    [api, setMessage],
+    [api, apiBase, isRemoteServerConnection, setMessage],
   );
 
   async function chooseServerDirectory() {
@@ -11176,12 +16025,23 @@ function SettingsView({
 
   async function saveServerConfig(event) {
     event?.preventDefault?.();
-    if (!canEditServerSettings) {
+    if (!isRemoteServerConnection && !canEditServerSettings) {
       setMessage("هذا المستخدم غير مسموح له بتعديل إعدادات السيرفر.");
       return;
     }
     setServerBusy(true);
     try {
+      if (isRemoteServerConnection) {
+        const remoteUrl = cleanApiBase(serverDraft.serverUrl || apiBase);
+        if (!remoteUrl) throw new Error("أدخل رابط السيرفر أو التنل.");
+        setApiBase(remoteUrl, { connectionMode: "remote" });
+        updateServerDraft("serverUrl", remoteUrl);
+        setMessage(`تم تثبيت اتصال هذا الجهاز على ${remoteUrl}`, {
+          type: "success",
+        });
+        await refreshServerStatus();
+        return;
+      }
       const data = await api.request("/api/admin/server-config", {
         method: "PUT",
         body: JSON.stringify({
@@ -11193,12 +16053,26 @@ function SettingsView({
           remoteDatabaseUrl: serverDraft.remoteDatabaseUrl,
         }),
       });
+      let restartedServer = null;
+      if (data.restartRequired && window.priceOfferDesktop?.startLocalServer) {
+        restartedServer = await window.priceOfferDesktop.startLocalServer({
+          dataDir: serverDraft.dataDir,
+          dbPath: serverDraft.dbPath,
+          restart: true,
+        });
+        const nextServer = cleanApiBase(
+          restartedServer.localUrl || restartedServer.serverUrl || "",
+        );
+        if (nextServer) setApiBase(nextServer, { connectionMode: "local" });
+      }
       await loadServerConfig();
       setMessage(
-        data.restartRequired
-          ? "تم حفظ المسارات. أعد تشغيل السيرفر أو التطبيق لتطبيق قاعدة البيانات/المجلد الجديد."
+        restartedServer
+          ? `تم تبديل قاعدة البيانات وتشغيل السيرفر: ${restartedServer.dbPath}`
+          : data.restartRequired
+            ? "تم حفظ المسارات. أعد تشغيل السيرفر أو التطبيق لتطبيق قاعدة البيانات/المجلد الجديد."
           : "تم حفظ مسارات السيرفر.",
-        { type: data.restartRequired ? "warning" : "success" },
+        { type: restartedServer || !data.restartRequired ? "success" : "warning" },
       );
     } catch (error) {
       setMessage(`تعذر حفظ مسارات السيرفر: ${error.message}`);
@@ -11224,7 +16098,7 @@ function SettingsView({
       const nextServer = cleanApiBase(data.serverUrl || data.localUrl || "");
       if (nextServer) {
         updateServerDraft("serverUrl", nextServer);
-        setApiBase(nextServer);
+        setApiBase(nextServer, { connectionMode: "local" });
       }
       setServerStatus((current) => ({
         ...(current || {}),
@@ -11282,10 +16156,9 @@ function SettingsView({
   async function copyServerStatus() {
     const text = serverStatus?.text || "";
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyTextToClipboard(text)) {
       setMessage("تم نسخ حالة السيرفر.", { type: "success" });
-    } catch {
+    } else {
       setMessage("تعذر النسخ من المتصفح، النص ظاهر ويمكن تحديده يدوياً.");
     }
   }
@@ -11392,6 +16265,16 @@ function SettingsView({
     currentUser?.username,
   ]);
 
+  async function refreshLocalSubscriptionState() {
+    const status = await api.request("/api/subscription/status").catch(() => null);
+    if (!status) return null;
+    setSubscriptionState?.({
+      ...status,
+      can_use_app: status.can_use_app !== false && status.has_access !== false,
+    });
+    return status;
+  }
+
   async function syncManagerNow() {
     setManagerSyncing(true);
     try {
@@ -11410,6 +16293,7 @@ function SettingsView({
         }
         return config.plans?.[0]?.id || "";
       });
+      await refreshLocalSubscriptionState();
       setMessage("تم تحديث بيانات Manager من السيرفر المحلي.", { type: "success" });
     } catch (error) {
       setManagerSubscriptionStatus(null);
@@ -11545,17 +16429,24 @@ function SettingsView({
           },
           onApproved: async () => {
             if (cancelled) return;
-            await refreshManagerSubscriptionConfig();
-            await refreshManagerState();
-            setMessage(
-              managerPaymentMode === "recurring"
-                ? "Recurring PayPal subscription activated and sent to the manager."
-                : "PayPal payment completed and sent to the manager.",
-            );
+            try {
+              await refreshManagerSubscriptionConfig();
+              await refreshManagerState();
+              await refreshLocalSubscriptionState();
+              setMessage(
+                managerPaymentMode === "recurring"
+                  ? "Recurring PayPal subscription activated and sent to the manager."
+                  : "PayPal payment completed and sent to the manager.",
+              );
+            } finally {
+              restoreInputInteractivity();
+            }
           },
           onError: (error) => {
-            if (!cancelled)
+            if (!cancelled) {
               setManagerCheckoutError(error?.message || "PayPal checkout failed.");
+              restoreInputInteractivity();
+            }
           },
           isCancelled: () =>
             cancelled || managerCheckoutRenderIdRef.current !== renderId,
@@ -11580,6 +16471,7 @@ function SettingsView({
     return () => {
       cancelled = true;
       cleanup?.();
+      restoreInputInteractivity();
     };
   }, [
     api,
@@ -11649,6 +16541,11 @@ function SettingsView({
         }),
       });
       setCompanyProfileDraft(profile);
+      const branding = await api.request("/api/settings/report-branding").catch(() => null);
+      if (branding) {
+        setReportBranding?.(branding);
+        setBrandingDraft(branding);
+      }
       setMessage("Company profile saved.");
     } catch (error) {
       setMessage(`Could not save company profile: ${error.message}`);
@@ -11766,6 +16663,122 @@ function SettingsView({
           : "page-stack"
       }
     >
+      <ManagerEventCenter
+        events={managerEvents}
+        onAction={onManagerEventAction}
+      />
+      <section className="panel application-version-panel">
+        <div className="panel-head">
+          <h2>
+            <RefreshCw size={18} /> إصدار التطبيق والتحديثات
+          </h2>
+        </div>
+        <div className="facts application-version-facts">
+          <span>
+            الإصدار المثبت: <strong dir="ltr">v{String(APP_VERSION).replace(/^v/i, "")}</strong>
+          </span>
+          <span>
+            أحدث إصدار متاح:{" "}
+            <strong dir="ltr">{updateInfo?.latestVersion || (checkingUpdate ? "..." : "—")}</strong>
+          </span>
+          <span>
+            إصدار قاعدة البيانات:{" "}
+            <strong dir="ltr">{health?.databaseSchemaVersion ?? "—"}</strong>
+          </span>
+        </div>
+        <div className="action-row">
+          <button
+            type="button"
+            onClick={() => checkForUpdates?.(false)}
+            disabled={checkingUpdate || updateInfo?.status === "downloading"}
+          >
+            <RefreshCw size={16} className={checkingUpdate ? "animate-spin" : ""} />
+            {checkingUpdate ? "جارٍ فحص التحديثات" : "فحص التحديثات"}
+          </button>
+          {(updateInfo?.updateAvailable || updateInfo?.canInstall) && (
+            <button
+              type="button"
+              className="primary"
+              onClick={openUpdateDownload}
+              disabled={updateInfo?.status === "downloading"}
+            >
+              {updateInfo?.canInstall
+                ? "إعادة التشغيل والتثبيت"
+                : updateInfo?.status === "downloading"
+                  ? `جارٍ التنزيل ${Math.round(updateInfo.downloadPercent || 0)}%`
+                  : "تنزيل التحديث"}
+            </button>
+          )}
+        </div>
+        {updateInfo?.status === "current" && (
+          <p className="muted">التطبيق محدّث.</p>
+        )}
+        {updateInfo?.error && <p className="error-text">{updateInfo.error}</p>}
+      </section>
+      {desktopSettings && (
+        <section className="panel report-save-settings-panel">
+          <div className="panel-head">
+            <h2>
+              <FileDown size={18} /> حفظ التقارير
+            </h2>
+          </div>
+          <div className="form-grid report-save-settings-grid">
+            <Field label="مجلد حفظ التقارير الافتراضي">
+              <div className="path-input-row">
+                <input
+                  dir="ltr"
+                  value={desktopSettings.reportSaveDirectory || ""}
+                  placeholder="اتركه فارغاً لاختيار المجلد عند كل حفظ"
+                  disabled={desktopSettingsBusy}
+                  onChange={(event) =>
+                    setDesktopSettings((current) => ({
+                      ...(current || {}),
+                      reportSaveDirectory: event.target.value,
+                    }))
+                  }
+                  onBlur={(event) =>
+                    updateDesktopSetting("reportSaveDirectory", event.target.value)
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={chooseReportSaveDirectory}
+                  disabled={desktopSettingsBusy}
+                >
+                  <HardDrive size={16} /> اختيار
+                </button>
+                {!!desktopSettings.reportSaveDirectory && (
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => updateDesktopSetting("reportSaveDirectory", "")}
+                    disabled={desktopSettingsBusy}
+                  >
+                    استخدام نافذة الحفظ
+                  </button>
+                )}
+              </div>
+            </Field>
+            <label className="settings-check-row">
+              <input
+                type="checkbox"
+                checked={!!desktopSettings.openPdfAfterSaving}
+                disabled={desktopSettingsBusy}
+                onChange={(event) =>
+                  updateDesktopSetting("openPdfAfterSaving", event.target.checked)
+                }
+              />
+              <span>فتح PDF تلقائياً بعد الحفظ للمراجعة</span>
+            </label>
+            {!desktopSettings.reportSaveDirectory &&
+              desktopSettings.lastReportSaveDirectory && (
+                <small dir="ltr">
+                  Last used folder: {desktopSettings.lastReportSaveDirectory}
+                </small>
+              )}
+          </div>
+        </section>
+      )}
       <section className="panel settings-grid">
         <div className="server-settings-panel">
           <div className="panel-head">
@@ -11789,7 +16802,14 @@ function SettingsView({
                 onChange={(event) => updateServerDraft("serverUrl", event.target.value)}
                 onBlur={(event) => {
                   const clean = cleanApiBase(event.target.value);
-                  if (clean) setApiBase(clean);
+                  if (clean) {
+                    const sameServer = clean === cleanApiBase(apiBase);
+                    setApiBase(clean, {
+                      connectionMode: sameServer
+                        ? activeConnectionMode
+                        : connectionModeForApiBase(clean),
+                    });
+                  }
                 }}
                 list="settings-server-url-candidates"
               />
@@ -11799,8 +16819,60 @@ function SettingsView({
                 ))}
               </datalist>
             </Field>
+            {desktopSettings && (
+              <div className="desktop-server-options">
+                {!isRemoteServerConnection && (
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={desktopSettings.startServerOnLaunch !== false}
+                      disabled={desktopSettingsBusy}
+                      onChange={(event) =>
+                        updateDesktopSetting("startServerOnLaunch", event.target.checked)
+                      }
+                    />
+                    <span>Start the local server automatically when this desktop app opens</span>
+                  </label>
+                )}
+                <label className={desktopSettings.supportsOpenAtLogin ? "" : "disabled"}>
+                  <input
+                    type="checkbox"
+                    checked={!!desktopSettings.openAtLogin}
+                    disabled={
+                      desktopSettingsBusy || !desktopSettings.supportsOpenAtLogin
+                    }
+                    onChange={(event) =>
+                      updateDesktopSetting("openAtLogin", event.target.checked)
+                    }
+                  />
+                  <span>
+                    {desktopSettings.supportsOpenAtLogin
+                      ? "Open the app when Windows starts"
+                      : "System sign-in startup is not available here"}
+                  </span>
+                </label>
+              </div>
+            )}
+            {isRemoteServerConnection ? (
+              <div className="remote-server-connection-card">
+                <strong>Remote server / tunnel mode</strong>
+                <span dir="ltr">{serverDraft.serverUrl || apiBase}</span>
+                <p>
+                  This computer remains pinned to this address. Database folders and
+                  database files are managed by the remote host and are not required here.
+                </p>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={serverBusy}
+                >
+                  <Save size={17} /> Save and pin this connection
+                </button>
+              </div>
+            ) : (
+              <>
             <Field label="Data folder">
-              <div className="path-picker">
+              <div className="server-path-row">
                 <input
                   dir="ltr"
                   value={serverDraft.dataDir || ""}
@@ -11816,7 +16888,7 @@ function SettingsView({
               </div>
             </Field>
             <Field label="Database file">
-              <div className="path-picker">
+              <div className="server-path-row">
                 <input
                   dir="ltr"
                   value={serverDraft.dbPath || ""}
@@ -11832,7 +16904,7 @@ function SettingsView({
               </div>
             </Field>
             <Field label="Migrate from old database">
-              <div className="path-picker">
+              <div className="server-path-row">
                 <input
                   dir="ltr"
                   value={serverDraft.migrateFromDbPath || ""}
@@ -11850,7 +16922,7 @@ function SettingsView({
               </div>
             </Field>
             <Field label="Migrate to new database">
-              <div className="path-picker">
+              <div className="server-path-row">
                 <input
                   dir="ltr"
                   value={serverDraft.migrateToDbPath || ""}
@@ -11888,9 +16960,6 @@ function SettingsView({
               </select>
             </Field>
             <div className="action-row server-actions">
-              <button type="submit" className="primary" disabled={serverBusy || !canEditServerSettings}>
-                <Save size={17} /> حفظ
-              </button>
               <button
                 type="button"
                 onClick={startHosting}
@@ -11901,14 +16970,27 @@ function SettingsView({
               <button type="button" onClick={createBackup} disabled={busy}>
                 <Database size={17} /> نسخة احتياطية
               </button>
+            </div>
+            <div className="action-row server-admin-actions">
+              <button
+                type="submit"
+                className="primary"
+                title="Save selected data/database paths"
+                disabled={serverBusy || !canEditServerSettings}
+              >
+                <Save size={17} /> Save paths
+              </button>
               <button
                 type="button"
                 onClick={migrateDatabase}
+                title="Copy data from an old database file into the selected new database file"
                 disabled={serverBusy || !canEditServerSettings}
               >
                 <Database size={17} /> Migrate DB
               </button>
             </div>
+              </>
+            )}
           </form>
           <div className="server-process-panel">
             <div className="server-process-head">
@@ -11920,7 +17002,11 @@ function SettingsView({
               >
                 {serverStatusExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
               </button>
-              <span>Server process details</span>
+              <span>
+                {isRemoteServerConnection
+                  ? "Tunnel client connection details"
+                  : "Server process details"}
+              </span>
               <button
                 type="button"
                 className="server-process-copy"
@@ -11939,16 +17025,20 @@ function SettingsView({
             )}
           </div>
           <div className="facts server-facts">
+            {!isRemoteServerConnection && (
+              <>
+                <span>
+                  <HardDrive size={16} /> {serverDraft.activeDataDir || serverDraft.dataDir || "-"}
+                </span>
+                <span>
+                  <Database size={16} /> {serverDraft.activeDbPath || serverDraft.dbPath || "-"}
+                </span>
+              </>
+            )}
             <span>
-              <HardDrive size={16} /> {serverDraft.activeDataDir || serverDraft.dataDir || "-"}
+              <Smartphone size={16} /> {serverDraft.serverUrl || apiBase}
             </span>
-            <span>
-              <Database size={16} /> {serverDraft.activeDbPath || serverDraft.dbPath || "-"}
-            </span>
-            <span>
-              <Smartphone size={16} /> {serverStatus?.localUrl || serverDraft.serverUrl || apiBase}
-            </span>
-            {(serverStatus?.lanUrls || serverDraft.lanIps || []).map((url) => (
+            {!isRemoteServerConnection && (serverStatus?.lanUrls || serverDraft.lanIps || []).map((url) => (
               <span key={url}>
                 <Smartphone size={16} /> {url}
               </span>
@@ -12251,9 +17341,6 @@ function SettingsView({
         {managerSubscriptionError && (
           <div className="error-state">{managerSubscriptionError}</div>
         )}
-        <div className="manager-receiver-chip" dir="ltr">
-          Receiver: {MANAGER_RECEIVER_HOST}
-        </div>
         <div className="subscription-mode-grid" role="tablist" aria-label="Payment mode">
           <button
             type="button"
@@ -12929,6 +18016,44 @@ async function showChatNotification(row = {}, count = 1) {
   return false;
 }
 
+function formatBytes(value = 0) {
+  const bytes = Math.max(0, Number(value || 0));
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB", "PB"];
+  let size = bytes / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 ? size.toFixed(1) : size.toFixed(2)} ${units[unitIndex]}`;
+}
+
+function fileRelativePath(file) {
+  return String(file?.webkitRelativePath || file?.relativePath || file?.name || "file");
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function initialsForName(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "؟";
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    return words.slice(0, 2).map((word) => [...word][0]).join("").toUpperCase();
+  }
+  return [...words[0]][0]?.toUpperCase() || "؟";
+}
+
 function ComboField({ label, value, options = [], onChange }) {
   const [open, setOpen] = useState(false);
   const cleanOptions = uniqueValues(options);
@@ -13174,8 +18299,11 @@ function ChatMediaPreview({ attachment, onClose, setMessage }) {
       if (navigator.share) {
         await navigator.share({ title: attachment.name, url: attachment.url });
       } else {
-        await navigator.clipboard.writeText(attachment.url);
-        setMessage?.("Attachment link copied");
+        if (await copyTextToClipboard(attachment.url)) {
+          setMessage?.("Attachment link copied");
+        } else {
+          throw new Error("Clipboard access is not available.");
+        }
       }
     } catch (error) {
       if (error?.name !== "AbortError") setMessage?.(`Share failed: ${error.message}`);
@@ -13223,6 +18351,9 @@ function ChatWidget({
   const [rows, setRows] = useState([]);
   const [text, setText] = useState("");
   const [file, setFile] = useState(null);
+  const [pendingAttachments, setPendingAttachments] = useState([]);
+  const [pendingAttachmentType, setPendingAttachmentType] = useState("file");
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [sending, setSending] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [seenMessage, setSeenMessage] = useState(null);
@@ -13244,6 +18375,10 @@ function ChatWidget({
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const [mentionLoading, setMentionLoading] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [reactionPicker, setReactionPicker] = useState(null);
+  const [folderBrowser, setFolderBrowser] = useState(null);
+  const [folderEntries, setFolderEntries] = useState([]);
+  const [folderLoading, setFolderLoading] = useState(false);
   const [emojiCategory, setEmojiCategory] = useState("most_used");
   const [emojiUsage, setEmojiUsage] = useState(() => {
     try {
@@ -13279,6 +18414,9 @@ function ChatWidget({
   const composerRef = useRef(null);
   const emojiPickerRef = useRef(null);
   const emojiButtonRef = useRef(null);
+  const reactionPickerRef = useRef(null);
+  const filesInputRef = useRef(null);
+  const folderInputRef = useRef(null);
   const firstUnreadIdRef = useRef(null);
   const positionedOpenRef = useRef(false);
   const recorderRef = useRef(null);
@@ -13319,7 +18457,8 @@ function ChatWidget({
       const target = event.target;
       if (
         chatPanelRef.current?.contains(target) ||
-        chatToggleRef.current?.contains(target)
+        chatToggleRef.current?.contains(target) ||
+        reactionPickerRef.current?.contains(target)
       )
         return;
       setOpen(false);
@@ -13345,9 +18484,23 @@ function ChatWidget({
       document.removeEventListener("pointerdown", closeEmojiPicker, true);
   }, [emojiOpen]);
 
+  useEffect(() => {
+    if (!reactionPicker) return undefined;
+    const closeReactionPicker = (event) => {
+      const target = event.target;
+      if (reactionPickerRef.current?.contains(target)) return;
+      setReactionPicker(null);
+    };
+    document.addEventListener("pointerdown", closeReactionPicker, true);
+    return () =>
+      document.removeEventListener("pointerdown", closeReactionPicker, true);
+  }, [reactionPicker]);
+
   const loadMessages = useCallback(async () => {
     try {
-      const data = await api.request("/api/chat/messages?limit=120");
+      const data = await api.request(
+        `/api/chat/messages?limit=120&user_id=${encodeURIComponent(currentUser?.id || currentUserName)}`,
+      );
       const nextRows = data.rows || [];
       const newestMessageId = nextRows.reduce(
         (maxId, row) => Math.max(maxId, Number(row.id || 0)),
@@ -13422,7 +18575,7 @@ function ChatWidget({
       if (error?.isNetworkError && rowsCountRef.current > 0) return;
       setMessage?.(`Chat error: ${error.message}`);
     }
-  }, [api, currentUserName, dismissedUnreadId, isOwnMessage, open, setMessage]);
+  }, [api, currentUser?.id, currentUserName, dismissedUnreadId, isOwnMessage, open, setMessage]);
 
   useEffect(() => {
     loadMessages();
@@ -13594,6 +18747,108 @@ function ChatWidget({
     });
   }
 
+  function pendingAttachmentSummary(items = pendingAttachments, type = pendingAttachmentType) {
+    const totalSize = items.reduce((sum, item) => sum + Number(item.file?.size || 0), 0);
+    const folderName =
+      type === "folder"
+        ? fileRelativePath(items[0]?.file).split(/[\\/]/)[0] || "Folder"
+        : "";
+    return {
+      count: items.length,
+      totalSize,
+      displayName:
+        type === "folder"
+          ? folderName
+          : items.length === 1
+            ? items[0]?.file?.name || "Attachment"
+            : `${items.length} files`,
+    };
+  }
+
+  function chooseManagedFiles(fileList, type = "file") {
+    const files = Array.from(fileList || []).filter((item) => item?.size >= 0);
+    if (!files.length) return;
+    setPendingAttachments(
+      files.map((selectedFile) => ({
+        file: selectedFile,
+        relativePath: fileRelativePath(selectedFile),
+      })),
+    );
+    setPendingAttachmentType(type === "folder" ? "folder" : files.length > 1 ? "multiple_files" : "file");
+    setFile(null);
+    setEmojiOpen(false);
+  }
+
+  async function uploadManagedAttachments(items = pendingAttachments, type = pendingAttachmentType) {
+    if (!items.length) return [];
+    const uploadItems = items.map((item, index) => ({
+      ...item,
+      clientId:
+        item.clientId ||
+        `${index}:${fileRelativePath(item.file)}:${Number(item.file?.size || 0)}`,
+    }));
+    const summary = pendingAttachmentSummary(items, type);
+    const session = await api.request("/api/chat/attachments/sessions", {
+      method: "POST",
+      body: JSON.stringify({
+        created_by: currentUser?.id || currentUserName,
+        attachment_type: type,
+        display_name: summary.displayName,
+        total_size: summary.totalSize,
+        entries: uploadItems.map(({ file: selectedFile, relativePath, clientId }) => ({
+          client_id: clientId,
+          relative_path: relativePath || selectedFile.name,
+          display_name: selectedFile.name,
+          size_bytes: selectedFile.size,
+          mime_type: selectedFile.type || "application/octet-stream",
+        })),
+      }),
+    });
+    const attachment = session.attachment;
+    const serverEntries = session.entries || [];
+    const entryByClientId = new Map(
+      serverEntries.map((entry) => [String(entry.client_id || ""), entry]),
+    );
+    const entryByPath = new Map(
+      serverEntries.map((entry) => [String(entry.relative_path || ""), entry]),
+    );
+    const chunkSize = 1024 * 1024;
+    let uploaded = 0;
+    for (const item of uploadItems) {
+      const selectedFile = item.file;
+      const relativePath = item.relativePath || selectedFile.name;
+      const serverEntry = entryByClientId.get(String(item.clientId || "")) || entryByPath.get(relativePath);
+      if (!serverEntry?.id) throw new Error(`Upload entry not created: ${relativePath}`);
+      let offset = 0;
+      while (offset < selectedFile.size) {
+        const chunk = selectedFile.slice(offset, Math.min(offset + chunkSize, selectedFile.size));
+        const data = arrayBufferToBase64(await chunk.arrayBuffer());
+        const result = await api.request(
+          `/api/chat/attachments/${encodeURIComponent(attachment.id)}/entries/${encodeURIComponent(serverEntry.id)}/chunk`,
+          {
+            method: "POST",
+            body: JSON.stringify({ offset, data }),
+          },
+        );
+        const nextOffset = Number(result.uploaded_bytes || offset + chunk.size);
+        uploaded += Math.max(0, nextOffset - offset);
+        offset = nextOffset;
+        setUploadProgress({
+          name: summary.displayName,
+          uploaded,
+          total: summary.totalSize,
+          percent: summary.totalSize ? Math.min(100, Math.round((uploaded / summary.totalSize) * 100)) : 100,
+        });
+      }
+    }
+    const completed = await api.request(
+      `/api/chat/attachments/${encodeURIComponent(attachment.id)}/complete`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    setUploadProgress(null);
+    return [completed.attachment || attachment];
+  }
+
   function preferredAudioMimeType() {
     if (!window.MediaRecorder?.isTypeSupported) return "";
     return [
@@ -13659,14 +18914,21 @@ function ChatWidget({
   async function sendChatPayload({
     messageText = text,
     selectedFile = file,
+    managedItems = pendingAttachments,
+    managedType = pendingAttachmentType,
     reply = replyTo,
     clearComposer = true,
     clearReply = true,
   } = {}) {
-    if (!String(messageText || "").trim() && !selectedFile) return null;
+    if (!String(messageText || "").trim() && !selectedFile && !managedItems.length) return null;
     setSending(true);
     try {
-      const attachment = await readFileAsDataUrl(selectedFile);
+      const managedAttachments = managedItems.length
+        ? await uploadManagedAttachments(managedItems, managedType)
+        : [];
+      const attachment = managedAttachments.length
+        ? null
+        : await readFileAsDataUrl(selectedFile);
       const row = await api.request("/api/chat/messages", {
         method: "POST",
         body: JSON.stringify({
@@ -13674,6 +18936,7 @@ function ChatWidget({
           message: messageText,
           reply_to_id: reply?.id || null,
           attachment,
+          attachment_ids: managedAttachments.map((item) => item.id).filter(Boolean),
         }),
       });
       setRows((current) => [...current, row]);
@@ -13681,6 +18944,8 @@ function ChatWidget({
       if (clearComposer) {
         setText("");
         setFile(null);
+        setPendingAttachments([]);
+        setPendingAttachmentType("file");
       }
       if (clearReply) setReplyTo(null);
       return row;
@@ -13707,6 +18972,7 @@ function ChatWidget({
       const sent = await sendChatPayload({
         messageText: "",
         selectedFile: voiceFile,
+        managedItems: [],
         clearComposer: false,
       });
       if (sent) setMessage?.("Voice message sent.");
@@ -13793,6 +19059,115 @@ function ChatWidget({
       setPendingDelete(null);
     } catch (error) {
       setMessage?.(`Chat delete failed: ${error.message}`);
+    }
+  }
+
+  function optimisticReactionState(reactions = [], emoji) {
+    const userId = String(currentUser?.id || currentUserName);
+    const displayName = currentUserName;
+    let found = false;
+    const next = reactions
+      .map((reaction) => {
+        if (reaction.emoji !== emoji) return reaction;
+        found = true;
+        const already = (reaction.users || []).some(
+          (user) => String(user.user_id) === userId,
+        );
+        const users = already
+          ? (reaction.users || []).filter((user) => String(user.user_id) !== userId)
+          : [
+              ...(reaction.users || []),
+              {
+                user_id: userId,
+                display_name: displayName,
+                initials: initialsForName(displayName),
+              },
+            ];
+        return {
+          ...reaction,
+          users,
+          count: users.length,
+          reacted_by_current: !already,
+        };
+      })
+      .filter((reaction) => Number(reaction.count || 0) > 0);
+    if (!found) {
+      next.push({
+        emoji,
+        count: 1,
+        users: [
+          {
+            user_id: userId,
+            display_name: displayName,
+            initials: initialsForName(displayName),
+          },
+        ],
+        reacted_by_current: true,
+      });
+    }
+    return next;
+  }
+
+  async function toggleReaction(row, emoji) {
+    if (!row?.id || !emoji) return;
+    setReactionPicker(null);
+    setRows((current) =>
+      current.map((item) =>
+        item.id === row.id
+          ? { ...item, reactions: optimisticReactionState(item.reactions || [], emoji) }
+          : item,
+      ),
+    );
+    try {
+      const result = await api.request(`/api/chat/messages/${row.id}/reactions`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: currentUser?.id || currentUserName,
+          user_name: currentUserName,
+          emoji,
+        }),
+      });
+      setRows((current) =>
+        current.map((item) =>
+          item.id === row.id ? { ...item, reactions: result.reactions || [] } : item,
+        ),
+      );
+    } catch (error) {
+      setMessage?.(`Reaction failed: ${error.message}`);
+      loadMessages();
+    }
+  }
+
+  function openReactionPicker(event, row) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    const rect = event?.currentTarget?.getBoundingClientRect?.();
+    setEmojiOpen(false);
+    setReactionPicker({
+      message: row,
+      left: Math.max(8, Math.min(rect?.left || event?.clientX || 24, window.innerWidth - 330)),
+      top: Math.max(8, Math.min((rect?.bottom || event?.clientY || 24) + 6, window.innerHeight - 380)),
+    });
+  }
+
+  async function openFolderBrowser(attachment, parent = null) {
+    if (!attachment?.id) return;
+    setFolderBrowser({ attachment, parent });
+    setFolderLoading(true);
+    try {
+      const query = parent ? `?parent=${encodeURIComponent(parent)}` : "";
+      const data = await api.request(
+        `/api/attachments/${encodeURIComponent(attachment.id)}/entries${query}`,
+      );
+      setFolderEntries(data.entries || []);
+      setFolderBrowser({
+        attachment: data.attachment || attachment,
+        parent: data.parent || null,
+      });
+    } catch (error) {
+      setMessage?.(`Attachment browse failed: ${error.message}`);
+    } finally {
+      setFolderLoading(false);
     }
   }
 
@@ -13920,6 +19295,8 @@ function ChatWidget({
         type: mimeType,
       }),
     );
+    setPendingAttachments([]);
+    setPendingAttachmentType("file");
     setEmojiOpen(false);
   }
 
@@ -14005,6 +19382,9 @@ function ChatWidget({
               const attachmentUrl = row.attachment_url
                 ? buildUrl(apiBase, row.attachment_url)
                 : "";
+              const managedAttachments = Array.isArray(row.attachments)
+                ? row.attachments
+                : [];
               const isOwn = isOwnMessage(row);
               const seenPeople = (row.seen || []).filter(
                 (mark) =>
@@ -14023,6 +19403,7 @@ function ChatWidget({
                   ]
                     .filter(Boolean)
                     .join(" ")}
+                  onContextMenu={(event) => openReactionPicker(event, row)}
                 >
                   <div className="chat-meta">
                     <strong>{isOwn ? "You" : row.sender || "User"}</strong>
@@ -14088,7 +19469,90 @@ function ChatWidget({
                         {row.attachment_name || "Attachment"}
                       </a>
                     ))}
+                  {!!managedAttachments.length && (
+                    <div className="chat-managed-attachments">
+                      {managedAttachments.map((attachment) => {
+                        const isFolder = attachment.attachment_type === "folder";
+                        const isMultiple = attachment.attachment_type === "multiple_files";
+                        const downloadUrl = attachment.download_url
+                          ? buildUrl(apiBase, attachment.download_url)
+                          : "";
+                        return (
+                          <article key={attachment.id} className="chat-managed-attachment-card">
+                            <div className="chat-managed-attachment-icon">
+                              {isFolder ? (
+                                <FolderOpen size={24} />
+                              ) : isMultiple ? (
+                                <Files size={24} />
+                              ) : (
+                                <FileText size={24} />
+                              )}
+                            </div>
+                            <div>
+                              <strong>{attachment.display_name || "Attachment"}</strong>
+                              <span>
+                                {isFolder
+                                  ? `${attachment.file_count || 0} files • ${attachment.folder_count || 0} folders`
+                                  : isMultiple
+                                    ? `${attachment.file_count || 0} files`
+                                    : attachment.mime_type || "File"}
+                                {" · "}
+                                {formatBytes(attachment.total_size)}
+                              </span>
+                            </div>
+                            <div className="chat-managed-attachment-actions">
+                              {(isFolder || isMultiple) && (
+                                <button
+                                  type="button"
+                                  onClick={() => openFolderBrowser(attachment)}
+                                >
+                                  Browse
+                                </button>
+                              )}
+                              {downloadUrl && (
+                                <a href={downloadUrl} target="_blank" rel="noreferrer">
+                                  <Download size={15} /> Download
+                                </a>
+                              )}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {!!row.reactions?.length && (
+                    <div className="chat-reactions" aria-label="Message reactions">
+                      {row.reactions.map((reaction) => {
+                        const users = reaction.users || [];
+                        const shownUsers = users.slice(0, 2);
+                        const extraCount = Math.max(0, Number(reaction.count || users.length) - shownUsers.length);
+                        return (
+                          <button
+                            key={reaction.emoji}
+                            type="button"
+                            className={reaction.reacted_by_current ? "chat-reaction-pill active" : "chat-reaction-pill"}
+                            title={users.map((user) => user.display_name).join("\n")}
+                            onClick={() => toggleReaction(row, reaction.emoji)}
+                          >
+                            <span>{reaction.emoji}</span>
+                            {shownUsers.map((user) => (
+                              <b key={user.user_id}>{user.initials}</b>
+                            ))}
+                            {extraCount > 0 && <em>+{extraCount}</em>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   <div className="chat-actions">
+                    <button
+                      type="button"
+                      className="chat-reaction-button"
+                      onClick={(event) => openReactionPicker(event, row)}
+                      title="React"
+                    >
+                      <Smile size={14} />
+                    </button>
                     <button
                       type="button"
                       className="chat-reply-button"
@@ -14117,6 +19581,13 @@ function ChatWidget({
                         <Trash2 size={14} />
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="chat-more-button"
+                      title="More"
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
                   </div>
                 </article>
               );
@@ -14193,6 +19664,40 @@ function ChatWidget({
               </button>
             </div>
           )}
+          {!!pendingAttachments.length && (
+            <div className="chat-pending-file">
+              <div className="chat-pending-file-icon">
+                {pendingAttachmentType === "folder" ? <FolderOpen size={22} /> : <Files size={22} />}
+              </div>
+              <div>
+                <strong>Ready to send</strong>
+                <span>
+                  {pendingAttachmentSummary().displayName} · {pendingAttachmentSummary().count} item(s) · {formatBytes(pendingAttachmentSummary().totalSize)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingAttachments([]);
+                  setPendingAttachmentType("file");
+                }}
+                title="Remove attachment"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
+          {uploadProgress && (
+            <div className="chat-upload-progress" role="status">
+              <strong>Uploading {uploadProgress.name}</strong>
+              <span>
+                {formatBytes(uploadProgress.uploaded)} of {formatBytes(uploadProgress.total)}
+              </span>
+              <div>
+                <i style={{ width: `${uploadProgress.percent || 0}%` }} />
+              </div>
+            </div>
+          )}
           {mentionQuery && (mentionLoading || mentionSuggestions.length > 0) && (
             <div className="chat-mention-list" role="listbox" aria-label="اقتراحات الإشارة">
               {mentionLoading && !mentionSuggestions.length ? (
@@ -14263,6 +19768,62 @@ function ChatWidget({
               </div>
             </div>
           )}
+          {reactionPicker && createPortal(
+            <div
+              ref={reactionPickerRef}
+              className="chat-emoji-picker chat-reaction-picker"
+              aria-label="لوحة تفاعل الرسالة"
+              style={{
+                left: `${reactionPicker.left}px`,
+                top: `${reactionPicker.top}px`,
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <div className="chat-emoji-tabs">
+                <button
+                  type="button"
+                  className={emojiCategory === "most_used" ? "active" : ""}
+                  onClick={() => setEmojiCategory("most_used")}
+                >
+                  Most used
+                </button>
+                {CHAT_EMOJI_CATEGORIES.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    className={emojiCategory === category.id ? "active" : ""}
+                    onClick={() => setEmojiCategory(category.id)}
+                  >
+                    {category.label}
+                  </button>
+                ))}
+              </div>
+              <div className="chat-emoji-section-head">
+                <strong>{activeEmojiSection.label}</strong>
+                <button
+                  type="button"
+                  onClick={() => setReactionPicker(null)}
+                  title="Close"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="chat-emoji-grid">
+                {activeEmojiSection.emojis.map((emoji, index) => (
+                  <button
+                    key={`${emoji}-${index}`}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => toggleReaction(reactionPicker.message, emoji)}
+                    aria-label={emoji}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>,
+            document.body,
+          )}
           <form className="chat-compose" onSubmit={sendMessage}>
             <textarea
               ref={composerRef}
@@ -14291,14 +19852,44 @@ function ChatWidget({
             >
               <Smile size={18} />
             </button>
-            <label className="chat-attach" title={file?.name || "Attach file"}>
+            <button
+              type="button"
+              className="chat-attach"
+              title="إرسال ملفات"
+              onClick={() => filesInputRef.current?.click()}
+            >
               <Paperclip size={17} />
-              <input
-                type="file"
-                accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
-                onChange={(event) => setFile(event.target.files?.[0] || null)}
-              />
-            </label>
+            </button>
+            <button
+              type="button"
+              className="chat-attach"
+              title="إرسال مجلد"
+              onClick={() => folderInputRef.current?.click()}
+            >
+              <FolderOpen size={17} />
+            </button>
+            <input
+              ref={filesInputRef}
+              className="chat-hidden-file-input"
+              type="file"
+              multiple
+              onChange={(event) => {
+                chooseManagedFiles(event.target.files, "multiple_files");
+                event.target.value = "";
+              }}
+            />
+            <input
+              ref={folderInputRef}
+              className="chat-hidden-file-input"
+              type="file"
+              multiple
+              webkitdirectory=""
+              directory=""
+              onChange={(event) => {
+                chooseManagedFiles(event.target.files, "folder");
+                event.target.value = "";
+              }}
+            />
             <button
               type="button"
               className={recording ? "chat-voice-button recording" : "chat-voice-button"}
@@ -14370,6 +19961,82 @@ function ChatWidget({
                 ))
               ) : (
                 <span>No other users have seen it yet</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {folderBrowser && (
+        <div
+          className="chat-overlay"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setFolderBrowser(null);
+              setFolderEntries([]);
+            }
+          }}
+        >
+          <div className="chat-dialog chat-folder-browser">
+            <div className="chat-dialog-head">
+              <strong>{folderBrowser.attachment?.display_name || "Attachment folder"}</strong>
+              <button
+                type="button"
+                onClick={() => {
+                  setFolderBrowser(null);
+                  setFolderEntries([]);
+                }}
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="chat-folder-browser-meta">
+              <span>{folderBrowser.attachment?.file_count || 0} files</span>
+              <span>{folderBrowser.attachment?.folder_count || 0} folders</span>
+              <span>{formatBytes(folderBrowser.attachment?.total_size || 0)}</span>
+            </div>
+            {folderBrowser.parent && (
+              <button
+                type="button"
+                className="chat-folder-up"
+                onClick={() => openFolderBrowser(folderBrowser.attachment)}
+              >
+                رجوع إلى الجذر
+              </button>
+            )}
+            <div className="chat-folder-entry-list">
+              {folderLoading ? (
+                <span>Loading...</span>
+              ) : folderEntries.length ? (
+                folderEntries.map((entry) => (
+                  <div key={entry.id} className="chat-folder-entry">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        entry.entry_type === "folder"
+                          ? openFolderBrowser(folderBrowser.attachment, entry.id)
+                          : null
+                      }
+                    >
+                      {entry.entry_type === "folder" ? (
+                        <FolderOpen size={18} />
+                      ) : (
+                        <FileText size={18} />
+                      )}
+                      <span>{entry.display_name}</span>
+                    </button>
+                    <small>{entry.entry_type === "file" ? formatBytes(entry.size_bytes) : "Folder"}</small>
+                    {entry.download_url && (
+                      <a href={buildUrl(apiBase, entry.download_url)} target="_blank" rel="noreferrer">
+                        <Download size={14} /> Download
+                      </a>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <span>No files in this folder.</span>
               )}
             </div>
           </div>

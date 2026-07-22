@@ -1,6 +1,6 @@
 # Accounting Management
 
-Version `v1.4.1` restores the local/manual company flow from v1.3.8 and keeps the v1.4.0 report, smart-table, focus, and session fixes.
+Version `v1.4.3` restores the category column in price-offer and invoice reports and keeps the v1.4 smart-table and access-control fixes intact.
 
 ## Development
 

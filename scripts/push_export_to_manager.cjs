@@ -5,7 +5,7 @@ const { spawnSync } = require("child_process");
 const ROOT_DIR = path.resolve(__dirname, "..");
 const DEFAULT_IMPORT_URL =
   process.env.AM_MANAGER_IMPORT_URL ||
-  `${(process.env.AM_CLOUD_API_URL || process.env.AM_MANAGER_BASE_URL || "https://yasserdiab.site").replace(/\/$/, "")}/api/import/sqlite-export`;
+  `${(process.env.AM_CLOUD_API_URL || process.env.AM_MANAGER_BASE_URL || "https://manager.yasserdiab.site").replace(/\/$/, "")}/api/import/sqlite-export`;
 
 function readToken() {
   const candidates = [

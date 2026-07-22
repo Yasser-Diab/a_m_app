@@ -37,20 +37,20 @@ const requiredMarkers = [
   "/api/subscription/config",
   "/api/company-account",
   "/api/manager/public",
-  "/api/payments/create-checkout",
+  "/api/manager-payments",
+  "/api/paypal/orders",
   "/api/paypal/subscription-plan",
   "/api/paypal/subscriptions/activate",
   "subscription-mode-grid",
   "account-danger-zone",
   "تحديث Manager",
-  "am-manager-v1.4.1",
+  "am-manager-v1.4.3",
 ];
 const forbiddenMarkers = [
   "smartRates",
   "Embedded secure checkout",
   "Manager PayPal client id is not configured",
   "/api/manager-account",
-  "/api/manager-payments",
   "إرسال البيانات للمدير",
   "Delete Manager account",
 ];

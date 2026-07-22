@@ -5,8 +5,33 @@ function cleanApiBase(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
-async function localRequest(apiBase = DEFAULT_API_BASE, path, options = {}) {
-  const base = cleanApiBase(apiBase) || DEFAULT_API_BASE;
+function defaultApiBaseForCurrentPage() {
+  if (typeof location !== "undefined" && location.protocol === "https:") {
+    return cleanApiBase(location.origin);
+  }
+  return DEFAULT_API_BASE;
+}
+
+function safeApiBaseForCurrentPage(value) {
+  const clean = cleanApiBase(value);
+  if (!clean) return defaultApiBaseForCurrentPage();
+  try {
+    const url = new URL(clean);
+    if (
+      typeof location !== "undefined" &&
+      location.protocol === "https:" &&
+      url.protocol === "http:"
+    ) {
+      return defaultApiBaseForCurrentPage();
+    }
+  } catch {
+    return defaultApiBaseForCurrentPage();
+  }
+  return clean;
+}
+
+async function localRequest(apiBase = defaultApiBaseForCurrentPage(), path, options = {}) {
+  const base = safeApiBaseForCurrentPage(apiBase);
   const body =
     options.body && typeof options.body !== "string"
       ? JSON.stringify(options.body)
@@ -20,7 +45,16 @@ async function localRequest(apiBase = DEFAULT_API_BASE, path, options = {}) {
     },
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(
+      response.ok
+        ? "The payment server returned an unreadable response."
+        : `Payment server error (${response.status}).`,
+    );
+  }
   if (!response.ok) {
     throw new Error(data?.error || data?.message || `HTTP ${response.status}`);
   }
@@ -46,20 +80,45 @@ function planPrice(plan, billingCycle) {
 }
 
 function paypalSdkUrl(config = {}, currency = "USD", intent = "capture") {
-  if (config.sdk_url || config.sdkUrl) return config.sdk_url || config.sdkUrl;
   const clientId = config.client_id || config.clientId;
-  if (!clientId) throw new Error("Manager did not return PayPal SDK config.");
-  const sdkUrl = new URL("https://www.paypal.com/sdk/js");
-  sdkUrl.searchParams.set("client-id", clientId);
+  let sdkUrl;
+  try {
+    sdkUrl = new URL(config.sdk_url || config.sdkUrl || "https://www.paypal.com/sdk/js");
+  } catch {
+    sdkUrl = new URL("https://www.paypal.com/sdk/js");
+  }
+  if (clientId) sdkUrl.searchParams.set("client-id", clientId);
+  if (!sdkUrl.searchParams.get("client-id")) {
+    throw new Error("Manager did not return PayPal SDK config.");
+  }
   sdkUrl.searchParams.set("currency", config.currency || currency || "USD");
   sdkUrl.searchParams.set("intent", intent === "subscription" ? "subscription" : "capture");
   sdkUrl.searchParams.set(
     "components",
     intent === "subscription" ? "buttons" : "buttons,card-fields",
   );
-  sdkUrl.searchParams.set("enable-funding", "card,credit,paylater,venmo");
-  if (intent === "subscription") sdkUrl.searchParams.set("vault", "true");
+  if (intent === "subscription") {
+    sdkUrl.searchParams.set("vault", "true");
+    sdkUrl.searchParams.delete("commit");
+  } else {
+    sdkUrl.searchParams.delete("vault");
+    sdkUrl.searchParams.set("commit", "true");
+    sdkUrl.searchParams.set("enable-funding", "card,credit,paylater,venmo");
+  }
   return sdkUrl.toString();
+}
+
+function paypalClientConfigPath(currency, intent) {
+  const query = new URLSearchParams({
+    currency: currency || "USD",
+    mode: intent === "subscription" ? "subscription" : "capture",
+    intent,
+  });
+  return `/api/paypal/client-config?${query.toString()}`;
+}
+
+function validEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 }
 
 function loadPayPalSdk(src, isCancelled = () => false) {
@@ -77,7 +136,7 @@ function loadPayPalSdk(src, isCancelled = () => false) {
     script.src = src;
     script.async = true;
     script.dataset.managerPaypalSdk = "true";
-    script.dataset.sdkIntegrationSource = "am-manager-v1.4.1";
+    script.dataset.sdkIntegrationSource = "am-manager-v1.4.3";
     script.onload = () => {
       if (isCancelled() || window.__managerPayPalSdkGeneration !== generation) {
         reject(new Error("PayPal checkout was replaced."));
@@ -113,11 +172,11 @@ export async function loadManagerSubscriptionConfig(apiBase = DEFAULT_API_BASE) 
 }
 
 export async function loadManagerSubscriptionStatus(apiBase = DEFAULT_API_BASE) {
-  return localRequest(apiBase, "/api/subscription/status");
+  return localRequest(apiBase, "/api/manager-subscription/status");
 }
 
 export async function loadManagerPayments(apiBase = DEFAULT_API_BASE) {
-  const rows = await localRequest(apiBase, "/api/payments").catch(() => []);
+  const rows = await localRequest(apiBase, "/api/manager-payments").catch(() => []);
   return { payments: Array.isArray(rows) ? rows : rows?.payments || [] };
 }
 
@@ -155,12 +214,13 @@ export async function renderManagerPayPalCheckout({
   const recurring = paymentMode === "recurring";
   const paypalIntent = recurring ? "subscription" : "capture";
   const publicConfig =
-    (await localRequest(apiBase, "/api/paypal/client-config", {
+    (await localRequest(apiBase, paypalClientConfigPath(currency, paypalIntent), {
       method: "GET",
     }).catch(() => null)) ||
     (await localRequest(apiBase, "/api/subscription/config").catch(() => null)) ||
     (await localRequest(apiBase, "/api/manager/public").catch(() => null));
-  const clientConfig = publicConfig?.paypal || publicConfig?.settings?.paypal || null;
+  const clientConfig =
+    publicConfig?.paypal || publicConfig?.settings?.paypal || publicConfig || null;
   if (!clientConfig?.client_id && !clientConfig?.clientId && !clientConfig?.sdk_url) {
     throw new Error("PayPal credentials are not configured in the Manager app yet.");
   }
@@ -184,15 +244,10 @@ export async function renderManagerPayPalCheckout({
 
   const createOrder = async () => {
     if (isCancelled()) throw new Error("PayPal checkout was replaced.");
-    const data =
-      (await localRequest(apiBase, "/api/paypal/orders", {
-        method: "POST",
-        body: orderPayload,
-      }).catch(() => null)) ||
-      (await localRequest(apiBase, "/api/payments/create-checkout", {
-        method: "POST",
-        body: orderPayload,
-      }));
+    const data = await localRequest(apiBase, "/api/paypal/orders", {
+      method: "POST",
+      body: orderPayload,
+    });
     const id = data.id || data.orderID || data.order_id || data.paypal_order_id;
     if (!id) throw new Error("Manager did not return a PayPal order id.");
     return id;
@@ -201,19 +256,14 @@ export async function renderManagerPayPalCheckout({
   const approve = async (data) => {
     if (isCancelled()) return;
     const orderId = data.orderID || data.id;
-    const capture =
-      (await localRequest(
-        apiBase,
-        `/api/paypal/orders/${encodeURIComponent(orderId)}/capture`,
-        {
-          method: "POST",
-          body: { ...orderPayload, order_id: orderId },
-        },
-      ).catch(() => null)) ||
-      (await localRequest(apiBase, "/api/payments/paypal/capture", {
+    const capture = await localRequest(
+      apiBase,
+      `/api/paypal/orders/${encodeURIComponent(orderId)}/capture`,
+      {
         method: "POST",
         body: { ...orderPayload, order_id: orderId },
-      }));
+      },
+    );
     await onApproved?.(capture);
   };
 
@@ -224,12 +274,25 @@ export async function renderManagerPayPalCheckout({
       body: orderPayload,
     });
     const id =
-      data.plan_id ||
       data.paypal_plan_id ||
       data.subscription_plan_id ||
+      data.paypalPlanId ||
+      data.subscriptionPlanId ||
+      data.plan?.paypal_plan_id ||
+      data.plan?.paypalPlanId ||
+      data.plan_id ||
       data.id ||
       data.planId;
     if (!id) throw new Error("Manager did not return a PayPal subscription plan id.");
+    if (!/^P-[A-Z0-9]+$/i.test(String(id))) {
+      throw new Error(
+        "Manager returned an invalid recurring plan. A real active PayPal billing plan is required.",
+      );
+    }
+    const status = String(data.status || data.plan_status || "").toUpperCase();
+    if (status && status !== "ACTIVE") {
+      throw new Error(`The PayPal recurring plan is ${status.toLowerCase()}, not active.`);
+    }
     return id;
   };
 
@@ -238,7 +301,9 @@ export async function renderManagerPayPalCheckout({
     return actions.subscription.create({
       plan_id: paypalPlanId,
       custom_id: `${plan.id}:${orderPayload.billing_cycle}`,
-      subscriber: customer.email ? { email_address: customer.email } : undefined,
+      subscriber: validEmailAddress(customer.email)
+        ? { email_address: String(customer.email).trim() }
+        : undefined,
     });
   };
 
@@ -249,7 +314,29 @@ export async function renderManagerPayPalCheckout({
     const activation = await localRequest(apiBase, "/api/paypal/subscriptions/activate", {
       method: "POST",
       body: { ...orderPayload, subscription_id: subscriptionId },
-    }).catch(() => ({ subscription_id: subscriptionId }));
+    });
+    const activatedId =
+      activation.subscription_id ||
+      activation.provider_subscription_id ||
+      activation.paypal_subscription?.id ||
+      activation.paypalSubscription?.id ||
+      activation.subscription?.provider_subscription_id ||
+      activation.activatedSubscription?.provider_subscription_id;
+    if (activatedId && String(activatedId) !== String(subscriptionId)) {
+      throw new Error("Manager verified a different PayPal subscription id.");
+    }
+    const providerStatus = String(
+      activation.provider_status ||
+        activation.paypal_status ||
+        activation.paypal_subscription?.status ||
+        activation.paypalSubscription?.status ||
+        "",
+    ).toUpperCase();
+    if (activation.verified !== true && providerStatus !== "ACTIVE") {
+      throw new Error(
+        "PayPal approved the request, but Manager could not verify an active recurring subscription.",
+      );
+    }
     await onApproved?.(activation);
   };
 
@@ -274,11 +361,17 @@ export async function renderManagerPayPalCheckout({
     ...(recurring
       ? { createSubscription, onApprove: approveSubscription }
       : { createOrder, onApprove: approve }),
+    onCancel: () => {
+      if (!isCancelled()) {
+        onError?.(new Error("PayPal checkout was canceled before payment approval."));
+      }
+    },
     onError: reportError,
   });
-  if (!buttons.isEligible || buttons.isEligible()) {
-    await buttons.render(buttonsHost);
+  if (buttons.isEligible && !buttons.isEligible()) {
+    throw new Error("PayPal checkout is not eligible for this account or payment mode.");
   }
+  await buttons.render(buttonsHost);
 
   let cardFields = null;
   if (!recurring && paypal.CardFields?.isEligible?.() && cardHost && submitButton) {

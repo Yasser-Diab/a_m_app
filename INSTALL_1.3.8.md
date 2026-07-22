@@ -31,8 +31,8 @@ http://127.0.0.1:4181/main
 The Manager app remains separate. Start Manager first when testing payments.
 
 ```text
-Public tunnel:  https://yasserdiab.site
-Public ingest:  https://yasserdiab.site/api/ingest/account
+Public tunnel:  https://manager.yasserdiab.site
+Public ingest:  https://manager.yasserdiab.site/api/ingest/account
 Local ingest:   http://127.0.0.1:4295/api/ingest/account
 ```
 

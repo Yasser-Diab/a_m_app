@@ -1,3 +1,8 @@
+param(
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]]$BuilderArguments
+)
+
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -46,7 +51,7 @@ try {
     Remove-VariantOutput -Variant $variant
     Invoke-CheckedNative npm run build:web:raw
     Invoke-CheckedNative node scripts/verify_built_assets.cjs dist
-    Invoke-CheckedNative npx electron-builder --win nsis --config electron-builder.variant.cjs
+    Invoke-CheckedNative npx electron-builder --win nsis --config electron-builder.variant.cjs @BuilderArguments
   }
 }
 finally {

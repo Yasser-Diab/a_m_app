@@ -53,7 +53,7 @@ function inferPartyCategory(row = {}) {
   const text = `${row.party_type || ''} ${row.customer_name || ''} ${row.customer_display_name || ''}`;
   if (text.includes('\u0634\u0631\u0643')) return 'corporate';
   if (text.includes('\u0645\u0642\u0627\u0648\u0644')) return 'corporate';
-  return 'retail';
+  return 'unselected';
 }
 
 function displayPartyName(baseName, category) {
@@ -61,7 +61,17 @@ function displayPartyName(baseName, category) {
   if (!base) return '';
   if (category === 'unselected') return base;
   if (category === 'corporate') return `\u0634\u0631\u0643\u0629 ${base}`;
-  return `\u0645. ${base}`;
+  if (category === 'engineer') return `\u0645. ${base}`;
+  return base;
+}
+
+function termsSettingKeyForParty(category) {
+  // Individuals and engineers use individual terms. Unclassified customers
+  // and companies use company terms.
+  const normalized = String(category || '').trim().toLowerCase();
+  return normalized === 'retail' || normalized === 'engineer'
+    ? 'terms_retail'
+    : 'terms_corporate';
 }
 
 function partyFromInput(input = {}) {
@@ -123,6 +133,7 @@ function ensureRuntimeMigrations(database) {
   addColumn('search_party_name', 'TEXT');
   addColumn('statement_text', 'TEXT');
   addColumn('document_status', "TEXT DEFAULT 'draft'");
+  addColumn('vat_terms_only', 'INTEGER NOT NULL DEFAULT 0');
 
   database.exec('CREATE INDEX IF NOT EXISTS idx_work_items_party ON work_items(party_id)');
   database.exec('CREATE INDEX IF NOT EXISTS idx_work_items_document ON work_items(document_id)');
@@ -266,5 +277,6 @@ module.exports = {
   partyFromInput,
   statusForDocumentType,
   stripPartyPrefix,
+  termsSettingKeyForParty,
   unitLabel,
 };

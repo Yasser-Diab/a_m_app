@@ -35,6 +35,8 @@ class AppDatabase {
     this.dbPath = dbPath;
     this.schemaPath = schemaPath;
     this.db = null;
+    this.transactionDepth = 0;
+    this.savePending = false;
   }
 
   async open() {
@@ -55,9 +57,42 @@ class AppDatabase {
   }
 
   save() {
+    if (this.transactionDepth > 0) {
+      this.savePending = true;
+      return;
+    }
+    this.saveNow();
+  }
+
+  saveNow() {
     const bytes = this.db.export();
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
     fs.writeFileSync(this.dbPath, Buffer.from(bytes));
+    this.savePending = false;
+  }
+
+  transaction(callback) {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Database transaction requires a callback.');
+    }
+    if (this.transactionDepth > 0) return callback();
+    this.db.exec('BEGIN TRANSACTION');
+    this.transactionDepth = 1;
+    try {
+      const result = callback();
+      this.db.exec('COMMIT');
+      this.transactionDepth = 0;
+      this.saveNow();
+      return result;
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK');
+      } finally {
+        this.transactionDepth = 0;
+        this.savePending = false;
+      }
+      throw error;
+    }
   }
 
   all(sql, params = []) {
@@ -107,6 +142,13 @@ class AppDatabase {
     const backupPath = path.join(targetDir, `price_offer_${stamp}.db`);
     fs.copyFileSync(this.dbPath, backupPath);
     return backupPath;
+  }
+
+  close() {
+    if (!this.db) return;
+    this.save();
+    this.db.close();
+    this.db = null;
   }
 }
 

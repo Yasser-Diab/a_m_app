@@ -65,7 +65,21 @@ function normalizeUnitCode(value) {
     '\u0645\u0637',
     '\u0645\u062a\u0631 \u0637\u0648\u0644\u064a',
   ].includes(text)) return 'lm';
-  if (['count', 'number', 'no', 'nos', 'pcs', 'piece', 'pieces', '\u0639\u062f\u062f'].includes(text)) return 'count';
+  if ([
+    'count',
+    'number',
+    'no',
+    'nos',
+    'pcs',
+    'piece',
+    'pieces',
+    'unit',
+    'units',
+    '\u0639\u062f\u062f',
+    '\u0648\u062d\u062f\u0629',
+    '\u0648\u062d\u062f\u0647',
+    '\u0642\u0637\u0639\u0629',
+  ].includes(text)) return 'count';
   return 'sqm';
 }
 

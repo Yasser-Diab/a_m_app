@@ -42,8 +42,18 @@ module.exports = {
     amVariant: variantKey,
     amEntryTab: variant.entryTab || "dashboard",
   },
+  publish: [
+    {
+      provider: "github",
+      owner: "Yasser-Diab",
+      repo: "a_m_app",
+      channel: "latest",
+      releaseType: "release",
+    },
+  ],
   win: {
     icon: path.join(root, variant.icon || variants.variants.main.icon),
+    executableName: variant.name,
     requestedExecutionLevel: "asInvoker",
     target: [
       {
@@ -62,5 +72,7 @@ module.exports = {
     allowElevation: false,
     shortcutName: variant.name,
     uninstallDisplayName: variant.name,
+    deleteAppDataOnUninstall: false,
+    include: path.join(root, "build", "installer.nsh"),
   },
 };
