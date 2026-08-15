@@ -1,4 +1,4 @@
-# Accounting Management 1.3.8 Install Guide
+# Legacy 1.3.8 Install Guide
 
 ## What This Package Must Contain
 

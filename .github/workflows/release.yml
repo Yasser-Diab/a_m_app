@@ -59,23 +59,23 @@ jobs:
         run: |
           $version = node -p "require('./package.json').version"
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          Copy-Item "dist-installer/AccountingManagement/AccountingManagement-Setup-*.exe" "release-assets/" -Force
-          Copy-Item "dist-installer/AccountingManagement/AccountingManagement-Setup-*.exe.blockmap" "release-assets/" -Force
-          Copy-Item "dist-installer/AccountingManagement/latest.yml" "release-assets/" -Force
+          Copy-Item "dist-installer/EasyCommercial/EasyCommercial-Setup-*.exe" "release-assets/" -Force
+          Copy-Item "dist-installer/EasyCommercial/EasyCommercial-Setup-*.exe.blockmap" "release-assets/" -Force
+          Copy-Item "dist-installer/EasyCommercial/latest.yml" "release-assets/" -Force
           $apk = Get-ChildItem "android/app/build/outputs/apk" -Filter "*.apk" -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          Copy-Item $apk.FullName "release-assets/AccountingManagement-Android-v$version.apk" -Force
+          Copy-Item $apk.FullName "release-assets/EasyCommercial-Android-v$version.apk" -Force
           Copy-Item "INSTALL.txt" "release-assets/INSTALL.txt" -Force
-          Compress-Archive -Path "release-assets/*" -DestinationPath "AccountingManagement_V$version`_release.zip" -Force
+          Compress-Archive -Path "release-assets/*" -DestinationPath "EasyCommercial_V$version`_release.zip" -Force
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist-installer/AccountingManagement/AccountingManagement-Setup-*.exe
-            dist-installer/AccountingManagement/AccountingManagement-Setup-*.exe.blockmap
-            dist-installer/AccountingManagement/latest.yml
-            release-assets/AccountingManagement-Android-*.apk
-            AccountingManagement_V*_release.zip
+            dist-installer/EasyCommercial/EasyCommercial-Setup-*.exe
+            dist-installer/EasyCommercial/EasyCommercial-Setup-*.exe.blockmap
+            dist-installer/EasyCommercial/latest.yml
+            release-assets/EasyCommercial-Android-*.apk
+            EasyCommercial_V*_release.zip
           generate_release_notes: true
           draft: false
           prerelease: false

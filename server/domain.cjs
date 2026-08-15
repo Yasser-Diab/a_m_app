@@ -135,6 +135,12 @@ function ensureRuntimeMigrations(database) {
   addColumn('document_status', "TEXT DEFAULT 'draft'");
   addColumn('vat_terms_only', 'INTEGER NOT NULL DEFAULT 0');
 
+  const documentCols = database.all('PRAGMA table_info(documents)').map((row) => row.name);
+  const addDocumentColumn = (name, ddl) => {
+    if (!documentCols.includes(name)) database.exec(`ALTER TABLE documents ADD COLUMN ${name} ${ddl}`);
+  };
+  addDocumentColumn("report_language", "TEXT NOT NULL DEFAULT 'ar'");
+
   database.exec('CREATE INDEX IF NOT EXISTS idx_work_items_party ON work_items(party_id)');
   database.exec('CREATE INDEX IF NOT EXISTS idx_work_items_document ON work_items(document_id)');
   database.exec('CREATE INDEX IF NOT EXISTS idx_work_items_search_party ON work_items(search_party_name)');

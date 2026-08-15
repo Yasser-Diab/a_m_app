@@ -1,4 +1,4 @@
-# Accounting Management 1.3.9 Install Guide
+# Legacy 1.3.9 Install Guide
 
 ## Package Contents
 

@@ -1,6 +1,6 @@
-# Accounting Management
+# Easy Commercial
 
-Version `v1.4.3` restores the category column in price-offer and invoice reports and keeps the v1.4 smart-table and access-control fixes intact.
+Version `v2.0.0` introduces the Easy Commercial identity while preserving the existing quote, invoice, accounts, payment, smart-table, and report systems.
 
 ## Development
 
@@ -24,10 +24,10 @@ http://127.0.0.1:4190/main
 
 ## Builds
 
-Only the main Accounting Management app is built:
+Only the main Easy Commercial app is built:
 
-- Windows: `AccountingManagement-Setup-<version>.exe`
-- Android: `AccountingManagement-Android-v<version>-debug.apk`
+- Windows: `EasyCommercial-Setup-<version>.exe`
+- Android: `EasyCommercial-Android-v<version>-debug.apk`
 
 ```powershell
 npm run build:web

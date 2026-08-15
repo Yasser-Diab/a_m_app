@@ -61,7 +61,7 @@ module.exports = {
         arch: ["x64"],
       },
     ],
-    artifactName: `${variant.artifactPrefix || "AccountingManagement"}-Setup-${version}.\${ext}`,
+    artifactName: `${variant.artifactPrefix || "EasyCommercial"}-Setup-${version}.\${ext}`,
   },
   nsis: {
     oneClick: false,

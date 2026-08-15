@@ -44,7 +44,7 @@ function fixture(rows, operationNo) {
     tax_breakdown: [],
     subtotal_mode: "none",
     branding: {
-      companyNameEn: "Accounting Management",
+      companyNameEn: "Easy Commercial",
       companyNameAr: "إدارة الحسابات",
       companyAbbreviation: "AM",
       companyNameColor: "#9a6b16",

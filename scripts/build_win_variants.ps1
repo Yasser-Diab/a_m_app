@@ -8,6 +8,8 @@ $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $configPath = Join-Path $root "config\app-variants.json"
 $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+$packageJson = Get-Content -Raw -LiteralPath (Join-Path $root "package.json") | ConvertFrom-Json
+$buildVersion = if ($config.version) { [string]$config.version } else { [string]$packageJson.version }
 $variantNames = @("main")
 $desktopOutput = if ($config.desktopOutput) { $config.desktopOutput } else { "dist-installer" }
 
@@ -25,7 +27,7 @@ function Invoke-CheckedNative {
 function Remove-VariantOutput {
   param([object]$Variant)
 
-  $outputName = if ($Variant.artifactPrefix) { [string]$Variant.artifactPrefix } else { "AccountingManagement" }
+  $outputName = if ($Variant.artifactPrefix) { [string]$Variant.artifactPrefix } else { "EasyCommercial" }
   $outputPath = Join-Path (Join-Path $root $desktopOutput) $outputName
   $resolvedRoot = [System.IO.Path]::GetFullPath((Join-Path $root $desktopOutput))
   $resolvedOutput = [System.IO.Path]::GetFullPath($outputPath)
@@ -48,6 +50,8 @@ try {
     Write-Host "Building Windows app variant: $($variant.name)"
     $env:VITE_APP_VARIANT = $variantName
     $env:AM_APP_VARIANT = $variantName
+    $env:AM_BUILD_VERSION = $buildVersion
+    $env:VITE_APP_VERSION = $buildVersion
     Remove-VariantOutput -Variant $variant
     Invoke-CheckedNative npm run build:web:raw
     Invoke-CheckedNative node scripts/verify_built_assets.cjs dist
@@ -57,5 +61,7 @@ try {
 finally {
   Remove-Item Env:\VITE_APP_VARIANT -ErrorAction SilentlyContinue
   Remove-Item Env:\AM_APP_VARIANT -ErrorAction SilentlyContinue
+  Remove-Item Env:\AM_BUILD_VERSION -ErrorAction SilentlyContinue
+  Remove-Item Env:\VITE_APP_VERSION -ErrorAction SilentlyContinue
   Pop-Location
 }

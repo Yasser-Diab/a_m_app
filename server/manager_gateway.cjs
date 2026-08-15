@@ -192,7 +192,7 @@ function companyPayload(database) {
     normalizeText(profile.company_name) ||
     normalizeText(branding.companyNameEn) ||
     normalizeText(branding.companyNameAr) ||
-    "Accounting Management";
+    "Easy Commercial";
   return {
     external_key: normalizeText(profile.external_key) || name,
     name,
@@ -220,7 +220,7 @@ function appIdentityPayload(database, options = {}) {
       ? `http://127.0.0.1:${options.defaultPort()}`
       : "";
   return {
-    name: "Accounting Management",
+    name: "Easy Commercial",
     version: options.appVersion || "",
     variant: process.env.AM_APP_VARIANT || process.env.VITE_APP_VARIANT || "main",
     install_id: installId,
@@ -374,8 +374,8 @@ function accountPayload(database, options = {}) {
       {
         type: "system",
         title: "App sync",
-        details: `Accounting Management sent account, users, stats, diagnostics, and ${payments.length} recent payment row(s).`,
-        created_by: "Accounting Management",
+        details: `Easy Commercial sent account, users, stats, diagnostics, and ${payments.length} recent payment row(s).`,
+        created_by: "Easy Commercial",
         created_at: diagnostics.generated_at,
         metadata: diagnostics,
       },
@@ -635,7 +635,7 @@ function extractManagerName(data) {
   );
   if (named) return named;
   if (root.ingestEndpoint || root.localIngestEndpoint || root.tokenRequired !== undefined) {
-    return "Accounting Management Manager";
+    return "Easy Commercial Manager";
   }
   return "";
 }

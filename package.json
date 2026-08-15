@@ -1,7 +1,7 @@
 {
-  "name": "accounting-management",
-  "version": "1.4.3",
-  "description": "Local multi-user price offers, invoices, account statements, and contractor certificates.",
+  "name": "easy-commercial",
+  "version": "2.0.2",
+  "description": "Easy Commercial — Quotes, invoices, accounts, and payments.",
   "author": "Yasser Diab",
   "main": "electron/main.cjs",
   "private": true,
@@ -21,6 +21,7 @@
     "test:party-terms": "node scripts/test_party_terms.cjs",
     "test:chat-managed": "node scripts/test_chat_managed_attachments.cjs",
     "test:smart-table": "node scripts/test_smart_table_clipboard.mjs",
+    "test:contractor-payments": "node scripts/test_contractor_payments.cjs",
     "test:entry-batch": "node scripts/test_entry_batch.cjs",
     "test:server-connection": "node scripts/test_server_connection.cjs",
     "test:version-separation": "node scripts/test_version_separation.cjs",
@@ -62,7 +63,7 @@
   },
   "build": {
     "appId": "com.sherifalihassan.priceoffer",
-    "productName": "Accounting Management",
+    "productName": "Easy Commercial",
     "asar": true,
     "asarUnpack": [
       "data/price_offer.empty.db",
@@ -93,7 +94,7 @@
           ]
         }
       ],
-      "artifactName": "AccountingManagement-Setup-${version}.${ext}"
+      "artifactName": "EasyCommercial-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,

@@ -8,11 +8,13 @@ android/
 tmp_asar_extract/
 tmp/
 release/
+releases/
 build_logs/
 PDFs/
 extracted_media/
 supabase/
 Repo/
+upgrade-backups/
 
 *.zip
 *.exe

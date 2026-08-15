@@ -48,7 +48,7 @@ async function main() {
     format: "accounting-management-sqlite-export",
     format_version: 1,
     app: {
-      name: "Accounting Management",
+      name: "Easy Commercial",
       version: require("../package.json").version,
       release_label: require("../package.json").appReleaseLabel || "",
     },

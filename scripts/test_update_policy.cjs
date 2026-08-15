@@ -20,7 +20,7 @@ assert.deepEqual(
 
 const incompleteNewRelease = releaseUpdatePreflight({
   installedVersion: '1.4.2',
-  release: { ...oldAssetlessRelease, tag_name: 'v1.4.3' },
+  release: { ...oldAssetlessRelease, tag_name: 'v2.0.0' },
 });
 assert.equal(incompleteNewRelease.status, 'error');
 assert.equal(incompleteNewRelease.updateAvailable, true);
@@ -30,8 +30,16 @@ const completeNewRelease = releaseUpdatePreflight({
   installedVersion: '1.4.2',
   release: {
     ...oldAssetlessRelease,
-    tag_name: 'v1.4.3',
-    assets: [{ name: 'latest.yml' }, { name: 'AccountingManagement-Setup-1.4.3.exe' }],
+    tag_name: 'v2.0.0',
+    assets: [
+      { name: 'latest.yml' },
+      { name: 'easy-commercial-update.json' },
+      { name: 'EasyCommercial-Setup-2.0.0.exe' },
+    ],
+  },
+  manifest: {
+    version: '2.0.0',
+    windows: { version: '2.0.0', downloadUrl: 'EasyCommercial-Setup-2.0.0.exe' },
   },
 });
 assert.equal(completeNewRelease.status, 'available');

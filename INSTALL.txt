@@ -1,18 +1,18 @@
-Accounting Management v1.4.1
+Easy Commercial v2.0.0
 
 Windows:
-1. Run `AccountingManagement-Setup-1.4.1.exe`.
+1. Run `EasyCommercial-Setup-2.0.0.exe`.
 2. The installer is per-user and should not need "Run as administrator".
 3. Open the app, create a company account or log in to an existing company.
-4. If another old local server is already running, v1.4.1 will start on the next available local port instead of attaching to the old backend.
+4. If another old local server is already running, v2.0.0 will start on the next available local port instead of attaching to the old backend.
 
 Android:
-1. Install `AccountingManagement-Android-v1.4.1-debug.apk`.
+1. Install `EasyCommercial-Android-v2.0.0-debug.apk`.
 2. Log in using the local server or tunnel URL for the company.
 
 Included app targets:
-- Accounting Management for Windows
-- Accounting Management for Android
+- Easy Commercial for Windows
+- Easy Commercial for Android
 
 Backend:
 - Local/manual server mode is restored.

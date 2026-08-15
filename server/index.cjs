@@ -50,7 +50,12 @@ const DEFAULT_LAN_HOST = process.env.PRICE_OFFER_DEFAULT_HOST || "192.168.137.1"
 const WINDOWS_EXTERNAL_DATA_DIR = "D:\\AM_Data";
 const APP_VERSION = (() => {
   try {
-    return require(path.join(ROOT_DIR, "package.json")).version || "0.0.0";
+    return (
+      process.env.AM_BUILD_VERSION ||
+      require(path.join(ROOT_DIR, "config", "app-variants.json")).version ||
+      require(path.join(ROOT_DIR, "package.json")).version ||
+      "0.0.0"
+    );
   } catch {
     return "0.0.0";
   }
@@ -62,7 +67,7 @@ const RELEASE_DATA_DIR =
   path.join("D:\\releases", `AccountingManagement_V${APP_VERSION}`, "price_offer", "data");
 const UPDATE_REPOSITORY =
   process.env.AM_UPDATE_REPOSITORY || "Yasser-Diab/a_m_app";
-const APP_NAME = "Accounting Management";
+const APP_NAME = "Easy Commercial";
 const TRIAL_DAYS = 7;
 const SUBSCRIPTION_REMINDER_HOURS = 8;
 const COMPANY_SERVER_INSTANCES = new Map();
@@ -71,7 +76,7 @@ const ACTIVE_REPORT_CHILDREN = new Set();
 const DEFAULT_REPORT_BRANDING = Object.freeze({
   companyNameEn: APP_NAME,
   companyNameAr: APP_NAME,
-  companyAbbreviation: "A.M",
+  companyAbbreviation: "E.C",
   website: "",
   companyAddress: "Cairo, Egypt",
   companyPhone: "",
@@ -132,14 +137,14 @@ const DEFAULT_SUBSCRIPTION_PLANS = Object.freeze([
 
 const DEFAULT_MANAGER_SETTINGS = Object.freeze({
   publicUrl: "https://manager.yasserdiab.site",
-  businessName: "Accounting Management",
+  businessName: APP_NAME,
   sellerName: "Eng. Yasser Diab",
   ownerLoginName: "Yasser",
   ownerLoginEmail: "",
   ownerPassword: "23320001",
   supportEmail: "",
   supportPhone: "",
-  headline: "Subscribe to Accounting Management",
+  headline: `Subscribe to ${APP_NAME}`,
   tagline:
     "Choose a plan, pay online, and your subscription is activated after payment confirmation.",
   paymentMethods: [
@@ -858,6 +863,28 @@ function chooseReleaseAsset(release, platform = "") {
   return assets[0] || null;
 }
 
+function chooseReleaseManifestAsset(release) {
+  const assets = Array.isArray(release?.assets) ? release.assets : [];
+  return (
+    assets.find((item) => /easy-commercial-update\.json$/i.test(item.name || "")) ||
+    assets.find((item) => /update.*\.json$/i.test(item.name || "")) ||
+    null
+  );
+}
+
+async function readReleaseManifest(release) {
+  const asset = chooseReleaseManifestAsset(release);
+  if (!asset?.browser_download_url) return null;
+  const response = await fetch(asset.browser_download_url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": `Easy-Commercial/${APP_VERSION}`,
+    },
+  });
+  if (!response.ok) return null;
+  return response.json();
+}
+
 function chooseBestRelease(releases, platform = "") {
   const sorted = (Array.isArray(releases) ? releases : [])
     .filter(
@@ -969,6 +996,30 @@ function addPaymentPartyLikeClauses(parts, params, like) {
 
 const PAYMENT_AMOUNT_SQL = "ABS(COALESCE(wi.collection_amount, 0))";
 const VALID_PAYMENT_ROW_SQL = `${PAYMENT_AMOUNT_SQL} > 0`;
+const PAYMENT_IN_STATUS = "تحصيل";
+const PAYMENT_OUT_STATUS = "خصم";
+const PAYMENT_ROW_STATUSES = new Set([PAYMENT_IN_STATUS, PAYMENT_OUT_STATUS]);
+
+function paymentAccountingStatusForRole(role) {
+  return normalizeText(role) === "contractor" ? PAYMENT_OUT_STATUS : PAYMENT_IN_STATUS;
+}
+
+function documentTypeForEntry(input = {}) {
+  const accountingStatus = normalizeText(input.accounting_status);
+  if (PAYMENT_ROW_STATUSES.has(accountingStatus)) return "payment";
+  return documentTypeForStatus(accountingStatus || STATUS.OFFER);
+}
+
+function accountingStatusForWorkItem(document, input = {}) {
+  const documentType = normalizeText(document?.document_type || input.document_type);
+  const accountingStatus = normalizeText(input.accounting_status);
+  if (documentType === "payment") {
+    return PAYMENT_ROW_STATUSES.has(accountingStatus)
+      ? accountingStatus
+      : paymentAccountingStatusForRole(input.party_role || document?.party_role);
+  }
+  return statusForDocumentType(documentType) || accountingStatus || STATUS.OFFER;
+}
 
 function cleanupEmptyPaymentDocuments(database) {
   const emptyPaymentRowPredicate = `
@@ -1051,6 +1102,171 @@ function isPaymentEntryRow(row = {}) {
     numberOrZero(row.total_quantity) === 0 &&
     numberOrZero(row.rate) === 0 &&
     numberOrZero(row.building_unit_price) === 0
+  );
+}
+
+function repairContractorPaymentRows(database) {
+  const legacyRows = database.all(
+    `SELECT wi.id, wi.document_id, wi.party_category, wi.base_party_name,
+            wi.customer_name, wi.customer_display_name, wi.project, wi.building_unit,
+            wi.entry_date, contractor.id AS contractor_id,
+            contractor.category AS contractor_category,
+            contractor.base_name AS contractor_base_name,
+            contractor.display_name AS contractor_display_name,
+            contractor.search_name AS contractor_search_name
+     FROM work_items wi
+     JOIN documents d ON d.id = wi.document_id
+     LEFT JOIN parties current_party ON current_party.id = COALESCE(wi.party_id, d.party_id)
+     JOIN parties contractor
+       ON contractor.role = 'contractor'
+      AND contractor.search_name = COALESCE(
+        NULLIF(wi.search_party_name, ''),
+        NULLIF(d.search_party_name, ''),
+        NULLIF(current_party.search_name, '')
+      )
+     WHERE wi.deleted_at IS NULL
+       AND d.deleted_at IS NULL
+       AND d.document_type IN ('ledger', 'payment')
+       AND ABS(COALESCE(wi.collection_amount, 0)) > 0
+       AND COALESCE(wi.accounting_status, '') = ?
+       AND COALESCE(wi.party_id, d.party_id, 0) <> contractor.id`,
+    [PAYMENT_OUT_STATUS],
+  );
+  const candidateDocuments = new Map();
+  for (const row of legacyRows) {
+    const partyCategory = row.contractor_category || row.party_category || "corporate";
+    const baseName = row.contractor_base_name || row.base_party_name || row.customer_name;
+    const displayName =
+      row.contractor_display_name || row.customer_display_name || row.customer_name;
+    database.run(
+      `UPDATE work_items
+       SET party_id = ?,
+           party_role = 'contractor',
+           party_category = ?,
+           base_party_name = ?,
+           search_party_name = ?,
+           customer_name = ?,
+           customer_display_name = ?,
+           accounting_status = ?,
+           document_status = 'approved',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        row.contractor_id,
+        partyCategory,
+        baseName,
+        row.contractor_search_name,
+        displayName,
+        displayName,
+        PAYMENT_OUT_STATUS,
+        row.id,
+      ],
+    );
+    if (!candidateDocuments.has(row.document_id)) {
+      candidateDocuments.set(row.document_id, {
+        contractorId: row.contractor_id,
+        partyCategory,
+        displayName,
+        searchName: row.contractor_search_name,
+        project: row.project,
+        buildingUnit: row.building_unit,
+        entryDate: row.entry_date,
+      });
+    }
+  }
+  for (const [documentId, document] of candidateDocuments) {
+    const state = database.get(
+      `SELECT COUNT(*) AS row_count,
+              SUM(CASE
+                WHEN ABS(COALESCE(collection_amount, 0)) > 0
+                 AND accounting_status = ?
+                 AND party_role = 'contractor'
+                 AND party_id = ?
+                THEN 1 ELSE 0 END) AS contractor_payment_rows
+       FROM work_items
+       WHERE document_id = ? AND deleted_at IS NULL`,
+      [PAYMENT_OUT_STATUS, document.contractorId, documentId],
+    );
+    if (
+      Number(state?.row_count || 0) > 0 &&
+      Number(state?.row_count || 0) === Number(state?.contractor_payment_rows || 0)
+    ) {
+      database.run(
+        `UPDATE documents
+         SET document_type = 'payment',
+             status = 'approved',
+             party_id = ?,
+             party_role = 'contractor',
+             party_category = ?,
+             customer_name = ?,
+             search_party_name = ?,
+             project = COALESCE(NULLIF(project, ''), ?),
+             building_unit = COALESCE(NULLIF(building_unit, ''), ?),
+             entry_date = COALESCE(NULLIF(entry_date, ''), ?),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND deleted_at IS NULL`,
+        [
+          document.contractorId,
+          document.partyCategory,
+          document.displayName,
+          document.searchName,
+          document.project || "",
+          document.buildingUnit || "",
+          document.entryDate || "",
+          documentId,
+        ],
+      );
+    }
+  }
+  database.run(
+    `UPDATE documents
+     SET party_role = 'contractor',
+         status = 'approved',
+         updated_at = CURRENT_TIMESTAMP
+     WHERE document_type = 'payment'
+       AND deleted_at IS NULL
+       AND EXISTS (
+         SELECT 1
+         FROM work_items wi
+         LEFT JOIN parties p ON p.id = COALESCE(wi.party_id, documents.party_id)
+         WHERE wi.document_id = documents.id
+           AND wi.deleted_at IS NULL
+           AND ABS(COALESCE(wi.collection_amount, 0)) > 0
+           AND (
+             wi.party_role = 'contractor'
+             OR wi.accounting_status = ?
+             OR p.role = 'contractor'
+           )
+       )`,
+    [PAYMENT_OUT_STATUS],
+  );
+  database.run(
+    `UPDATE work_items
+     SET party_role = 'contractor',
+         accounting_status = ?,
+         document_status = 'approved',
+         updated_at = CURRENT_TIMESTAMP
+     WHERE deleted_at IS NULL
+       AND ABS(COALESCE(collection_amount, 0)) > 0
+       AND (
+         party_role = 'contractor'
+         OR accounting_status = ?
+         OR EXISTS (
+           SELECT 1
+           FROM documents d
+           WHERE d.id = work_items.document_id
+             AND d.deleted_at IS NULL
+             AND d.document_type = 'payment'
+             AND d.party_role = 'contractor'
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM parties p
+           WHERE p.id = work_items.party_id
+             AND p.role = 'contractor'
+         )
+       )`,
+    [PAYMENT_OUT_STATUS, PAYMENT_OUT_STATUS],
   );
 }
 
@@ -1284,13 +1500,7 @@ function getOrCreateParty(database, input) {
 }
 
 function getOrCreateDocument(database, input, party, existing = {}) {
-  const requestedType =
-    input.document_type ||
-    (normalizeText(input.accounting_status) === "تحصيل"
-      ? "payment"
-      : documentTypeForStatus(
-          normalizeText(input.accounting_status) || STATUS.OFFER,
-        ));
+  const requestedType = input.document_type || documentTypeForEntry(input);
   const explicitDocumentId =
     normalizeNumber(input.document_id) || normalizeNumber(existing.document_id);
   if (explicitDocumentId) {
@@ -1316,8 +1526,9 @@ function getOrCreateDocument(database, input, party, existing = {}) {
       const result = database.run(
         `INSERT INTO documents
           (document_type, document_no, operation_no, status, party_id, party_role, party_category,
-           customer_name, search_party_name, project, building_unit, entry_date, discount_type, discount_value)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           customer_name, search_party_name, project, building_unit, entry_date, discount_type, discount_value,
+           report_language)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           documentType,
           documentNo,
@@ -1339,6 +1550,7 @@ function getOrCreateDocument(database, input, party, existing = {}) {
             ? input.discount_type
             : "none",
           numberOrZero(input.discount_value),
+          normalizeText(input.report_language) === "en" ? "en" : "ar",
         ],
       );
       return database.get("SELECT * FROM documents WHERE id = ?", [
@@ -1425,10 +1637,11 @@ function normalizeInput(database, body, existing = {}) {
   }
   if (!party) party = getOrCreateParty(database, item);
   const document = getOrCreateDocument(database, item, party, existing);
-  const status =
-    statusForDocumentType(document?.document_type) ||
-    normalizeText(item.accounting_status) ||
-    STATUS.OFFER;
+  const rowPartyRole = party?.role || item.party_role || "customer";
+  const status = accountingStatusForWorkItem(document, {
+    ...item,
+    party_role: rowPartyRole,
+  });
   const serial =
     document?.document_no || normalizeNumber(item.serial) || Date.now();
   const calculated = calculateItem(item);
@@ -1463,7 +1676,7 @@ function normalizeInput(database, body, existing = {}) {
     unit_code: calculated.unit_code,
     party_id: party?.id || item.party_id || null,
     document_id: document?.id || item.document_id || null,
-    party_role: party?.role || item.party_role || "customer",
+    party_role: rowPartyRole,
     party_category: party?.category || item.party_category || "retail",
     source_customer_id: numberOrNull(item.source_customer_id),
     source_customer_name: normalizeText(item.source_customer_name),
@@ -1977,6 +2190,7 @@ function dimensionText(row, unit = "cm") {
 }
 
 function accountStatementData(database, query, type) {
+  const statementReportLanguage = reportLocaleFrom(query.report_language);
   const selectedParty = query.party_id
     ? database.get("SELECT * FROM parties WHERE id = ?", [
         Number(query.party_id),
@@ -2155,7 +2369,7 @@ function accountStatementData(database, query, type) {
         discount_amount: roundMoney(discountAmount),
         is_payment: 0,
         entry_date: row.entry_date || "",
-        description: `${documentTypeLabel(row.document_type)} - ${docNo}`,
+        description: `${statementDocumentTypeLabel(row.document_type, statementReportLanguage)} - ${docNo}`,
         project_label: row.project || "",
         details: row.work_types || "",
       });
@@ -2178,9 +2392,12 @@ function accountStatementData(database, query, type) {
         discount_amount: 0,
         is_payment: 1,
         entry_date: row.payment_entry_date || row.entry_date || "",
-        description: `تحصيل - ${docNo}`,
+        description: `${statementPaymentLabel(statementReportLanguage)} - ${docNo}`,
         project_label: row.project || "",
-        details: row.collection_notes || "",
+        details:
+          statementReportLanguage === "en" && normalizeText(row.collection_notes) === "تحصيل"
+            ? "Payment"
+            : row.collection_notes || "",
       });
     }
   }
@@ -2303,9 +2520,12 @@ function accountStatementData(database, query, type) {
       discount_amount: 0,
       is_payment: 1,
       entry_date: row.payment_entry_date || row.entry_date || "",
-      description: `تحصيل - ${docNo}`,
+      description: `${statementPaymentLabel(statementReportLanguage)} - ${docNo}`,
       project_label: row.project || "",
-      details: row.collection_notes || "",
+      details:
+        statementReportLanguage === "en" && normalizeText(row.collection_notes) === "تحصيل"
+          ? "Payment"
+          : row.collection_notes || "",
     });
   }
   ledgerRows.sort(
@@ -2360,22 +2580,25 @@ function accountStatementData(database, query, type) {
       numberOrZero(totals.final_insurance_amount) +
       numberOrZero(totals.contractor_tax_amount),
   );
+  const reportLanguage = statementReportLanguage;
   const taxBreakdown = [
-    ["vat_amount", "ضريبة القيمة المضافة 14%"],
-    ["social_insurance_amount", "تأمينات اجتماعية 3.6%"],
-    ["stamp_amount", "دمغة هندسية 0.001"],
-    ["works_insurance_amount", "تأمينات أعمال 5%"],
-    ["final_insurance_amount", "تأمين أعمال نهائي 5%"],
-    ["contractor_tax_amount", "ضريبة 1%"],
+    ["vat_amount", reportText(reportLanguage, "vat")],
+    ["social_insurance_amount", reportText(reportLanguage, "socialInsurance")],
+    ["stamp_amount", reportText(reportLanguage, "engineeringStamp")],
+    ["works_insurance_amount", reportText(reportLanguage, "worksInsurance")],
+    ["final_insurance_amount", reportText(reportLanguage, "finalInsurance")],
+    ["contractor_tax_amount", reportText(reportLanguage, "contractorTax")],
   ]
     .map(([key, label]) => ({ key, label, amount: roundMoney(totals[key]) }))
     .filter((tax) => tax.amount);
   const first = statementRows[0] || {};
   const statementProjects = uniqueRowValues(statementRows, "project");
   return {
-    title: documentTitle(type),
+    title: documentTitle(type, reportLanguage),
     type,
     is_statement: true,
+    report_language: reportLanguage,
+    report_direction: reportLanguage === "en" ? "ltr" : "rtl",
     filters: query,
     branding: reportBranding(database),
     prepared_by: query.user_name || "Eng. Yasser",
@@ -2383,7 +2606,7 @@ function accountStatementData(database, query, type) {
     project:
       query.project ||
       (statementProjects.length > 1
-        ? "كل المشاريع"
+        ? reportText(reportLanguage, "allProjects")
         : statementProjects[0] || ""),
     building_unit: query.project
       ? first.building_unit || query.building_unit || ""
@@ -2394,7 +2617,7 @@ function accountStatementData(database, query, type) {
     generated_at: new Date().toISOString(),
     totals,
     tax_breakdown: taxBreakdown,
-    discount_label: totals.discount_amount ? "إجمالي الخصومات" : "",
+    discount_label: totals.discount_amount ? reportText(reportLanguage, "discountTotal") : "",
     rows: [],
     statementRows,
     summaryRows: [],
@@ -2402,9 +2625,110 @@ function accountStatementData(database, query, type) {
   };
 }
 
-function documentTitle(type) {
-  return (
-    {
+const REPORT_I18N = {
+  ar: {
+    afterDiscount: "بعد الخصم",
+    afterDiscountTax: "بعد الخصم والضريبة",
+    afterTax: "بعد الضريبة",
+    afterWorkRate: "بعد نسبة العمل",
+    allProjects: "كل المشاريع",
+    amount: "المبلغ",
+    balance: "الرصيد",
+    beforeDiscount: "قبل الخصم",
+    beforeDiscountTax: "قبل الخصم والضريبة",
+    beforeTax: "قبل الضريبة",
+    beforeWorkRate: "قبل نسبة العمل",
+    buildingUnit: "المبني/الوحدة",
+    collection: "التحصيل",
+    contractor: "المقاول",
+    contractorTax: "ضريبة 1%",
+    customer: "العميل",
+    date: "التاريخ",
+    description: "البيان",
+    details: "التفاصيل",
+    discount: "خصم",
+    discountTotal: "إجمالي الخصومات",
+    engineeringStamp: "دمغة هندسية 0.001",
+    finalInsurance: "تأمين أعمال نهائي 5%",
+    grossTotal: "الإجمالي",
+    itemCount: "العدد",
+    location: "الموقع",
+    net: "الصافي",
+    number: "رقم",
+    paymentDetails: "بيان الدفعة",
+    paymentWork: "بيان الأعمال",
+    project: "المشروع",
+    quantity: "الكمية",
+    rate: "الفئة",
+    socialInsurance: "تأمينات اجتماعية 3.6%",
+    subtotal: "إجمالي",
+    terms: "الشروط والأحكام",
+    unit: "الوحدة",
+    vat: "ضريبة القيمة المضافة 14%",
+    workRate: "نسبة العمل",
+    works: "أعمال",
+    worksInsurance: "تأمينات أعمال 5%",
+    amountDue: "إجمالي المستحق",
+    pagePreview: "Page preview",
+    by: "By",
+  },
+  en: {
+    afterDiscount: "after discount",
+    afterDiscountTax: "after discount and VAT",
+    afterTax: "after VAT",
+    afterWorkRate: "After work %",
+    allProjects: "All projects",
+    amount: "Amount",
+    balance: "Balance",
+    beforeDiscount: "before discount",
+    beforeDiscountTax: "before discount and VAT",
+    beforeTax: "before VAT",
+    beforeWorkRate: "Before work %",
+    buildingUnit: "Building / Unit",
+    collection: "Collection",
+    contractor: "Contractor",
+    contractorTax: "Contractor tax 1%",
+    customer: "Customer",
+    date: "Date",
+    description: "Description",
+    details: "Details",
+    discount: "Discount",
+    discountTotal: "Total discounts",
+    engineeringStamp: "Engineering stamp 0.001",
+    finalInsurance: "Final works insurance 5%",
+    grossTotal: "Total",
+    itemCount: "Count",
+    location: "Location",
+    net: "Net",
+    number: "No.",
+    paymentDetails: "Payment details",
+    paymentWork: "Work details",
+    project: "Project",
+    quantity: "Quantity",
+    rate: "Rate",
+    socialInsurance: "Social insurance 3.6%",
+    subtotal: "Total",
+    terms: "Terms and Conditions",
+    unit: "Unit",
+    vat: "Value Added Tax 14%",
+    workRate: "Work %",
+    works: "Works",
+    worksInsurance: "Works insurance 5%",
+    amountDue: "Amount due",
+    pagePreview: "Page preview",
+    by: "By",
+  },
+};
+
+function reportText(locale, key) {
+  const lang = reportLocaleFrom(locale);
+  return REPORT_I18N[lang]?.[key] || REPORT_I18N.ar[key] || key;
+}
+
+function documentTitle(type, locale = "ar") {
+  const lang = reportLocaleFrom(locale);
+  const titles = {
+    ar: {
       offer: "عرض سعر",
       taxInvoice: "فاتورة ضريبية",
       nonTaxInvoice: "فاتورة غير ضريبية",
@@ -2421,8 +2745,29 @@ function documentTitle(type) {
       taxInclusiveTotal: "الاجمالي شامل الضريبة فقط",
       nonTaxTotal: "اجمالي بدون ضريبة",
       metricTotal: "اجمالي متري",
-    }[type] || "مستند"
-  );
+      fallback: "مستند",
+    },
+    en: {
+      offer: "Quotation",
+      taxInvoice: "Tax Invoice",
+      nonTaxInvoice: "Non-tax Invoice",
+      invoice: "Invoice",
+      taxStatement: "Tax Account Statement",
+      nonTaxStatement: "Non-tax Account Statement",
+      statement: "Account Statement",
+      contractor: "Contractor Certificate",
+      runningCertificate: "Running Certificates",
+      contractorStatement: "Contractor Statement",
+      contractorBoq: "Contractor BOQ",
+      customerSummary: "Customer Grand Total",
+      taxDeductions: "Taxes and Insurance Total",
+      taxInclusiveTotal: "VAT-inclusive Total",
+      nonTaxTotal: "Non-tax Total",
+      metricTotal: "Metric Total",
+      fallback: "Document",
+    },
+  };
+  return titles[lang]?.[type] || titles[lang]?.fallback || titles.ar.fallback;
 }
 
 function documentTypeLabel(type) {
@@ -2437,6 +2782,25 @@ function documentTypeLabel(type) {
     type ||
     ""
   );
+}
+
+function statementDocumentTypeLabel(type, locale = "ar") {
+  if (reportLocaleFrom(locale) !== "en") return documentTypeLabel(type);
+  return (
+    {
+      price_offer: "Quotation",
+      invoice: "Invoice",
+      contractor_certificate: "Contractor Certificate",
+      payment: "Payment",
+      ledger: "Ledger Entry",
+    }[type] ||
+    documentTitle(type, "en") ||
+    "Document"
+  );
+}
+
+function statementPaymentLabel(locale = "ar") {
+  return reportLocaleFrom(locale) === "en" ? "Payment" : "تحصيل";
 }
 
 function richDefaultTerms(kind) {
@@ -2505,6 +2869,73 @@ function richDefaultTerms(kind) {
   return { sections: common };
 }
 
+function richDefaultTermsEn(kind) {
+  const vatLine = "__VAT_LINE__";
+  return {
+    sections: [
+      {
+        title: "Quotation Validity",
+        lines: [
+          kind === "corporate"
+            ? "This quotation is valid for seven days from the issue date."
+            : "This quotation is valid for 48 hours from the issue date.",
+          "Prices are based on current raw-material costs and may change according to market movement.",
+          "This quotation is tied to the U.S. dollar exchange rate according to the Central Bank of Egypt unless otherwise agreed in writing.",
+          ...(kind === "retail"
+            ? [
+                "** Work starts from receiving the advance payment, and the works are delivered within 30 days.",
+              ]
+            : []),
+        ],
+      },
+      {
+        title: "VAT and Exclusions",
+        lines: [
+          vatLine,
+          "Scaffolding and any external works are excluded unless expressly mentioned.",
+        ],
+      },
+      {
+        title: "Scope of Work",
+        lines: [
+          "The client is responsible for preparing installation openings and providing the required assistance during installation.",
+          "If the required assistance is not available on time, the client bears the additional costs resulting from delay.",
+        ],
+      },
+      {
+        title: "Payment Terms",
+        lines:
+          kind === "corporate"
+            ? [
+                "60% upon contract signing.",
+                "15% upon supply.",
+                "15% upon installation.",
+                "10% upon final delivery.",
+              ]
+            : ["80% upon contract signing.", "20% upon delivery."],
+      },
+      {
+        title: "Manufacturing and Quality",
+        lines: [
+          "Manufacturing is carried out accurately and efficiently in approved factories.",
+          "Installation is performed according to the highest quality standards under engineering supervision.",
+          "All accessories are approved and guaranteed quality.",
+        ],
+      },
+      {
+        title: "Consultant Coordination",
+        lines: ["We are ready to coordinate with any consultant supervising the works."],
+      },
+      {
+        title: "Note",
+        lines: [
+          "All measurements and quantities are approximate and based on drawings; they will be adjusted during manufacturing according to actual site requirements.",
+        ],
+      },
+    ],
+  };
+}
+
 function ensureRichTerms(database) {
   const versionKey = "terms_template_version";
   const currentVersion = database.get(
@@ -2542,6 +2973,39 @@ function ensureRichTerms(database) {
     "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
     [versionKey, nextVersion],
   );
+  for (const [key, value] of [
+    ["terms_retail_en", richDefaultTermsEn("retail")],
+    ["terms_corporate_en", richDefaultTermsEn("corporate")],
+  ]) {
+    const row = database.get("SELECT value FROM app_settings WHERE key = ?", [
+      key,
+    ]);
+    let shouldUpdate = !row;
+    if (row) {
+      try {
+        const parsed = JSON.parse(row.value);
+        shouldUpdate =
+          !Array.isArray(parsed.sections) || parsed.sections.length < 6;
+      } catch {
+        shouldUpdate = true;
+      }
+    }
+    if (shouldUpdate) {
+      database.run(
+        "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+        [key, JSON.stringify(value)],
+      );
+    }
+  }
+  for (const [key, value] of [
+    ["ui_language", "ar"],
+    ["default_report_language", "ar"],
+  ]) {
+    database.run(
+      "INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+      [key, value],
+    );
+  }
 }
 
 function adminPassword(database) {
@@ -3041,7 +3505,7 @@ async function createPaypalOrder(settings, payment, returnBase = "") {
         },
       ],
       application_context: {
-        brand_name: "Accounting Management",
+        brand_name: APP_NAME,
         shipping_preference: "NO_SHIPPING",
         user_action: "PAY_NOW",
         return_url: `${returnUrl}?payment_id=${encodeURIComponent(payment.id)}`,
@@ -3410,7 +3874,7 @@ function subscriptionStatus(database) {
     can_use_app: false,
     status: paidUntil ? "subscription-expired" : "trial-expired",
     expired_at: expiredAt,
-    message: "Trial or subscription ended. Payment is required before Accounting Management can be used again.",
+    message: `Trial or subscription ended. Payment is required before ${APP_NAME} can be used again.`,
     reminder_interval_hours: SUBSCRIPTION_REMINDER_HOURS,
     account,
   };
@@ -3853,6 +4317,38 @@ function dashboardAnalytics(database, query = {}) {
   };
   const selectedInvoices = invoices.filter((row) => inRange(row.entry_date));
   const selectedPayments = payments.filter((row) => inRange(row.entry_date));
+  const operationalRows = database
+    .all(
+      `SELECT wi.id,
+              COALESCE(wi.entry_date, d.entry_date) AS entry_date,
+              wi.unit_code,
+              ROUND(COALESCE(wi.quantity, 0), 2) AS quantity,
+              ROUND(COALESCE(wi.item_count, 0), 2) AS item_count
+       FROM work_items wi
+       JOIN documents d ON d.id = wi.document_id
+       LEFT JOIN parties p ON p.id = COALESCE(wi.party_id, d.party_id)
+       WHERE wi.deleted_at IS NULL
+         AND d.deleted_at IS NULL
+         AND d.document_type = 'invoice'
+         AND d.status = 'approved'
+         AND COALESCE(p.role, wi.party_role, d.party_role, 'customer') = 'customer'
+         AND NOT EXISTS (
+           SELECT 1 FROM parties contractor
+           WHERE contractor.role = 'contractor'
+             AND contractor.search_name = COALESCE(p.search_name, wi.search_party_name, d.search_party_name, '')
+         )`,
+    )
+    .filter((row) => inRange(row.entry_date));
+  const quantityByUnitMap = new Map();
+  let dimensionalItemCount = 0;
+  for (const row of operationalRows) {
+    const unitCode = normalizeUnitCode(row.unit_code || "count");
+    quantityByUnitMap.set(
+      unitCode,
+      roundMoney((quantityByUnitMap.get(unitCode) || 0) + numberOrZero(row.quantity)),
+    );
+    dimensionalItemCount += numberOrZero(row.item_count);
+  }
   const partyKey = (row) =>
     String(row.party_id || normalizeArabic(row.customer) || row.customer || "unknown");
   const paymentsByParty = new Map();
@@ -3955,6 +4451,17 @@ function dashboardAnalytics(database, query = {}) {
     invoices_by_month: monthMap(selectedInvoices),
     payments_by_month: monthMap(selectedPayments),
     cash_collection_trend: monthMap(selectedPayments),
+    operational: {
+      row_count: operationalRows.length,
+      item_count: roundMoney(dimensionalItemCount),
+      quantity_by_unit: [...quantityByUnitMap.entries()]
+        .filter(([, quantity]) => numberOrZero(quantity) !== 0)
+        .map(([unit_code, quantity]) => ({
+          unit_code,
+          unit_label: unitLabel(unit_code),
+          quantity: roundMoney(quantity),
+        })),
+    },
     customers: [...customerMap.values()]
       .map((row) => ({
         ...row,
@@ -4025,7 +4532,7 @@ function companyAbbreviation(value) {
     .map((part) => part[0].toUpperCase())
     .join("");
   if (latin) return latin.slice(0, 8);
-  return "A.M";
+  return "E.C";
 }
 
 function appBrandingForCompany(profile = {}) {
@@ -4364,27 +4871,43 @@ function taxBreakdown(rows) {
   return totals;
 }
 
-function discountLabel(document, totals) {
+function discountLabel(document, totals, locale = "ar") {
   if (!totals?.discount_amount) return "";
+  const lang = reportLocaleFrom(locale);
   if (document?.discount_type === "rate")
-    return `خصم خاص ${money(document.discount_value)}%`;
+    return lang === "en"
+      ? `Special discount ${money(document.discount_value)}%`
+      : `خصم خاص ${money(document.discount_value)}%`;
   if (document?.discount_type === "amount")
-    return `خصم خاص ${money(document.discount_value)} جنيه`;
-  return "خصم خاص";
+    return lang === "en"
+      ? `Special discount ${money(document.discount_value)} EGP`
+      : `خصم خاص ${money(document.discount_value)} جنيه`;
+  return lang === "en" ? "Special discount" : "خصم خاص";
 }
 
-function termsForDocument(database, first, type, rows = []) {
+function reportLocaleFrom(value) {
+  return normalizeText(value) === "en" ? "en" : "ar";
+}
+
+function termsForDocument(database, first, type, rows = [], locale = "ar") {
   if (!["offer", "price_offer"].includes(type)) return [];
-  const key = termsSettingKeyForParty(first?.party_category);
+  const reportLocale = reportLocaleFrom(locale || first?.report_language);
+  const baseKey = termsSettingKeyForParty(first?.party_category);
+  const key = reportLocale === "en" ? `${baseKey}_en` : baseKey;
   const pricesIncludeVat = (rows || []).some(
     (row) =>
       normalizeBool(row.vat_enabled) ||
       normalizeBool(row.vat_terms_only) ||
       numberOrZero(row.vat_amount),
   );
-  const vatLine = pricesIncludeVat
-    ? "الأسعار شاملة ضريبة القيمة المضافة بنسبة 14% ."
-    : "الأسعار غير شاملة ضريبة القيمة المضافة بنسبة 14% .";
+  const vatLine =
+    reportLocale === "en"
+      ? pricesIncludeVat
+        ? "Prices are inclusive of 14% Value Added Tax (VAT)."
+        : "Prices are exclusive of 14% Value Added Tax (VAT)."
+      : pricesIncludeVat
+        ? "الأسعار شاملة ضريبة القيمة المضافة بنسبة 14% ."
+        : "الأسعار غير شاملة ضريبة القيمة المضافة بنسبة 14% .";
   try {
     const sections =
       JSON.parse(
@@ -4711,7 +5234,7 @@ function renderReportXml(data) {
  xmlns:html="http://www.w3.org/TR/REC-html40">
   <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
     <Title>${xmlEscape(data.title)}</Title>
-    <Author>Accounting Management</Author>
+    <Author>${APP_NAME}</Author>
     <Created>${new Date(data.generated_at).toISOString()}</Created>
   </DocumentProperties>
   <Worksheet ss:Name="التقرير">
@@ -4722,6 +5245,8 @@ function renderReportXml(data) {
 }
 
 function renderReportHtmlV2(data) {
+  const locale = reportLocaleFrom(data.report_language);
+  const dir = locale === "en" ? "ltr" : "rtl";
   const showDimensions = !!data.show_dimensions;
   const dimensionUnit = data.dimension_unit || "cm";
   const statementHtml = (data.statementRows || []).length
@@ -4869,7 +5394,7 @@ function renderReportXmlV2(data) {
  xmlns:html="http://www.w3.org/TR/REC-html40">
   <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
     <Title>${xmlEscape(data.title)}</Title>
-    <Author>Accounting Management</Author>
+    <Author>${APP_NAME}</Author>
     <Created>${new Date(data.generated_at).toISOString()}</Created>
   </DocumentProperties>
   <Worksheet ss:Name="التقرير">
@@ -4957,14 +5482,14 @@ function highlightPercentages(value) {
   );
 }
 
-function taxBreakdown(rows) {
+function taxBreakdown(rows, locale = "ar") {
   return [
-    ["vat_amount", "ضريبة القيمة المضافة 14%"],
-    ["social_insurance_amount", "تأمينات اجتماعية 3.6%"],
-    ["stamp_amount", "دمغة هندسية 0.001"],
-    ["works_insurance_amount", "تأمينات أعمال 5%"],
-    ["final_insurance_amount", "تأمين أعمال نهائي 5%"],
-    ["contractor_tax_amount", "ضريبة 1%"],
+    ["vat_amount", reportText(locale, "vat")],
+    ["social_insurance_amount", reportText(locale, "socialInsurance")],
+    ["stamp_amount", reportText(locale, "engineeringStamp")],
+    ["works_insurance_amount", reportText(locale, "worksInsurance")],
+    ["final_insurance_amount", reportText(locale, "finalInsurance")],
+    ["contractor_tax_amount", reportText(locale, "contractorTax")],
   ]
     .map(([key, label]) => ({
       key,
@@ -5178,7 +5703,7 @@ function quantitySummaryParts(rows = [], locale = "ar") {
   if (totals.sqm) {
     parts.push({
       value: fmt.format(roundMoney(totals.sqm)),
-      unit: locale === "en" ? "m2" : "م²",
+      unit: locale === "en" ? "m²" : "م²",
     });
   }
   if (totals.lm) {
@@ -5587,15 +6112,16 @@ function projectLocationLabel(data = {}) {
 function contractorPaymentTableHtml(data) {
   const rows = data.paymentRows || [];
   if (data.type !== "contractor" || !rows.length) return "";
+  const locale = reportLocaleFrom(data.report_language);
   return `
     <table class="report-table payment-table">
-      <thead><tr><th>\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062f\u0641\u0639\u0629</th><th>\u0628\u064a\u0627\u0646 \u0627\u0644\u0623\u0639\u0645\u0627\u0644</th><th>\u0628\u064a\u0627\u0646 \u0627\u0644\u062f\u0641\u0639\u0629</th><th>\u0627\u0644\u0645\u0628\u0644\u063a</th></tr></thead>
+      <thead><tr><th>${reportText(locale, "date")}</th><th>${reportText(locale, "paymentWork")}</th><th>${reportText(locale, "paymentDetails")}</th><th>${reportText(locale, "amount")}</th></tr></thead>
       <tbody>${rows
         .map(
           (row) => `
         <tr class="payment-row">
           <td class="nowrap date-cell">${escapeHtml(reportDateCell(row.entry_date))}</td>
-          <td>${escapeHtml(row.work_type || row.description || "\u062a\u062d\u0635\u064a\u0644")}</td>
+          <td>${escapeHtml(row.work_type || row.description || reportText(locale, "collection"))}</td>
           <td>${escapeHtml(row.collection_note || row.notes || "")}</td>
           <td class="number-cell">${money(paymentAmount(row))}</td>
         </tr>`,
@@ -5787,6 +6313,7 @@ function reportRowBlocks(rows = [], subtotalMode = "none") {
 function detailReportTableHtml(data, showDimensions, dimensionUnit) {
   const rows = data.rows || [];
   if (!rows.length) return "";
+  const locale = reportLocaleFrom(data.report_language);
   if (data.type === "contractor") {
     const showProjectColumn = Number(data.project_selection_count || 0) !== 1;
     const columnCount = showProjectColumn ? 11 : 10;
@@ -5794,7 +6321,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
     const body = [];
     for (const group of groups) {
       body.push(
-        `<tr class="group-row certificate-row"><td colspan="${columnCount}">مستخلص رقم ${escapeHtml(group.key)}</td></tr>`,
+        `<tr class="group-row certificate-row"><td colspan="${columnCount}">${locale === "en" ? "Certificate No." : "مستخلص رقم"} ${escapeHtml(group.key)}</td></tr>`,
       );
       group.rows.forEach((row) => {
         body.push(`
@@ -5816,7 +6343,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
         const subtotal = contractorGroupTotals(group.rows);
         body.push(`
           <tr class="subtotal">
-            <td colspan="${showProjectColumn ? 5 : 4}">إجمالي مستخلص رقم ${escapeHtml(group.key)}</td>
+            <td colspan="${showProjectColumn ? 5 : 4}">${locale === "en" ? "Certificate Total No." : "إجمالي مستخلص رقم"} ${escapeHtml(group.key)}</td>
             <td class="number-cell">${displayNumber(subtotal.item_count, true)}</td>
             <td class="number-cell">${displayNumber(subtotal.quantity, true)}</td>
             <td></td>
@@ -5828,7 +6355,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
     }
     return `
       <table class="report-table contractor-detail">
-        <thead><tr><th>التاريخ</th><th>البيان</th>${showProjectColumn ? "<th>المشروع</th>" : ""}<th>الموقع</th><th>الوحدة</th><th>العدد</th><th>الكمية</th><th>نسبة العمل</th><th>الفئة</th><th>الإجمالي</th><th>بعد النسبة</th></tr></thead>
+        <thead><tr><th>${reportText(locale, "date")}</th><th>${reportText(locale, "description")}</th>${showProjectColumn ? `<th>${reportText(locale, "project")}</th>` : ""}<th>${reportText(locale, "location")}</th><th>${reportText(locale, "unit")}</th><th>${reportText(locale, "itemCount")}</th><th>${reportText(locale, "quantity")}</th><th>${reportText(locale, "workRate")}</th><th>${reportText(locale, "rate")}</th><th>${reportText(locale, "grossTotal")}</th><th>${reportText(locale, "afterWorkRate")}</th></tr></thead>
         <tbody>${body.join("")}</tbody>
       </table>`;
   }
@@ -5846,7 +6373,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
       const totals = block.totals || blankLineItemTotals();
       const labelSpan = 2 + (showDimensions ? 1 : 0);
       body.push(
-        `<tr class="subtotal ${block.level}-subtotal-row"><td colspan="${labelSpan}">إجمالي ${escapeHtml(block.label)}</td><td class="number-cell">${displayNumber(totals.item_count, true)}</td><td class="number-cell">${displayNumber(totals.quantity, true)}</td><td></td><td class="number-cell">${money(totals.gross_total)}</td></tr>`,
+        `<tr class="subtotal ${block.level}-subtotal-row"><td colspan="${labelSpan}">${reportText(locale, "subtotal")} ${escapeHtml(block.label)}</td><td class="number-cell">${displayNumber(totals.item_count, true)}</td><td class="number-cell">${displayNumber(totals.quantity, true)}</td><td></td><td class="number-cell">${money(totals.gross_total)}</td></tr>`,
       );
       continue;
     }
@@ -5869,7 +6396,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
   return `
     <table class="report-table line-items">
       ${lineItemColgroup(showDimensions)}
-      <thead><tr><th>البيان</th><th>الوحدة</th>${showDimensions ? "<th>المقاس</th>" : ""}<th>العدد</th><th>الكمية</th><th>الفئة</th><th>الإجمالي</th></tr></thead>
+      <thead><tr><th>${reportText(locale, "description")}</th><th>${reportText(locale, "unit")}</th>${showDimensions ? `<th>${locale === "en" ? "Size" : "المقاس"}</th>` : ""}<th>${reportText(locale, "itemCount")}</th><th>${reportText(locale, "quantity")}</th><th>${reportText(locale, "rate")}</th><th>${reportText(locale, "grossTotal")}</th></tr></thead>
       <tbody>${body.join("")}</tbody>
     </table>`;
 }
@@ -5877,9 +6404,10 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
 function termsHtml(data) {
   const sections = data.terms || [];
   if (!sections.length) return "";
+  const locale = reportLocaleFrom(data.report_language);
   return `
     <section class="terms">
-      <h2>الشروط والأحكام</h2>
+      <h2>${reportText(locale, "terms")}</h2>
       ${sections
         .map(
           (section) => `
@@ -5901,11 +6429,12 @@ function termsHtml(data) {
     </section>`;
 }
 
-function reportTotalValueHtml(parts = []) {
+function reportTotalValueHtml(parts = [], locale = "ar") {
+  const dir = reportLocaleFrom(locale) === "en" ? "ltr" : "rtl";
   return (parts || [])
     .map(
       (part) =>
-        `<span class="total-value-part">${part.prefix ? `<span class="report-total-prefix" dir="rtl">${escapeHtml(part.prefix)}</span>` : ""}<bdi dir="ltr">${escapeHtml(part.value)}</bdi>${part.unit ? `<span class="report-total-unit" dir="rtl">${escapeHtml(part.unit)}</span>` : ""}</span>`,
+        `<span class="total-value-part" dir="ltr">${part.prefix ? `<span class="report-total-prefix" dir="${dir}">${escapeHtml(part.prefix)}</span>` : ""}<bdi dir="ltr">${escapeHtml(part.value)}</bdi>${part.unit ? `<span class="report-total-unit" dir="ltr">${escapeHtml(part.unit)}</span>` : ""}</span>`,
     )
     .join('<span class="total-value-separator" aria-hidden="true">-</span>');
 }
@@ -5916,15 +6445,18 @@ function reportTotalBoxHtml({
   unit = "",
   parts = null,
   className = "",
+  locale = "ar",
 }) {
+  const dir = reportLocaleFrom(locale) === "en" ? "ltr" : "rtl";
   const valueParts = Array.isArray(parts)
     ? parts
     : [{ value: String(value ?? ""), unit }];
-  return `<div class="box${className ? ` ${className}` : ""}" dir="rtl"><span class="report-total-label">${labelHtml}</span><strong class="report-total-value">${reportTotalValueHtml(valueParts)}</strong></div>`;
+  return `<div class="box${className ? ` ${className}` : ""}" dir="${dir}"><span class="report-total-label">${labelHtml}</span><strong class="report-total-value">${reportTotalValueHtml(valueParts, locale)}</strong></div>`;
 }
 
 function totalsHtml(data) {
   const totals = data.totals || {};
+  const locale = reportLocaleFrom(data.report_language);
   const isStatement = !!(data.is_statement || (data.statementRows || []).length);
   const taxBoxes = (data.tax_breakdown || [])
     .map(
@@ -5932,6 +6464,7 @@ function totalsHtml(data) {
         reportTotalBoxHtml({
           labelHtml: escapeHtml(tax.label),
           value: formatMonetaryTotal(tax.amount),
+          locale,
         }),
     )
     .join("");
@@ -5940,13 +6473,15 @@ function totalsHtml(data) {
         labelHtml: escapeHtml(data.discount_label),
         value: formatMonetaryTotal(totals.discount_amount),
         className: "discount",
+        locale,
       })
     : "";
   const paymentBox = totals.credit
     ? reportTotalBoxHtml({
-        labelHtml: "التحصيل",
+        labelHtml: reportText(locale, "collection"),
         value: formatMonetaryTotal(totals.credit),
         className: "payment-total",
+        locale,
       })
     : "";
 
@@ -5957,43 +6492,45 @@ function totalsHtml(data) {
     roundMoney(totals.gross_total) !== roundMoney(totals.net_total);
 
   const adjustmentBeforeText = taxBoxes && discountBox
-    ? "قبل الخصم والضريبة"
+    ? reportText(locale, "beforeDiscountTax")
     : taxBoxes
-      ? "قبل الضريبة"
+      ? reportText(locale, "beforeTax")
       : discountBox
-        ? "قبل الخصم"
+        ? reportText(locale, "beforeDiscount")
         : "";
   const adjustmentAfterText = taxBoxes && discountBox
-    ? "بعد الخصم والضريبة"
+    ? reportText(locale, "afterDiscountTax")
     : taxBoxes
-      ? "بعد الضريبة"
+      ? reportText(locale, "afterTax")
       : discountBox
-        ? "بعد الخصم"
+        ? reportText(locale, "afterDiscount")
         : "";
   const grossLabel = adjustmentBeforeText
-    ? `الإجمالي<small class="sub-label">(${adjustmentBeforeText})</small>`
-    : "الإجمالي";
+    ? `${reportText(locale, "grossTotal")}<small class="sub-label">(${adjustmentBeforeText})</small>`
+    : reportText(locale, "grossTotal");
   const netLabel = adjustmentAfterText
-    ? `الإجمالي<small class="sub-label">(${adjustmentAfterText})</small>`
-    : "الصافي";
+    ? `${reportText(locale, "grossTotal")}<small class="sub-label">(${adjustmentAfterText})</small>`
+    : reportText(locale, "net");
   const adjustedTotalBox = totals.credit && adjustmentAfterText
     ? reportTotalBoxHtml({
-        labelHtml: `الإجمالي<small class="sub-label">(${adjustmentAfterText})</small>`,
+        labelHtml: `${reportText(locale, "grossTotal")}<small class="sub-label">(${adjustmentAfterText})</small>`,
         value: formatMonetaryTotal(
           numberOrZero(totals.net_total) + numberOrZero(totals.credit),
         ),
         className: "adjusted-total",
+        locale,
       })
     : "";
   const finalNetLabel = paymentBox && data.type === "contractor"
-    ? "إجمالي المستحق"
+    ? reportText(locale, "amountDue")
     : netLabel;
 
   if (isStatement) {
     const quantitySummary = totals.quantity
       ? reportTotalBoxHtml({
-          labelHtml: "الكمية",
+          labelHtml: reportText(locale, "quantity"),
           value: money(totals.quantity),
+          locale,
         })
       : "";
     const realGross = numberOrZero(
@@ -6003,11 +6540,13 @@ function totalsHtml(data) {
     const workRateBox =
       realGross && roundMoney(realGross) !== roundMoney(workGross)
         ? `${reportTotalBoxHtml({
-            labelHtml: "قبل نسبة العمل",
+            labelHtml: reportText(locale, "beforeWorkRate"),
             value: formatMonetaryTotal(realGross),
+            locale,
           })}${reportTotalBoxHtml({
-            labelHtml: "بعد نسبة العمل",
+            labelHtml: reportText(locale, "afterWorkRate"),
             value: formatMonetaryTotal(workGross),
+            locale,
           })}`
         : "";
 
@@ -6015,30 +6554,32 @@ function totalsHtml(data) {
       <div class="totals">
         <div class="totals-row totals-primary">
           ${quantitySummary}
-          ${workRateBox || (showGross ? reportTotalBoxHtml({ labelHtml: grossLabel, value: formatMonetaryTotal(totals.gross_total) }) : "")}
+          ${workRateBox || (showGross ? reportTotalBoxHtml({ labelHtml: grossLabel, value: formatMonetaryTotal(totals.gross_total), locale }) : "")}
         </div>
         <div class="totals-row totals-secondary">
           ${taxBoxes}
           ${discountBox}
           ${adjustedTotalBox}
-          ${reportTotalBoxHtml({ labelHtml: "التحصيل", value: formatMonetaryTotal(totals.credit) })}
-          ${reportTotalBoxHtml({ labelHtml: "الرصيد", value: formatMonetaryTotal(totals.net_total), className: "emphasis" })}
+          ${reportTotalBoxHtml({ labelHtml: reportText(locale, "collection"), value: formatMonetaryTotal(totals.credit), locale })}
+          ${reportTotalBoxHtml({ labelHtml: reportText(locale, "balance"), value: formatMonetaryTotal(totals.net_total), className: "emphasis", locale })}
         </div>
       </div>`;
   }
 
-  const quantityParts = quantitySummaryParts(data.rows || [], "ar");
-  const itemCountSummary = itemCountSummaryText(data.rows || [], "ar");
+  const quantityParts = quantitySummaryParts(data.rows || [], locale);
+  const itemCountSummary = itemCountSummaryText(data.rows || [], locale);
   const quantityBox = quantityParts.length
     ? reportTotalBoxHtml({
-        labelHtml: "الكمية",
+        labelHtml: reportText(locale, "quantity"),
         parts: quantityParts,
+        locale,
       })
     : "";
   const itemCountBox = itemCountSummary
     ? reportTotalBoxHtml({
-        labelHtml: "العدد",
+        labelHtml: reportText(locale, "itemCount"),
         value: itemCountSummary,
+        locale,
       })
     : "";
   const realGross = numberOrZero(totals.real_gross_total);
@@ -6046,20 +6587,25 @@ function totalsHtml(data) {
   const workRateBox =
     realGross && roundMoney(realGross) !== roundMoney(workGross)
       ? `${reportTotalBoxHtml({
-          labelHtml: "قبل نسبة العمل",
+          labelHtml: reportText(locale, "beforeWorkRate"),
           value: formatMonetaryTotal(realGross),
+          locale,
         })}${reportTotalBoxHtml({
-          labelHtml: "بعد نسبة العمل",
+          labelHtml: reportText(locale, "afterWorkRate"),
           value: formatMonetaryTotal(workGross),
+          locale,
         })}`
       : "";
   const finalNetBox = reportTotalBoxHtml({
     labelHtml: finalNetLabel,
     value: formatMonetaryTotal(totals.net_total),
     className: "emphasis",
+    locale,
   });
   const wordsBox = ["invoice", "taxInvoice", "nonTaxInvoice"].includes(data.type)
-    ? `<div class="box words" dir="rtl"><strong class="report-total-value">${escapeHtml(arabicAmountWords(Math.round(numberOrZero(totals.net_total))))}</strong></div>`
+    ? (locale === "ar"
+      ? `<div class="box words" dir="rtl"><strong class="report-total-value">${escapeHtml(arabicAmountWords(Math.round(numberOrZero(totals.net_total))))}</strong></div>`
+      : "")
     : "";
 
   return `
@@ -6067,7 +6613,7 @@ function totalsHtml(data) {
       <div class="totals-row totals-primary">
         ${quantityBox}
         ${itemCountBox}
-        ${workRateBox || (showGross ? reportTotalBoxHtml({ labelHtml: grossLabel, value: formatMonetaryTotal(totals.gross_total) }) : "")}
+        ${workRateBox || (showGross ? reportTotalBoxHtml({ labelHtml: grossLabel, value: formatMonetaryTotal(totals.gross_total), locale }) : "")}
         ${showGross ? "" : finalNetBox}
       </div>
       ${showGross || taxBoxes || discountBox || adjustedTotalBox || paymentBox
@@ -6084,6 +6630,8 @@ function totalsHtml(data) {
 }
 
 function renderReportHtmlV2(data) {
+  const locale = reportLocaleFrom(data.report_language);
+  const dir = locale === "en" ? "ltr" : "rtl";
   const showDimensions = !!data.show_dimensions;
   const dimensionUnit = data.dimension_unit || "cm";
   const branding = {
@@ -6097,11 +6645,15 @@ function renderReportHtmlV2(data) {
     normalizeText(branding.companyPhone) || branding.companyAbbreviation;
   const footerCenterContact = footerContact || branding.companyAbbreviation;
   const titleLine = data.operation_no
-    ? `${data.title} رقم ${data.operation_no}`
+    ? locale === "en"
+      ? `${data.title} ${reportText(locale, "number")} ${data.operation_no}`
+      : `${data.title} رقم ${data.operation_no}`
     : data.title;
   const workLine =
     data.type !== "contractor" && data.overall_work_type
-      ? `أعمال ${data.overall_work_type}`
+      ? locale === "en"
+        ? `${reportText(locale, "works")}: ${data.overall_work_type}`
+        : `أعمال ${data.overall_work_type}`
       : "";
   const rows = data.rows || [];
   const projectValues = uniqueRowValues(rows, "project").filter(
@@ -6120,7 +6672,7 @@ function renderReportHtmlV2(data) {
       : buildingValues.length === 1
         ? buildingValues[0]
         : buildingValues.length > 1
-          ? "كل المشاريع"
+          ? reportText(locale, "allProjects")
           : data.building_unit || "";
   const selectedProjects = Array.isArray(data.selected_projects)
     ? data.selected_projects
@@ -6131,11 +6683,11 @@ function renderReportHtmlV2(data) {
       ? selectedProjects[0]
       : "";
   const headerInfo = [
-    [data.type === "contractor" ? "المقاول" : "العميل", data.party || "-"],
+    [data.type === "contractor" ? reportText(locale, "contractor") : reportText(locale, "customer"), data.party || "-"],
   ];
   if (data.type !== "contractor" || selectedProject) {
     headerInfo.push([
-      "المشروع",
+      reportText(locale, "project"),
       data.type === "contractor"
         ? selectedProject
         : projectLocationLabel(data),
@@ -6149,7 +6701,7 @@ function renderReportHtmlV2(data) {
         <col style="width:10%"><col style="width:13.5%"><col style="width:14.5%"><col style="width:24%">
         <col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:8.5%"><col style="width:8.5%">
       </colgroup>
-      <thead><tr><th>التاريخ</th><th>المستند</th><th>المشروع</th><th class="details-column">التفاصيل</th><th>الكمية</th><th>نسبة العمل</th><th>خصم</th><th>الإجمالي</th><th>الرصيد</th></tr></thead>
+      <thead><tr><th>${reportText(locale, "date")}</th><th>${documentTitle("statement", locale)}</th><th>${reportText(locale, "project")}</th><th class="details-column">${reportText(locale, "details")}</th><th>${reportText(locale, "quantity")}</th><th>${reportText(locale, "workRate")}</th><th>${reportText(locale, "discount")}</th><th>${reportText(locale, "grossTotal")}</th><th>${reportText(locale, "balance")}</th></tr></thead>
       <tbody>${statementRows
         .map(
           (row) => `
@@ -6172,17 +6724,17 @@ function renderReportHtmlV2(data) {
   const summaryKeys = Object.keys((data.summaryRows || [])[0] || {});
   const summaryHtml = summaryKeys.length
     ? `
-    <table class="report-table summary"><thead><tr>${summaryKeys.map((key) => `<th>${escapeHtml(summaryLabel(key))}</th>`).join("")}</tr></thead>
+    <table class="report-table summary"><thead><tr>${summaryKeys.map((key) => `<th>${escapeHtml(summaryLabel(key, locale))}</th>`).join("")}</tr></thead>
     <tbody>${data.summaryRows.map((row) => `<tr>${summaryKeys.map((key) => `<td>${formatCell(row[key])}</td>`).join("")}</tr>`).join("")}</tbody></table>`
     : "";
 
   return `<!doctype html>
-  <html lang="ar" dir="rtl"><head><meta charset="utf-8" />
+  <html lang="${locale}" dir="${dir}"><head><meta charset="utf-8" />
   <style>
     :root{--brand-name:${branding.companyNameColor};--report-line:${branding.lineColor};--table-head-bg:${branding.tableHeaderBg};--table-head-text:${branding.tableHeaderText};--table-body-text:${branding.tableBodyText};--table-odd-bg:${branding.tableOddBg};--table-even-bg:${branding.tableEvenBg}}
     @page{size:A4 portrait;margin:10mm 9mm 20mm}
     *{box-sizing:border-box}
-    body{font-family:${branding.bodyFontStack};margin:0;color:#1b1b1b;background:#fff;font-size:12px}
+    body{font-family:${branding.bodyFontStack};margin:0;color:#1b1b1b;background:#fff;font-size:12px;direction:${dir}}
     .page{padding:10px 12px 24px}
     .brand-head{position:relative;min-height:190px;margin-bottom:8px;padding-top:2px;text-align:center}
     .brand-center{width:min(620px,100%);margin:0 auto;text-align:center}
@@ -6202,13 +6754,14 @@ function renderReportHtmlV2(data) {
     .info-band{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0;background:#f3f0e8;border:1px solid #d9cfb8;margin:8px 0 10px}
     .info-item{display:grid;grid-template-columns:auto 1fr;gap:10px;padding:9px 12px;align-items:center;min-height:38px;font-size:13px;font-weight:700}
     .info-item span{font-weight:800;color:#111}
-    .info-item strong{min-width:0;font-weight:800;text-align:right;overflow-wrap:anywhere;word-break:normal}
+    .info-item strong{min-width:0;font-weight:800;text-align:${locale === "en" ? "left" : "right"};overflow-wrap:anywhere;word-break:normal}
     .report-table{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:10px;font-size:10px;page-break-inside:auto}
     .report-table.line-items{table-layout:fixed}
     .report-table thead{display:table-header-group}
     .report-table tfoot{display:table-footer-group}
     .report-table tr,.report-table th,.report-table td{break-inside:avoid!important;break-inside:avoid-page!important;page-break-inside:avoid!important}
     .report-table tbody{break-inside:auto!important;page-break-inside:auto!important}
+    .report-table tbody tr{break-inside:avoid!important;break-inside:avoid-page!important;page-break-inside:avoid!important}
     th,td{border:1px solid #d6d0c3;padding:4px 4px;vertical-align:middle;overflow-wrap:break-word}
     th{background:var(--table-head-bg);color:var(--table-head-text);font-weight:700;text-align:center}
     td{text-align:center;color:var(--table-body-text);background:var(--table-even-bg)}
@@ -6220,7 +6773,7 @@ function renderReportHtmlV2(data) {
     .dimension-cell{width:112px;min-width:96px}
     .unit-cell{width:36px;min-width:34px}
     .work-rate-cell{width:48px;min-width:44px}
-    .details-column{text-align:right;line-height:1.4}
+    .details-column{text-align:${locale === "en" ? "left" : "right"};line-height:1.4}
     .statement-table{table-layout:fixed;font-size:9.2px}
     .statement-table th,.statement-table td{max-width:0;overflow:hidden;padding:4px 3px}
     .statement-table .date-cell,.statement-table .id-cell,.statement-table .number-cell,.statement-table .work-rate-cell{width:auto;min-width:0}
@@ -6232,23 +6785,23 @@ function renderReportHtmlV2(data) {
     .contractor-detail .desc{width:27%}.contractor-detail .project-cell{width:16%;white-space:normal}
     .location-cell{white-space:pre-line;line-height:1.45}
     tbody tr:nth-child(odd):not(.group-row):not(.subtotal) td{background:var(--table-odd-bg)}
-    .desc{text-align:right;width:auto;max-width:100%;line-height:1.45;white-space:normal;word-break:normal;word-wrap:break-word;overflow-wrap:anywhere;unicode-bidi:plaintext;vertical-align:top}
+    .desc{text-align:${locale === "en" ? "left" : "right"};width:auto;max-width:100%;line-height:1.45;white-space:normal;word-break:normal;word-wrap:break-word;overflow-wrap:anywhere;unicode-bidi:plaintext;vertical-align:top}
     .desc-line{display:block;unicode-bidi:plaintext}
     .totals{display:grid;gap:12px;margin:12px 0;max-width:100%}
-    .totals-row{display:flex;flex-wrap:wrap;direction:rtl;align-items:stretch;gap:12px;max-width:100%}
+    .totals-row{display:flex;flex-wrap:wrap;direction:${dir};align-items:stretch;gap:12px;max-width:100%}
     .totals-row:empty{display:none}
     .totals-primary{justify-content:stretch}
     .totals-primary>.box{flex:1 1 max-content;width:auto}
     .totals-secondary{justify-content:flex-end}
     .totals-secondary>.box{flex:0 0 auto}
     .totals-words{justify-content:flex-end}
-    .box{border:1px solid var(--report-line);background:#fbfaf6;padding:10px 14px;direction:rtl;text-align:right;display:flex;gap:14px;justify-content:space-between;align-items:center;min-height:44px;flex:0 0 auto;width:max-content;min-width:max-content;max-width:100%;white-space:nowrap;box-sizing:border-box}
-    .report-total-label{direction:rtl;text-align:right;font-size:11px;font-weight:600;line-height:1.25;display:inline-flex;align-items:baseline;gap:3px;white-space:nowrap;flex:0 0 auto}
-    .report-total-value{direction:rtl;text-align:left;font-size:18px;font-weight:700;line-height:1.2;display:inline-flex;align-items:baseline;justify-content:flex-end;gap:5px;margin-inline-start:auto;white-space:nowrap;flex:0 0 auto;unicode-bidi:isolate}
-    .total-value-part{direction:rtl;display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap;unicode-bidi:isolate}
+    .box{border:1px solid var(--report-line);background:#fbfaf6;padding:10px 14px;direction:${dir};text-align:${locale === "en" ? "left" : "right"};display:flex;gap:14px;justify-content:space-between;align-items:center;min-height:44px;flex:0 0 auto;width:max-content;min-width:max-content;max-width:100%;white-space:nowrap;box-sizing:border-box;break-inside:avoid;page-break-inside:avoid}
+    .report-total-label{direction:${dir};text-align:${locale === "en" ? "left" : "right"};font-size:11px;font-weight:600;line-height:1.25;display:inline-flex;align-items:baseline;gap:3px;white-space:nowrap;flex:0 0 auto}
+    .report-total-value{direction:${dir};text-align:${locale === "en" ? "right" : "left"};font-size:18px;font-weight:700;line-height:1.2;display:inline-flex;align-items:baseline;justify-content:flex-end;gap:5px;margin-inline-start:auto;white-space:nowrap;flex:0 0 auto;unicode-bidi:isolate}
+    .total-value-part{direction:ltr;display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap;unicode-bidi:isolate}
     .total-value-part bdi{direction:ltr;unicode-bidi:isolate}
-    .report-total-prefix{direction:rtl;font-size:.78em;font-weight:700;white-space:nowrap;unicode-bidi:isolate}
-    .report-total-unit{direction:rtl;font-size:.78em;font-weight:700;white-space:nowrap;unicode-bidi:isolate}
+    .report-total-prefix{direction:${dir};font-size:.78em;font-weight:700;white-space:nowrap;unicode-bidi:isolate}
+    .report-total-unit{direction:ltr;font-size:.78em;font-weight:700;white-space:nowrap;unicode-bidi:isolate}
     .total-value-separator{direction:ltr;font-size:.75em;opacity:.65;unicode-bidi:isolate}
     .box.emphasis{background:#efe3c6;border-color:var(--brand-name)}
     .sub-label{font-size:9.5px;font-weight:600;line-height:1.25;opacity:0.93;display:inline;white-space:nowrap}
@@ -6257,15 +6810,15 @@ function renderReportHtmlV2(data) {
     .percent-red,.work-rate-cell,.discount-cell{color:#c00000;font-weight:700}
     .payment-row td{color:#c00000;text-decoration:underline;text-underline-offset:3px;font-weight:700}
     .payment-row td:last-child{text-decoration:none}.negative-balance{color:#1769aa!important;text-decoration:none!important}
-    .group-row td{background:#ece6d7;color:#111;font-weight:700;text-align:right}
+    .group-row td{background:#ece6d7;color:#111;font-weight:700;text-align:${locale === "en" ? "left" : "right"}}
     .subtotal td{background:#f0f0f0;font-weight:700;color:#111}
-    .terms{page-break-inside:avoid;margin-top:14px;border:1px solid var(--report-line);background:#fff}
+    .terms{break-inside:avoid;page-break-inside:avoid;margin-top:14px;border:1px solid var(--report-line);background:#fff}
     .terms h2{font-size:14px;margin:0;text-align:center;background:var(--table-head-bg);color:var(--table-head-text);padding:8px}
-    .term-block{padding:8px 12px;border-top:1px solid #e6ddc9}
+    .term-block{padding:8px 12px;border-top:1px solid #e6ddc9;break-inside:avoid;page-break-inside:avoid}
     .term-block h3{font-size:12px;margin:0 0 5px;color:var(--brand-name)}
     .term-block ul{list-style:none;margin:0;padding:0;display:grid;gap:3px}
-    .term-block li{position:relative;margin:0;padding-right:14px;line-height:1.55;text-align:right;color:#202020}
-    .term-block li::before{content:"-";position:absolute;right:0;color:var(--brand-name);font-weight:700}
+    .term-block li{position:relative;margin:0;${locale === "en" ? "padding-left:14px" : "padding-right:14px"};line-height:1.55;text-align:${locale === "en" ? "left" : "right"};color:#202020}
+    .term-block li::before{content:"-";position:absolute;${locale === "en" ? "left:0" : "right:0"};color:var(--brand-name);font-weight:700}
     .term-block li.important span{color:#c00000;font-weight:700}
     .footer{margin-top:12px;padding-top:7px;border-top:1px solid var(--report-line);display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;color:var(--brand-name);font-size:11px;direction:ltr;line-height:1.45;align-items:center}
     .footer .left,.footer .center,.footer .right{text-align:center}.footer span{display:grid;min-height:42px;place-content:center;gap:2px}.footer em{font-style:normal}
@@ -6291,7 +6844,7 @@ function renderReportHtmlV2(data) {
     <footer class="footer">
       <span class="left"><strong>${escapeHtml(reportDate(data.generated_at))}</strong><em>${escapeHtml(footerPhone)}</em></span>
       <span class="center"><strong>${escapeHtml(branding.companyAbbreviation)}</strong><em>${escapeHtml(footerCenterContact)}</em></span>
-      <span class="right"><strong>Page preview</strong><em>By ${escapeHtml(data.prepared_by || "Eng. Yasser")}</em></span>
+      <span class="right"><strong>${reportText(locale, "pagePreview")}</strong><em>${reportText(locale, "by")} ${escapeHtml(data.prepared_by || "Eng. Yasser")}</em></span>
     </footer>
   </div></body></html>`;
 }
@@ -6300,7 +6853,7 @@ async function writeXlsx(data, outputPath) {
   const branding = normalizeReportBranding(data.branding || DEFAULT_REPORT_BRANDING);
   const brandColor = hexToArgb(branding.companyNameColor, "FF146B5C");
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Accounting Management";
+  workbook.creator = APP_NAME;
   workbook.created = new Date();
   const sheet = workbook.addWorksheet("التقرير", {
     views: [{ rightToLeft: true, state: "frozen", ySplit: 7 }],
@@ -6486,7 +7039,7 @@ async function writeXlsx(data, outputPath) {
 
 async function writeCleanXlsx(data, outputPath) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Accounting Management";
+  workbook.creator = APP_NAME;
   workbook.created = new Date();
   const branding = {
     ...reportBrandingFallback(),
@@ -6898,6 +7451,9 @@ function buildReportData(database, query, type) {
       : [];
   const dimensionUnit = query.dimension_unit === "m" ? "m" : "cm";
   const totals = totalsForRows(rows, document);
+  const reportLanguage = reportLocaleFrom(
+    query.report_language || document?.report_language || first.report_language,
+  );
   const contractorCertificateNo =
     type === "contractor"
       ? contractorCertificateNumber(rows, query.certificate_no)
@@ -6915,8 +7471,10 @@ function buildReportData(database, query, type) {
     );
   }
   return {
-    title: documentTitle(type),
+    title: documentTitle(type, reportLanguage),
     type,
+    report_language: reportLanguage,
+    report_direction: reportLanguage === "en" ? "ltr" : "rtl",
     filters: query,
     selected_projects: selectedProjects,
     project_selection_count: selectedProjects.length,
@@ -6947,13 +7505,13 @@ function buildReportData(database, query, type) {
       document?.entry_date || first.entry_date || query.entry_date || "",
     generated_at: new Date().toISOString(),
     totals,
-    tax_breakdown: taxBreakdown(rows),
+    tax_breakdown: taxBreakdown(rows, reportLanguage),
     vat_enabled: rows.some(
       (row) => normalizeBool(row.vat_enabled) || numberOrZero(row.vat_amount),
     ),
     vat_terms_only: rows.some((row) => normalizeBool(row.vat_terms_only)),
-    discount_label: discountLabel(document, totals),
-    terms: termsForDocument(database, first, type, rows),
+    discount_label: discountLabel(document, totals, reportLanguage),
+    terms: termsForDocument(database, first, type, rows, reportLanguage),
     summaryRows,
     rows,
     paymentRows,
@@ -6964,7 +7522,29 @@ function formatCell(value) {
   return typeof value === "number" ? money(value) : escapeHtml(value || "");
 }
 
-function summaryLabel(key) {
+function summaryLabel(key, locale = "ar") {
+  if (reportLocaleFrom(locale) === "en") {
+    return (
+      {
+        customer: "Customer",
+        project: "Project",
+        building_unit: "Building / Unit",
+        work_type: "Work type",
+        rows: "Rows",
+        area_m2: "Square meters",
+        quantity: "Quantity",
+        average_rate: "Average rate",
+        gross_total: "Total",
+        vat_amount: "VAT 14%",
+        social_insurance_amount: "Social insurance",
+        stamp_amount: "Stamp",
+        works_insurance_amount: "Works insurance",
+        final_insurance_amount: "Final insurance",
+        contractor_tax_amount: "Contractor tax",
+        net_total: "Net",
+      }[key] || key
+    );
+  }
   return (
     {
       customer: "العميل",
@@ -7464,7 +8044,7 @@ function renderProductiveQuantitiesHtml(data) {
 
 async function writeProductiveQuantitiesXlsx(data, outputPath) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Accounting Management";
+  workbook.creator = APP_NAME;
   workbook.created = new Date();
   const sheet = workbook.addWorksheet("الكميات المنتجة", {
     views: [{ rightToLeft: true, state: "frozen", ySplit: 6 }],
@@ -7614,7 +8194,7 @@ $listeners = @(
 
 function formatServerStatusText(status = {}) {
   const lines = [
-    "Accounting Management server status",
+    `${APP_NAME} server status`,
     `Generated: ${status.generatedAt || new Date().toISOString()}`,
     `Version: ${APP_VERSION}`,
     `PID: ${status.pid}`,
@@ -7689,6 +8269,7 @@ async function createServer(options = {}) {
   await database.open();
   ensureRuntimeMigrations(database);
   repairMisfiledContractorItems(database);
+  repairContractorPaymentRows(database);
   normalizeApprovedOffers(database);
   recalculateAllItems(database);
   cleanupEmptyPaymentDocuments(database);
@@ -7796,7 +8377,7 @@ async function createServer(options = {}) {
   app.get("/api/health", (req, res) => {
     res.json({
       ok: true,
-      app: "Accounting Management",
+      app: APP_NAME,
       version: APP_VERSION,
       serverVersion: APP_VERSION,
       databaseSchemaVersion: DATABASE_SCHEMA_VERSION,
@@ -7808,6 +8389,7 @@ async function createServer(options = {}) {
     const platform = req.query.platform || "";
     const installedVersion =
       extractVersion(req.query.installed_version) || APP_VERSION;
+    const installedVersionCode = Number(req.query.version_code || req.query.versionCode || 0);
     const repo = process.env.AM_UPDATE_REPOSITORY || UPDATE_REPOSITORY;
     const releasesUrl = `https://api.github.com/repos/${repo}/releases?per_page=20`;
     const latestUrl = `https://api.github.com/repos/${repo}/releases/latest`;
@@ -7854,22 +8436,48 @@ async function createServer(options = {}) {
           repository: repo,
         });
       }
-      const latestVersion = releaseVersion(release);
+      const manifest = await readReleaseManifest(release).catch(() => null);
+      const isAndroid = String(platform || "").toLowerCase().includes("android");
+      const latestVersion = isAndroid
+        ? manifest?.android?.versionName || releaseVersion(release)
+        : manifest?.windows?.version || manifest?.version || releaseVersion(release);
+      const latestVersionCode = Number(manifest?.android?.versionCode || 0);
       const asset = chooseReleaseAsset(release, platform);
+      const manifestDownloadValue = isAndroid
+        ? manifest?.android?.downloadUrl || ""
+        : manifest?.windows?.downloadUrl || "";
+      const manifestDownloadAsset = manifestDownloadValue
+        ? (Array.isArray(release.assets) ? release.assets : []).find(
+            (item) => String(item?.name || "") === String(manifestDownloadValue),
+          )
+        : null;
+      const platformDownloadUrl = /^https?:\/\//i.test(String(manifestDownloadValue))
+        ? manifestDownloadValue
+        : manifestDownloadAsset?.browser_download_url || "";
+      const updateAvailable =
+        isAndroid && latestVersionCode && installedVersionCode
+          ? latestVersionCode > installedVersionCode
+          : compareVersions(latestVersion, installedVersion) > 0;
       res.json({
         currentVersion: installedVersion,
         installedVersion,
+        installedVersionCode: installedVersionCode || null,
         latestVersion,
-        updateAvailable: compareVersions(latestVersion, installedVersion) > 0,
+        latestVersionCode: latestVersionCode || null,
+        updateAvailable,
         releaseName: release.name || release.tag_name || "",
         releaseUrl: release.html_url || `https://github.com/${repo}/releases`,
         downloadUrl:
+          platformDownloadUrl ||
           asset?.browser_download_url ||
           release.html_url ||
           `https://github.com/${repo}/releases`,
+        sha256: isAndroid ? manifest?.android?.sha256 || "" : manifest?.windows?.sha256 || "",
+        size: isAndroid ? manifest?.android?.size || asset?.size || 0 : manifest?.windows?.size || asset?.size || 0,
         assetName: asset?.name || "",
         publishedAt: release.published_at || "",
         repository: repo,
+        manifest: manifest ? { version: manifest.version || "", channel: manifest.channel || "stable" } : null,
       });
     } catch (error) {
       res.status(502).json({
@@ -9091,6 +9699,7 @@ async function createServer(options = {}) {
       "search_party_name",
       "discount_type",
       "discount_value",
+      "report_language",
       "notes",
     ];
     const sets = [];
@@ -9112,6 +9721,10 @@ async function createServer(options = {}) {
         params.push(
           key === "document_no"
             ? Number(req.body[key]) || current.document_no
+            : key === "report_language"
+              ? normalizeText(req.body[key]) === "en"
+                ? "en"
+                : "ar"
             : key === "entry_date"
               ? normalizeText(req.body[key])
                 ? normalizeEntryDateTime(req.body[key])
@@ -9176,7 +9789,7 @@ async function createServer(options = {}) {
       [
         updated.document_no,
         updated.operation_no,
-        statusForDocumentType(updated.document_type) || STATUS.OFFER,
+        accountingStatusForWorkItem(updated, { party_role: updated.party_role }),
         updated.status,
         updated.party_id,
         updated.party_role,
@@ -9247,7 +9860,7 @@ async function createServer(options = {}) {
     ];
     const params = [];
     if (req.query.role) {
-      clauses.push("COALESCE(p.role, wi.party_role) = ?");
+      clauses.push("COALESCE(p.role, wi.party_role, d.party_role, 'customer') = ?");
       params.push(req.query.role);
     }
     const q = normalizeText(req.query.q);
@@ -9267,7 +9880,7 @@ async function createServer(options = {}) {
               ROUND(SUM(${paymentAmountExpr}), 2) AS paid_total
        FROM work_items wi
        JOIN documents d ON d.id = wi.document_id
-       LEFT JOIN parties p ON p.id = d.party_id
+       LEFT JOIN parties p ON p.id = COALESCE(wi.party_id, d.party_id)
        WHERE ${clauses.join(" AND ")}
        GROUP BY 1, 2, 3, 4
        HAVING display_name IS NOT NULL AND display_name <> ''
@@ -9288,8 +9901,12 @@ async function createServer(options = {}) {
     ];
     const params = [];
     if (req.query.party_id) {
-      clauses.push("d.party_id = ?");
+      clauses.push("COALESCE(wi.party_id, d.party_id) = ?");
       params.push(Number(req.query.party_id));
+    }
+    if (req.query.role) {
+      clauses.push("COALESCE(p.role, wi.party_role, d.party_role, 'customer') = ?");
+      params.push(req.query.role);
     }
     if (req.query.customer) {
       const q = normalizeText(req.query.customer);
@@ -9310,7 +9927,7 @@ async function createServer(options = {}) {
               p.base_name AS base_party_name
        FROM work_items wi
        JOIN documents d ON d.id = wi.document_id
-       LEFT JOIN parties p ON p.id = d.party_id
+       LEFT JOIN parties p ON p.id = COALESCE(wi.party_id, d.party_id)
        WHERE ${clauses.join(" AND ")}
        ORDER BY COALESCE(wi.entry_date, '' ) DESC, wi.id DESC
        LIMIT ?`,
@@ -9681,7 +10298,7 @@ async function createServer(options = {}) {
 
   app.get("/api/manager/public", (req, res) => {
     res.json({
-      app: "Accounting Management Manager",
+      app: `${APP_NAME} Manager`,
       version: APP_VERSION,
       settings: managerSettings(database, false),
       plans: subscriptionPlans(database).filter((plan) =>
@@ -10142,7 +10759,8 @@ async function createServer(options = {}) {
 
   app.get("/api/settings/terms", (req, res) => {
     const rows = database.all(
-      "SELECT key, value FROM app_settings WHERE key IN ('terms_retail', 'terms_corporate')",
+      `SELECT key, value FROM app_settings
+       WHERE key IN ('terms_retail', 'terms_corporate', 'terms_retail_en', 'terms_corporate_en')`,
     );
     res.json(
       Object.fromEntries(rows.map((row) => [row.key, JSON.parse(row.value)])),
@@ -10152,8 +10770,13 @@ async function createServer(options = {}) {
   app.put("/api/settings/terms/:key", (req, res) => {
     if (!userPermissionAuthorized(database, req.body, "can_edit_terms"))
       return res.status(403).json({ error: "Terms permission is required" });
-    const key =
-      req.params.key === "corporate" ? "terms_corporate" : "terms_retail";
+    const keyMap = {
+      retail: "terms_retail",
+      corporate: "terms_corporate",
+      retail_en: "terms_retail_en",
+      corporate_en: "terms_corporate_en",
+    };
+    const key = keyMap[req.params.key] || "terms_retail";
     database.run(
       "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
       [key, JSON.stringify(req.body.value || { sections: [] })],
@@ -11048,7 +11671,7 @@ if (require.main === module) {
         standaloneKeepAlive =
           standaloneKeepAlive || setInterval(() => {}, 60 * 60 * 1000);
         console.log(
-          `Accounting Management server: ${defaultServerUrl(DEFAULT_PORT)}`,
+          `${APP_NAME} server: ${defaultServerUrl(DEFAULT_PORT)}`,
         );
         console.log(`Database: ${server.dbPath}`);
         for (const ip of getLanIps())

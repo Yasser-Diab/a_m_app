@@ -74,7 +74,7 @@ function clearElement(element) {
 function planPrice(plan, billingCycle) {
   const amount =
     billingCycle === "annually" || billingCycle === "yearly"
-      ? plan?.annually ?? plan?.annual ?? plan?.yearly ?? plan?.monthly
+      ? plan?.annually ?? plan?.annual ?? plan?.yearly ?? plan?.yearly_price
       : plan?.monthly ?? plan?.amount ?? plan?.price;
   return Number(amount || 0);
 }

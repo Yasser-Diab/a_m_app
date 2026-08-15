@@ -210,6 +210,7 @@ CREATE TABLE IF NOT EXISTS documents (
   building_unit TEXT,
   title TEXT,
   entry_date TEXT,
+  report_language TEXT NOT NULL DEFAULT 'ar' CHECK (report_language IN ('ar', 'en')),
   discount_type TEXT CHECK (discount_type IN ('none', 'rate', 'amount')) DEFAULT 'none',
   discount_value REAL NOT NULL DEFAULT 0,
   notes TEXT,
@@ -240,8 +241,8 @@ VALUES ('admin', 'مدير النظام', 'admin');
 
 INSERT OR IGNORE INTO app_settings (key, value)
 VALUES
-  ('company_name_ar', 'Accounting Management'),
-  ('company_name_en', 'Accounting Management'),
+  ('company_name_ar', 'Easy Commercial'),
+  ('company_name_en', 'Easy Commercial'),
   ('vat_rate', '0.14'),
   ('social_insurance_rate', '0.036'),
   ('stamp_rate', '0.001'),
@@ -253,4 +254,8 @@ INSERT OR IGNORE INTO app_settings (key, value)
 VALUES
   ('admin_password', '23320001'),
   ('terms_retail', '{"sections":[{"title":"صلاحية عرض السعر","lines":["عرض السعر ساري لمدة (48) ساعة من تاريخ إصداره.","الأسعار تعتمد على أسعار المواد الخام الحالية وقابلة للتغيير حسب تقلبات السوق."]},{"title":"شروط الدفع","lines":["80% عند توقيع العقد.","20% عند التسليم."]}]}'),
-  ('terms_corporate', '{"sections":[{"title":"صلاحية عرض السعر","lines":["عرض السعر ساري لمدة (48) ساعة من تاريخ إصداره.","الأسعار تعتمد على أسعار المواد الخام الحالية وقابلة للتغيير حسب تقلبات السوق."]},{"title":"شروط الدفع","lines":["60% عند توقيع العقد.","15% عند التوريد.","15% عند التركيب.","10% عند التسليم."]}]}');
+  ('terms_corporate', '{"sections":[{"title":"صلاحية عرض السعر","lines":["عرض السعر ساري لمدة (48) ساعة من تاريخ إصداره.","الأسعار تعتمد على أسعار المواد الخام الحالية وقابلة للتغيير حسب تقلبات السوق."]},{"title":"شروط الدفع","lines":["60% عند توقيع العقد.","15% عند التوريد.","15% عند التركيب.","10% عند التسليم."]}]}'),
+  ('terms_retail_en', '{"sections":[{"title":"Quotation Validity","lines":["This quotation is valid for 48 hours from the issue date.","Prices are based on current raw-material costs and may change according to market movement."]},{"title":"Payment Terms","lines":["80% upon contract signing.","20% upon delivery."]}]}'),
+  ('terms_corporate_en', '{"sections":[{"title":"Quotation Validity","lines":["This quotation is valid for seven days from the issue date.","Prices are based on current raw-material costs and may change according to market movement."]},{"title":"Payment Terms","lines":["60% upon contract signing.","15% upon supply.","15% upon installation.","10% upon final delivery."]}]}'),
+  ('ui_language', 'ar'),
+  ('default_report_language', 'ar');

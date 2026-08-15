@@ -4,9 +4,18 @@ $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $configPath = Join-Path $root "config\app-variants.json"
 $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
 $packageJson = Get-Content -Raw -LiteralPath (Join-Path $root "package.json") | ConvertFrom-Json
-$version = if ($packageJson.version) { [string]$packageJson.version } else { [string]$config.version }
-$digits = ($version -replace "\D", "")
-$versionCode = [int]($digits.PadRight(3, "0").Substring(0, 3))
+$version = if ($env:AM_BUILD_VERSION) {
+  [string]$env:AM_BUILD_VERSION
+} elseif ($config.version) {
+  [string]$config.version
+} else {
+  [string]$packageJson.version
+}
+$versionParts = @($version -split "\D+" | Where-Object { $_ -ne "" })
+$majorVersion = if ($versionParts.Count -gt 0) { [int]$versionParts[0] } else { 0 }
+$minorVersion = if ($versionParts.Count -gt 1) { [int]$versionParts[1] } else { 0 }
+$patchVersion = if ($versionParts.Count -gt 2) { [int]$versionParts[2] } else { 0 }
+$versionCode = ($majorVersion * 1000000) + ($minorVersion * 1000) + $patchVersion
 $variantNames = @("main")
 
 $capacitorPath = Join-Path $root "capacitor.config.json"
@@ -170,6 +179,7 @@ try {
 
     Write-Host "Building Android app variant: $($variant.name)"
     $env:VITE_APP_VARIANT = $variantName
+    $env:VITE_APP_VERSION = $version
     Set-AndroidVariantFiles -Variant $variant
 
     Invoke-CheckedNative npm run build:web:raw
@@ -202,6 +212,7 @@ try {
 }
 finally {
   Remove-Item Env:\VITE_APP_VARIANT -ErrorAction SilentlyContinue
+  Remove-Item Env:\VITE_APP_VERSION -ErrorAction SilentlyContinue
   Remove-Item Env:\AM_ANDROID_ASSET_DIR -ErrorAction SilentlyContinue
   Set-TextNoBom -Path $capacitorPath -Value $originalCapacitor
   Set-TextNoBom -Path $gradlePath -Value $originalGradle

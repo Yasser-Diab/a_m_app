@@ -31,13 +31,17 @@ let shutdownForceTimer;
 let updateStartupTimer;
 let updateCheckPromise;
 let updaterConfigured = false;
+const PRODUCT_NAME = 'Easy Commercial';
+const LEGACY_USER_DATA_NAME = 'Accounting Management';
+const APP_ID = 'com.sherifalihassan.priceoffer';
+app.setName(PRODUCT_NAME);
+app.setPath('userData', path.join(app.getPath('appData'), LEGACY_USER_DATA_NAME));
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 const shutdownRequestedByArgument = process.argv.includes('--shutdown-for-update');
 
 const DEFAULT_LAN_HOST = process.env.PRICE_OFFER_DEFAULT_HOST || '192.168.137.1';
 const DEFAULT_PORT = Number(process.env.PRICE_OFFER_PORT || 4181);
 const DEFAULT_TUNNEL_URL = process.env.PRICE_OFFER_TUNNEL_URL || '';
-const APP_ID = 'com.sherifalihassan.priceoffer';
 const APP_VERSION = app.getVersion();
 const UPDATE_REPOSITORY = process.env.AM_UPDATE_REPOSITORY || 'Yasser-Diab/a_m_app';
 const WINDOWS_EXTERNAL_DATA_DIR = 'D:\\AM_Data';
@@ -149,6 +153,57 @@ function fetchLatestPublishedRelease() {
   });
 }
 
+function fetchJsonUrl(url) {
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const transport = parsed.protocol === 'https:' ? https : http;
+    const request = transport.get(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: `${parsed.pathname}${parsed.search}`,
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': `Easy-Commercial/${APP_VERSION}`,
+        },
+        timeout: 10000,
+      },
+      (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { body += chunk; });
+        response.on('end', () => {
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            reject(new Error(`Update manifest returned ${response.statusCode}.`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(body));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      },
+    );
+    request.on('timeout', () => request.destroy(new Error('Update manifest check timed out.')));
+    request.on('error', reject);
+  });
+}
+
+async function fetchReleaseManifest(release) {
+  const assets = Array.isArray(release?.assets) ? release.assets : [];
+  const asset = assets.find((item) => /easy-commercial-update\.json$/i.test(item?.name || ''));
+  if (!asset?.browser_download_url) return null;
+  return fetchJsonUrl(asset.browser_download_url).catch(() => null);
+}
+
 function configureApplicationUpdater() {
   if (updaterConfigured) return;
   updaterConfigured = true;
@@ -236,9 +291,12 @@ async function checkForApplicationUpdates({ manual = false } = {}) {
   updateCheckPromise = (async () => {
     publishUpdateState({ status: 'checking', error: '' });
     const release = await fetchLatestPublishedRelease();
+    const manifest = await fetchReleaseManifest(release);
     const preflight = releaseUpdatePreflight({
       installedVersion: APP_VERSION,
       release,
+      manifest,
+      platform: process.platform,
     });
     if (preflight.status === 'current' || preflight.status === 'error') {
       return publishUpdateState({
@@ -329,7 +387,7 @@ function compatibleServerAt(apiBase) {
           try {
             const data = JSON.parse(body);
             resolve(response.statusCode === 200 &&
-              data?.app === 'Accounting Management' &&
+              [LEGACY_USER_DATA_NAME, PRODUCT_NAME].includes(data?.app) &&
               compareVersions(data.version, APP_VERSION) >= 0
               ? { apiBase: clean, health: data }
               : null);
@@ -438,7 +496,7 @@ $connections = @(Get-NetTCPConnection -RemotePort $portValue -State Established 
 function formatClientConnectionStatus(serverUrl, detectedServer, powerShell) {
   const health = detectedServer?.health || {};
   const lines = [
-    'Accounting Management client connection status',
+    `${PRODUCT_NAME} client connection status`,
     `Generated: ${new Date().toISOString()}`,
     'Connection mode: REMOTE SERVER / TUNNEL',
     `Configured server: ${serverUrl}`,
@@ -618,6 +676,33 @@ function applyOpenAtLoginSetting(settings = readDesktopSettings()) {
   }
 }
 
+function activeDesktopDataPaths() {
+  const dataDir = path.resolve(
+    apiServer?.dataDir || process.env.PRICE_OFFER_DATA_DIR || desktopDataDir(),
+  );
+  const dbPath = path.resolve(apiServer?.dbPath || path.join(dataDir, 'price_offer.db'));
+  let databaseSize = 0;
+  let databaseExists = false;
+  try {
+    if (fs.existsSync(dbPath)) {
+      const stat = fs.statSync(dbPath);
+      databaseSize = stat.size;
+      databaseExists = stat.isFile();
+    }
+  } catch {
+    databaseSize = 0;
+    databaseExists = false;
+  }
+  return {
+    activeDataDir: dataDir,
+    activeDbPath: dbPath,
+    dataDir,
+    dbPath,
+    databaseSize,
+    databaseExists,
+  };
+}
+
 function publicDesktopSettings(settings = readDesktopSettings()) {
   let loginItem = {};
   try {
@@ -629,6 +714,9 @@ function publicDesktopSettings(settings = readDesktopSettings()) {
   }
   return {
     ...normalizeDesktopSettings(settings),
+    ...activeDesktopDataPaths(),
+    localServerRunning: !!httpServer,
+    localServerPort: Number(process.env.PRICE_OFFER_PORT || DEFAULT_PORT),
     supportsOpenAtLogin: supportsOpenAtLogin(),
     loginItemOpenAtLogin: !!loginItem.openAtLogin,
     settingsPath: desktopSettingsPath(),
@@ -986,7 +1074,7 @@ function trayMenuTemplate() {
   const settings = readDesktopSettings();
   const serverRunning = !!httpServer;
   return [
-    { label: 'Open Accounting Management', click: () => showMainWindow('dashboard') },
+    { label: `Open ${PRODUCT_NAME}`, click: () => showMainWindow('dashboard') },
     { label: 'Open Settings', click: () => showMainWindow('settings') },
     { type: 'separator' },
     ...NAVIGATION_SECTIONS.map((section) => ({
@@ -1013,13 +1101,13 @@ function trayMenuTemplate() {
       click: (menuItem) => updateDesktopSettings({ openAtLogin: menuItem.checked }),
     },
     { type: 'separator' },
-    { label: 'Exit Accounting Management', click: quitFromTray },
+    { label: `Exit ${PRODUCT_NAME}`, click: quitFromTray },
   ];
 }
 
 function updateTrayMenu() {
   if (!tray) return;
-  tray.setToolTip(httpServer ? 'Accounting Management is running in the background' : 'Accounting Management');
+  tray.setToolTip(httpServer ? `${PRODUCT_NAME} is running in the background` : PRODUCT_NAME);
   tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate()));
 }
 
@@ -1037,7 +1125,7 @@ function updateApplicationMenu() {
   const serverRunning = !!httpServer;
   const template = [
     {
-      label: 'Accounting Management',
+      label: PRODUCT_NAME,
       submenu: [
         { label: 'Open App', click: () => showMainWindow('dashboard') },
         { label: 'Settings', click: () => showMainWindow('settings') },
@@ -1188,7 +1276,7 @@ async function createWindow() {
     ...restoredBounds,
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Accounting Management',
+    title: PRODUCT_NAME,
     icon: path.join(__dirname, '..', 'build', 'variants', 'main.ico'),
     backgroundColor: '#f6f7f8',
     webPreferences: {
@@ -1287,7 +1375,7 @@ if (!gotSingleInstanceLock) {
   }).catch((error) => {
     writeStartupError(error);
     dialog.showErrorBox(
-      'Accounting Management could not start',
+      `${PRODUCT_NAME} could not start`,
       `${error?.message || error}\n\nA diagnostic log was saved in the app data folder.`,
     );
     shutdownApplication('Fatal startup failure').catch(() => app.exit(1));
@@ -1390,6 +1478,29 @@ ipcMain.handle('save-report-file', async (_event, payload = {}) => {
 });
 
 ipcMain.handle('start-local-server', async (_event, options = {}) => startLocalServer(options));
+ipcMain.handle('stop-local-server', async () => {
+  await stopLocalServer();
+  return publicDesktopSettings();
+});
+ipcMain.handle('restart-local-server', async (_event, options = {}) => {
+  await stopLocalServer();
+  return startLocalServer({ ...(options || {}), restart: true });
+});
+ipcMain.handle('open-data-directory', async () => {
+  const { activeDataDir } = activeDesktopDataPaths();
+  fs.mkdirSync(activeDataDir, { recursive: true });
+  const error = await shell.openPath(activeDataDir);
+  if (error) throw new Error(error);
+  return true;
+});
+ipcMain.handle('open-database-directory', async () => {
+  const { activeDbPath } = activeDesktopDataPaths();
+  const directory = path.dirname(activeDbPath);
+  fs.mkdirSync(directory, { recursive: true });
+  const error = await shell.openPath(directory);
+  if (error) throw new Error(error);
+  return true;
+});
 
 ipcMain.handle('show-section', async (_event, section = '') => {
   showMainWindow(String(section || 'dashboard'));
@@ -1399,7 +1510,7 @@ ipcMain.handle('show-section', async (_event, section = '') => {
 ipcMain.handle('show-desktop-notification', async (_event, payload = {}) => {
   if (!Notification.isSupported()) return false;
   const notification = new Notification({
-    title: String(payload.title || 'Accounting Management'),
+    title: String(payload.title || PRODUCT_NAME),
     body: String(payload.body || ''),
     icon: trayIconPath(),
     silent: !!payload.silent,
@@ -1468,8 +1579,7 @@ app.on('before-quit', (event) => {
 });
 
 app.on('will-quit', () => {
-  clearTimeout(shutdownForceTimer);
-  shutdownLog('Electron will-quit received');
+  shutdownLog('Electron will-quit received; force-exit timer remains armed as a safety fallback');
 });
 
 process.on('exit', (code) => {

@@ -70,7 +70,7 @@ const fixture = {
     },
   ],
   branding: {
-    companyNameEn: "Accounting Management",
+    companyNameEn: "Easy Commercial",
     companyNameAr: "إدارة الحسابات",
     companyAbbreviation: "AM",
     companyNameColor: "#9a6b16",
@@ -111,15 +111,15 @@ assert.ok(html.includes("120"));
 assert.ok(html.includes("125"));
 assert.match(
   html,
-  /<span class="total-value-part"><bdi dir="ltr">255<\/bdi><span class="report-total-unit" dir="rtl">م²<\/span><\/span>/,
+  /<span class="total-value-part" dir="ltr"><bdi dir="ltr">255<\/bdi><span class="report-total-unit" dir="ltr">م²<\/span><\/span>/,
 );
 assert.match(
   html,
-  /<span class="total-value-part"><span class="report-total-prefix" dir="rtl">بالعدد<\/span><bdi dir="ltr">125<\/bdi><\/span>/,
+  /<span class="total-value-part" dir="ltr"><span class="report-total-prefix" dir="rtl">بالعدد<\/span><bdi dir="ltr">125<\/bdi><\/span>/,
 );
 assert.match(
   html,
-  /<span class="report-total-label">العدد<\/span><strong class="report-total-value"><span class="total-value-part"><bdi dir="ltr">35<\/bdi><\/span><\/strong>/,
+  /<span class="report-total-label">العدد<\/span><strong class="report-total-value"><span class="total-value-part" dir="ltr"><bdi dir="ltr">35<\/bdi><\/span><\/strong>/,
 );
 assert.ok(!html.includes('<bdi dir="ltr">160</bdi>'));
 assert.ok(!html.includes("255م²"));
@@ -155,7 +155,7 @@ const unitOnlyHtml = renderReportHtmlV2({
 });
 assert.match(
   unitOnlyHtml,
-  /<span class="report-total-label">الكمية<\/span><strong class="report-total-value"><span class="total-value-part"><span class="report-total-prefix" dir="rtl">بالعدد<\/span><bdi dir="ltr">125<\/bdi><\/span><\/strong>/,
+  /<span class="report-total-label">الكمية<\/span><strong class="report-total-value"><span class="total-value-part" dir="ltr"><span class="report-total-prefix" dir="rtl">بالعدد<\/span><bdi dir="ltr">125<\/bdi><\/span><\/strong>/,
 );
 assert.doesNotMatch(
   unitOnlyHtml,

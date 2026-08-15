@@ -29,6 +29,7 @@ import {
   Download,
   Eye,
   KeyRound,
+  Languages,
   LogOut,
   Maximize2,
   MessageCircle,
@@ -65,6 +66,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import appLogo from "./assets/sticker logo s.png";
+import appIcon from "./assets/easy-commercial-icon.png";
 import { CHAT_EMOJI_CATEGORIES } from "./emoji-data.js";
 import {
   applySmartClipboardGridToRows,
@@ -89,15 +91,17 @@ import {
 } from "./manager-paypal-checkout.js";
 import "./styles.css";
 
-const APP_NAME = "Accounting Management";
+const APP_NAME = "Easy Commercial";
+const APP_SLOGAN = "Quotes · Invoices · Accounts · Payments";
+const LEGACY_APP_NAMES = ["Accounting Management", APP_NAME];
 const APP_VERSION =
   window.priceOfferDesktop?.installedVersion ||
   import.meta.env.VITE_APP_VERSION ||
-  "1.4.3";
+  "2.0.0";
 const APP_RELEASE_LABEL = APP_VERSION;
 const APP_DISPLAY_VERSION = APP_RELEASE_LABEL || APP_VERSION;
-const APP_MARK = "A.M";
-const APP_BYLINE = "By Y.D";
+const APP_MARK = "E.C";
+const APP_BYLINE = APP_SLOGAN;
 const DEFAULT_LOCAL_HOST = "192.168.137.1";
 const DEFAULT_LOCAL_PORT = 4181;
 const DEFAULT_API_BASE = `http://${DEFAULT_LOCAL_HOST}:${DEFAULT_LOCAL_PORT}`;
@@ -105,6 +109,495 @@ const MANAGER_API_BASE = "https://manager.yasserdiab.site";
 const MANAGER_PUBLIC_URL = "https://manager.yasserdiab.site";
 const SERVICE_TERMS_VERSION = "2026-06-27";
 const SERVICE_TERMS_STORAGE_KEY = "accountingManagementTermsAcceptedVersion";
+
+const UI_TRANSLATIONS = {
+  en: {
+    "لوحة التحكم": "Dashboard",
+    "عروض الأسعار": "Quotations",
+    "الفواتير": "Invoices",
+    "كشف حساب": "Account Statement",
+    "كشف حساب عميل": "Customer Statement",
+    "الدفعات": "Payments",
+    "المقاولين": "Contractors",
+    "الكميات المنتجة": "Produced Quantities",
+    "إدخال / تعديل": "Entry / Edit",
+    "الإعدادات": "Settings",
+    "التحليلات المالية والتشغيلية": "Financial and Operational Analytics",
+    "بحث بيانات عميل": "Customer Data Search",
+    "عميل محفوظ": "Saved Customer",
+    "اكتب أو اختر العميل": "Type or choose customer",
+    "اختر عميل لعرض الشجرة": "Choose a customer to show the tree",
+    "التنبيهات والعروض": "Notifications and Offers",
+    "إصدار التطبيق والتحديثات": "App Version and Updates",
+    "الإصدار المثبت:": "Installed version:",
+    "أحدث إصدار متاح:": "Latest available version:",
+    "إصدار قاعدة البيانات:": "Database version:",
+    "فحص التحديثات": "Check for updates",
+    "جارٍ فحص التحديثات": "Checking for updates",
+    "التطبيق محدّث.": "Application is current.",
+    "اللغة": "Language",
+    "لغة واجهة التطبيق": "Interface Language",
+    "لغة التقرير": "Report Language",
+    "لغة التقرير الافتراضية للمستندات الجديدة": "Default report language for new documents",
+    "العربية": "Arabic",
+    "حفظ التقارير": "Report Saving",
+    "مجلد حفظ التقارير الافتراضي": "Default report save folder",
+    "فتح PDF تلقائياً بعد الحفظ للمراجعة": "Open PDF after saving for review",
+    "الخادم": "Server",
+    "الحالة": "Status",
+    "مسودة": "Draft",
+    "معتمد": "Approved",
+    "مغلق": "Closed",
+    "بدون": "None",
+    "نوع الخصم": "Discount Type",
+    "قيمة الخصم": "Discount Value",
+    "حفظ المستند": "Save Document",
+    "معاينة التصدير": "Export Preview",
+    "إغلاق المعاينة": "Close Preview",
+    "عرض": "Show",
+    "بحث": "Search",
+    "PDF معاينة": "PDF Preview",
+    "معاينة PDF": "PDF Preview",
+    "مشاركة": "Share",
+    "حذف المستند": "Delete Document",
+    "تعديل": "Edit",
+    "نسخ إلى مستند جديد": "Copy to New Document",
+    "إجمالي مباني": "Building Totals",
+    "إجمالي وحدات": "Unit Totals",
+    "المقاس: سم": "Measure: cm",
+    "المقاس: م": "Measure: m",
+    "تبديل ظهور المقاسات بين سنتيمتر ومتر": "Switch displayed measurements between centimeters and meters",
+    "ID / رقم مستند": "ID / Document No.",
+    "العميل - بحث": "Customer - Search",
+    "المقاول - بحث": "Contractor - Search",
+    "العميل": "Customer",
+    "المقاول": "Contractor",
+    "رقم / مستند": "No. / Document",
+    "كل مستندات المحدد": "All selected documents",
+    "المشروع (اختياري)": "Project (optional)",
+    "المشروعات (اختياري)": "Projects (optional)",
+    "نوع الأعمال (اختياري)": "Work type (optional)",
+    "رقم المستخلص (اختياري)": "Certificate No. (optional)",
+    "أعمال ودفعات المقاولين": "Contractor Works and Payments",
+    "إدخال المستخلصات والأعمال والدفعات الخاصة بالمقاولين من هذا القسم فقط.": "Enter contractor certificates, works, and payments only from this section.",
+    "إدخال مستخلص / أعمال مقاول": "Enter Contractor Certificate / Work",
+    "الشروط والأحكام العربية — الأفراد": "Arabic — Individuals Terms",
+    "الشروط والأحكام العربية — الشركات": "Arabic — Companies Terms",
+    "الشروط والأحكام الإنجليزية — الأفراد": "English — Individuals Terms",
+    "الشروط والأحكام الإنجليزية — الشركات": "English — Companies Terms",
+    "Report branding": "Report branding",
+    "Save branding": "Save branding",
+    "Drop logo image": "Drop logo image",
+    "حفظ": "Save",
+    "إلغاء": "Cancel",
+    "حذف": "Delete",
+    "إغلاق": "Close",
+    "خروج": "Logout",
+    "تحديث": "Refresh",
+    "متصل": "Connected",
+    "غير متصل": "Disconnected",
+    "بند جاهز": "ready item",
+    "بنود المستند": "Document items",
+    "بيانات ثابتة للمستند": "Fixed Document Data",
+    "نوع المستند": "Document Type",
+    "عرض سعر": "Quotation",
+    "فاتورة": "Invoice",
+    "مستخلص مقاول": "Contractor Certificate",
+    "الطرف": "Party",
+    "تصنيف العميل": "Customer Classification",
+    "نوع الأعمال": "Work Type",
+    "اسم العميل/المقاول بدون م. أو شركة": "Customer/contractor name without prefix",
+    "المشروع": "Project",
+    "التاريخ": "Date",
+    "رقم المستند": "Document No.",
+    "الرقم التسلسلي": "Serial No.",
+    "الضرائب والتأمينات": "Taxes and Insurance",
+    "ضريبة القيمة المضافة 14%": "VAT 14%",
+    "تأمينات اجتماعية 3.6%": "Social Insurance 3.6%",
+    "دمغة هندسية 0.001": "Engineering Stamp 0.001",
+    "تأمينات أعمال 5%": "Works Insurance 5%",
+    "تأمين أعمال نهائي 5%": "Final Works Insurance 5%",
+    "ضريبة 1%": "Tax 1%",
+    "القيد": "Entries",
+    "المستند": "Documents",
+    "عميل/مقاول": "Customers / Contractors",
+    "إجمالي عروض الأسعار": "Total Quotations",
+    "إجمالي الفواتير (التحصيل)": "Total Invoices (Collection)",
+    "إجمالي المقاولين (الخصوم)": "Total Contractors (Liabilities)",
+    "المبنى/الوحدة": "Building/Unit",
+    "عدد القيود": "Entry count",
+    "الأمتار المربعة": "Square meters",
+    "متوسط الفئة": "Average rate",
+    "ضريبة 14%": "VAT 14%",
+    "تأمينات اجتماعية": "Social insurance",
+    "دمغة": "Stamp",
+    "تأمين أعمال": "Works insurance",
+    "تأمين نهائي": "Final insurance",
+    "ضريبة مقاولات": "Contractor tax",
+    "حالة المستندات": "Document Status",
+    "النوع": "Type",
+    "العدد": "Count",
+    "تحديث Manager": "Update Manager",
+    "تشغيل الاستضافة": "Start Hosting",
+    "نسخة احتياطية": "Backup",
+    "تفاصيل عملية الخادم": "Server process details",
+    "لا توجد رسائل من عملية الخادم بعد.": "No server process messages yet.",
+    "المظهر": "Appearance",
+    "النظام": "System",
+    "فاتح": "Light",
+    "الإشتراك والدفع": "Subscription and Payment",
+    "اشتراك متجدد": "Recurring Subscription",
+    "دفع مرة واحدة": "One-time Payment",
+    "شهري": "Monthly",
+    "سنوي": "Yearly",
+    "مستخدم": "User",
+    "مستخدمون": "Users",
+    "نشط": "Active",
+    "موقوف": "Inactive",
+    "يحتاج مراجعة": "Needs Review",
+    "الحالة:": "Status:",
+    "مدفوع حتى": "Paid through",
+    "لن يتم التجديد بعد نهاية الفترة": "Will not renew after the current period",
+    "دفعة مسجلة في المدير": "manager payment",
+    "دفعات مسجلة في المدير": "manager payments",
+    "إلغاء التجديد": "Cancel Renewal",
+    "لا توجد خطط اشتراك جاهزة من المدير الآن.": "No subscription plans are ready from the manager yet.",
+    "المستخدمون": "Users",
+    "كلمة المرور الحالية": "Current Password",
+    "كلمة المرور الجديدة": "New Password",
+    "تغيير كلمتي": "Change My Password",
+    "اسم الدخول": "Login Name",
+    "الاسم في التقارير": "Report Name",
+    "اسم التقرير": "Report Name",
+    "كلمة المرور": "Password",
+    "الدور": "Role",
+    "مدير": "Admin",
+    "إضافة مستخدم": "Add User",
+    "آخر ظهور": "Last Seen",
+    "وقت العمل": "Work Time",
+    "فواتير": "Invoices",
+    "حالة المستند": "Document Status",
+    "الشروط": "Terms",
+    "إعدادات الشركة": "Company Settings",
+    "استايلات الجداول": "Table Styles",
+    "كلمة مرور جديدة": "New Password",
+    "إنشاء فواتير معتمدة": "Create Approved Invoices",
+    "تسجيل دفعات": "Record Payments",
+    "تغيير حالة المستند": "Change Document Status",
+    "تعديل الشروط والأحكام": "Edit Terms and Conditions",
+    "تعديل إعدادات الشركة": "Edit Company Settings",
+    "تعديل استايلات الجداول": "Edit Table Styles",
+    "السماح بإنشاء فواتير معتمدة": "Allow creating approved invoices",
+    "السماح بتسجيل دفعات": "Allow recording payments",
+    "السماح بتغيير حالة المستند": "Allow changing document status",
+    "السماح بتعديل الشروط والأحكام": "Allow editing terms and conditions",
+    "السماح بتعديل بيانات الشركة وإعداداتها": "Allow editing company data and settings",
+    "السماح بتعديل ألوان وخطوط الجداول والتقارير": "Allow editing table and report colors/fonts",
+    "نعم": "Yes",
+    "إيقاف": "Disable",
+    "إدارة المستخدمين للمدير فقط": "User management is available for managers only.",
+    "اتركه فارغاً لاختيار المجلد عند كل حفظ": "Leave empty to choose a folder each time",
+    "اختيار": "Browse",
+    "استخدام نافذة الحفظ": "Use Save Dialog",
+    "داكن": "Dark",
+    "ذهبي": "Gold",
+    "كلمة مرور الإدارة": "Admin Password",
+    "تم فتح أدوات الإدارة": "Admin tools unlocked",
+    "أدوات الإدارة مقفلة": "Admin tools locked",
+    "إعادة التشغيل والتثبيت": "Restart and Install",
+    "تنزيل التحديث": "Download Update",
+    "حفظ المسارات": "Save paths",
+    "ترحيل قاعدة البيانات": "Migrate DB",
+    "تم حفظ إعدادات تشغيل التطبيق.": "App startup settings saved.",
+    "تم تحديث حالة السيرفر.": "Server status refreshed.",
+    "رابط السيرفر": "Server URL",
+    "مجلد البيانات": "Data folder",
+    "ملف قاعدة البيانات": "Database file",
+    "الترحيل من قاعدة بيانات قديمة": "Migrate from old database",
+    "الترحيل إلى قاعدة بيانات جديدة": "Migrate to new database",
+    "رابط قاعدة البيانات البعيدة": "Remote database URL",
+    "مزود قاعدة البيانات": "Database provider",
+    "استعراض": "Browse",
+    "حساب الشركة": "Company account",
+    "حذف حساب الشركة": "Delete company account",
+    "حذف الحساب": "Delete account",
+    "ينشئ أرشيفاً لقاعدة البيانات، ثم يحذف المستخدمين والدردشة والمستندات والدفعات وحالة الاشتراك المحفوظة محلياً من هذا التطبيق.": "Creates a database archive, then removes locally saved users, chat, documents, payments, and subscription state from this app.",
+    "إدخال مستند جديد": "New Document Entry",
+    "تعديل مستند": "Edit Document",
+    "اختيار من البيانات السابقة": "Choose from previous data",
+    "بدون تصنيف": "Unclassified",
+    "فرد": "Individual",
+    "مهندس": "Engineer",
+    "شركة": "Company",
+    "عميل": "Customer",
+    "مقاول": "Contractor",
+    "الأسعار تشمل ضريبة 14% في الشروط فقط (بدون احتساب)": "Prices mention 14% VAT in terms only (no calculation)",
+    "العميل مصدر الأعمال": "Source Customer",
+    "أنواع الأعمال داخل المستخلص": "Work Types in Certificate",
+    "اختر أنواع الأعمال": "Choose work types",
+    "أنواع أعمال": "Work types",
+    "مسح الاختيار": "Clear selection",
+    "رقم المستخلص": "Certificate No.",
+    "نسبة": "Percentage",
+    "مبلغ": "Amount",
+    "من": "From",
+    "إلى": "To",
+    "المدفوع من العملاء": "Paid by customers",
+    "إجمالي الفواتير المعتمدة المطلوب سدادها": "Approved invoices to be paid",
+    "إجمالي المدفوع من العملاء": "Total paid by customers",
+    "المطلوب سداده - الفواتير المعتمدة": "Must be paid - approved invoices",
+    "إجمالي غير المدفوع الحقيقي": "Real unpaid total",
+    "المتأخر غير المدفوع": "Overdue unpaid",
+    "إجمالي الفواتير": "Total invoices",
+    "مدفوع مدى الحياة": "Lifetime paid",
+    "مدفوع السنة": "Year paid",
+    "مدفوع الشهر": "Month paid",
+    "المدفوع مقابل إجمالي الفواتير المعتمدة": "Paid vs approved invoices",
+    "الفواتير حسب الشهر": "Invoices by month",
+    "المدفوعات حسب الشهر": "Payments by month",
+    "اتجاه التحصيل النقدي": "Cash collection trend",
+    "أعمار الديون": "Invoice aging",
+    "غير المدفوع حسب العميل": "Unpaid by customer",
+    "المدفوع حسب العميل": "Paid by customer",
+    "تصدير PDF": "Export PDF",
+    "ملخص الفترة": "Range summary",
+    "ملخص الكميات": "Quantity summary",
+    "تحليل المدفوع والمطلوب": "Paid and due analysis",
+    "مغطى من الفواتير المعتمدة": "covered from approved invoices",
+    "بنود الفواتير المعتمدة": "Approved invoice rows",
+    "عدد القطع": "Piece count",
+    "الكمية": "Quantity",
+    "الدخل": "Income",
+    "غير المدفوع": "Unpaid",
+    "المصدر": "Source",
+    "السنة": "Year",
+    "الشهر": "Month",
+    "لا توجد أنواع أعمال في الفترة": "No work types in this period",
+    "كل أنواع الأعمال في الفترة": "All work types in this period",
+    "أنواع أعمال محددة": "Selected work types",
+    "عرض كل الأنواع": "Show all types",
+    "لا توجد كميات منتجة في هذا الاختيار": "No produced quantities for this selection",
+    "وحدة الكمية": "Quantity Unit",
+    "نسبة العمل": "Work %",
+    "الكمية المنتجة": "Produced Quantity",
+    "بند": "item",
+    "بند جاهز للحفظ": "ready item to save",
+    "المبنى / الوحدة": "Building / Unit",
+    "بيان الأعمال": "Work Description",
+    "قيمة الدفعة": "Payment Amount",
+    "ملاحظة": "Note",
+    "مراجعة الدفعات": "Payments Review",
+    "اختيار الطرف": "Choose Party",
+    "كل الدفعات": "All Payments",
+    "تحصيل": "Collection",
+    "خصم": "Deduction",
+    "حفظ الدفعة": "Save Payment",
+    "حفظ التعديل": "Save Changes",
+    "إلغاء التعديل": "Cancel Edit",
+    "لا توجد دفعات لهذا الاختيار": "No payments for this selection",
+    "إدارة المقاولين": "Contractors Management",
+    "بحث بالاسم أو ID": "Search by name or ID",
+    "اسم المقاول": "Contractor Name",
+    "الاسم الظاهر": "Display Name",
+    "الهاتف": "Phone",
+    "البريد الإلكتروني": "Email",
+    "البريد": "Email",
+    "العنوان": "Address",
+    "الرقم الضريبي": "Tax No.",
+    "ملاحظات": "Notes",
+    "إضافة المقاول": "Add Contractor",
+    "حذف سجل المقاول": "Delete Contractor Record",
+    "حذف المقاول": "Delete Contractor",
+    "رجوع إلى الجذر": "Back to root",
+    "إضافة صف فارغ بالأعلى": "Insert empty row above",
+    "إضافة صف فارغ بالأسفل": "Insert empty row below",
+    "حذف هذا الصف": "Delete this row",
+    "لصق": "Paste",
+    "نسخ المحتوى": "Copy content",
+    "مسح الخلية": "Clear cell",
+    "بحث في الجدول": "Search Table",
+    "بحث واستبدال في الجدول": "Search and replace in table",
+    "إغلاق البحث": "Close search",
+    "اكتب النص أو الرقم المطلوب...": "Type the required text or number...",
+    "استبدال بـ:": "Replace with:",
+    "استبدال الكل": "Replace All",
+    "السابق": "Previous",
+    "التالي": "Next",
+    "انتقال": "Go",
+    "صف": "Row",
+    "نتيجة": "result",
+    "نسخ للأسفل": "Copy down",
+    "تحديد ↑": "Select ↑",
+    "تحديد ↓": "Select ↓",
+    "ترتيب من الأصغر إلى الأكبر": "Sort smallest to largest",
+    "ترتيب من الأكبر إلى الأصغر": "Sort largest to smallest",
+    "ترتيب من أ إلى ي": "Sort A to Z",
+    "ترتيب من ي إلى أ": "Sort Z to A",
+    "مسح الترتيب": "Clear sort",
+    "بحث في القيم...": "Search values...",
+    "تحديد الكل": "Select all",
+    "القيم الفارغة": "Blank values",
+    "مسح عامل التصفية": "Clear filter",
+    "تغيير حجم القائمة": "Resize menu",
+    "مسح جميع عوامل التصفية": "Clear all filters",
+    "مسح جميع الترتيبات": "Clear all sorts",
+    "إعادة ضبط العرض": "Reset view",
+    "صف ظاهر من": "visible rows of",
+    "مبنى": "Building",
+    "وحدة": "Unit",
+    "بيان": "Description",
+    "زجاج": "Glass",
+    "قطاع": "Profile",
+    "لون": "Color",
+    "عدد": "Count",
+    "عرض سم": "Width cm",
+    "ارتفاع سم": "Height cm",
+    "الوحدة": "Unit",
+    "كمية مباشرة": "Direct Quantity",
+    "فئة": "Rate",
+    "نسبة العمل %": "Work %",
+    "ثابت": "Fixed",
+    "قياس": "Measure",
+    "قياسي": "Standard",
+    "هندسي": "Engineering",
+    "نسخ": "Copy",
+    "حفظ ومعاينة": "Save and Preview",
+    "اعتماد وحفظ": "Approve and Save",
+    "مسح النموذج": "Clear Form",
+    "معاينة قبل الحفظ": "Preview Before Saving",
+    "العودة للتعديل": "Back to Edit",
+    "إغلاق والرجوع": "Close and return",
+    "لصق بيانات الحافظة في النطاق المحدد": "Paste clipboard data into the selected range",
+    "تصغير جدول البنود": "Shrink items table",
+    "توسيع جدول البنود لملء الشاشة": "Expand items table to full screen",
+    "اختصار": "Shortcut",
+  },
+};
+
+function uiText(value, language = "ar") {
+  const key = String(value ?? "").replace(/\s+/g, " ").trim();
+  return language === "en" ? UI_TRANSLATIONS.en[key] || value : value;
+}
+
+function normalizeReportLanguage(value, fallback = "ar") {
+  if (value === "en") return "en";
+  if (value === "ar") return "ar";
+  return fallback === "en" ? "en" : "ar";
+}
+
+function reportLanguageStorageKey(workflowId = "default") {
+  return `easyCommercialReportLanguage.${workflowId || "default"}`;
+}
+
+function storedReportLanguageFor(workflowId, fallback = "ar") {
+  try {
+    return normalizeReportLanguage(
+      localStorage.getItem(reportLanguageStorageKey(workflowId)),
+      fallback,
+    );
+  } catch {
+    return normalizeReportLanguage(fallback);
+  }
+}
+
+function saveStoredReportLanguage(workflowId, language) {
+  try {
+    localStorage.setItem(
+      reportLanguageStorageKey(workflowId),
+      normalizeReportLanguage(language),
+    );
+  } catch {
+    // Ignore storage failures; the in-memory selection still works.
+  }
+}
+
+function applyUiTranslations(root, language = "ar") {
+  if (!root) return;
+  const originals = applyUiTranslations.originals || (applyUiTranslations.originals = new WeakMap());
+  const attrOriginals = applyUiTranslations.attrOriginals || (applyUiTranslations.attrOriginals = new WeakMap());
+  const shouldSkip = (node) => {
+    const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    return !!element?.closest?.(".document-preview, .smart-entry-table, .smart-table-scroll, iframe, script, style, textarea");
+  };
+  const translateString = (value) => {
+    const clean = String(value ?? "").replace(/\s+/g, " ").trim();
+    if (language !== "en") return null;
+    const fixed = UI_TRANSLATIONS.en[clean];
+    if (fixed) return fixed;
+    const userCountMatch = clean.match(/^(\d+(?:[.,]\d+)?)\s+مستخدم$/);
+    if (userCountMatch) return `${userCountMatch[1]} users`;
+    const paidThroughMatch = clean.match(/^مدفوع حتى\s+(.+)$/);
+    if (paidThroughMatch) return `Paid through ${paidThroughMatch[1]}`;
+    const statusMatch = clean.match(/^الحالة:\s*(.+)$/);
+    if (statusMatch) {
+      const status = UI_TRANSLATIONS.en[statusMatch[1]] || statusMatch[1];
+      return `Status: ${status}`;
+    }
+    const managerPaymentMatch = clean.match(/^(\d+)\s+دفعة مسجلة في المدير$/);
+    if (managerPaymentMatch) {
+      const count = Number(managerPaymentMatch[1]);
+      return `${managerPaymentMatch[1]} manager payment${count === 1 ? "" : "s"}`;
+    }
+    const readyItemMatch = clean.match(/^(\d+(?:[.,]\d+)?)\s+بند(?:\s+جاهز(?:\s+للحفظ)?)?$/);
+    if (readyItemMatch) {
+      const count = Number(String(readyItemMatch[1]).replace(",", "."));
+      return `${readyItemMatch[1]} ready item${count === 1 ? "" : "s"}`;
+    }
+    const visibleRowsMatch = clean.match(/^(\d+)\s+صف ظاهر من\s+(\d+)$/);
+    if (visibleRowsMatch) return `${visibleRowsMatch[1]} visible rows of ${visibleRowsMatch[2]}`;
+    const searchResultMatch = clean.match(/^(\d+)\s+نتيجة$/);
+    if (searchResultMatch) {
+      const count = Number(searchResultMatch[1]);
+      return `${searchResultMatch[1]} result${count === 1 ? "" : "s"}`;
+    }
+    const searchPositionMatch = clean.match(/^(\d+)\s+من\s+(\d+)$/);
+    if (searchPositionMatch) return `${searchPositionMatch[1]} of ${searchPositionMatch[2]}`;
+    const countPrefixMatch = clean.match(/^عدد:\s*(.+)$/);
+    if (countPrefixMatch) return `Count: ${countPrefixMatch[1]}`;
+    const lastCertificateMatch = clean.match(/^آخر مستخلص لهذا المقاول والمشروع:\s*(.+?)\s+—\s+التالي:\s*(.+)$/);
+    if (lastCertificateMatch) return `Last certificate for this contractor/project: ${lastCertificateMatch[1]} — Next: ${lastCertificateMatch[2]}`;
+    const downloadingUpdateMatch = clean.match(/^جارٍ التنزيل\s+(\d+)%$/);
+    if (downloadingUpdateMatch) return `Downloading ${downloadingUpdateMatch[1]}%`;
+    const backupMatch = clean.match(/^تم إنشاء نسخة احتياطية:\s*(.+)$/);
+    if (backupMatch) return `Backup created: ${backupMatch[1]}`;
+    const reportFolderMatch = clean.match(/^تم تعيين مجلد حفظ التقارير:\s*(.+)$/);
+    if (reportFolderMatch) return `Report save folder set: ${reportFolderMatch[1]}`;
+    return null;
+  };
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue?.trim() || shouldSkip(node)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  for (const node of textNodes) {
+    if (!originals.has(node)) originals.set(node, node.nodeValue);
+    const original = originals.get(node);
+    const translated = translateString(original);
+    const nextValue = language === "en" && translated
+      ? original.replace(original.trim(), translated)
+      : original;
+    if (node.nodeValue !== nextValue) node.nodeValue = nextValue;
+  }
+  const attributeNames = ["title", "aria-label", "placeholder"];
+  root.querySelectorAll?.("[title], [aria-label], [placeholder]").forEach((element) => {
+    if (shouldSkip(element)) return;
+    let stored = attrOriginals.get(element);
+    if (!stored) {
+      stored = {};
+      attrOriginals.set(element, stored);
+    }
+    for (const attr of attributeNames) {
+      if (!element.hasAttribute(attr)) continue;
+      if (!Object.prototype.hasOwnProperty.call(stored, attr)) stored[attr] = element.getAttribute(attr);
+      const translated = translateString(stored[attr]);
+      const nextValue = language === "en" && translated ? translated : stored[attr];
+      if (element.getAttribute(attr) !== nextValue) element.setAttribute(attr, nextValue);
+    }
+  });
+}
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -117,7 +610,7 @@ class AppErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    console.error("Accounting Management render error", error, info);
+    console.error(`${APP_NAME} render error`, error, info);
   }
 
   render() {
@@ -310,6 +803,7 @@ const DEFAULT_ENTRY = {
   work_types: [],
   document_type: "price_offer",
   document_status: "draft",
+  report_language: "ar",
   entry_date: new Date().toISOString().slice(0, 10),
   building_unit: "",
   floor_apartment: "",
@@ -485,6 +979,17 @@ function statementOf(row) {
     row.collection_note ||
     ""
   );
+}
+
+function localizedStatementDescription(value, locale = "ar") {
+  const textValue = String(value || "");
+  if (locale !== "en") return textValue;
+  return textValue
+    .replace(/^تحصيل\s*-\s*/u, "Payment - ")
+    .replace(/^فاتورة\s*-\s*/u, "Invoice - ")
+    .replace(/^عرض سعر\s*-\s*/u, "Quotation - ")
+    .replace(/^مستخلص مقاول\s*-\s*/u, "Contractor Certificate - ")
+    .replace(/^قيد حساب\s*-\s*/u, "Ledger Entry - ");
 }
 
 function normalizeClientUnitCode(value) {
@@ -1185,7 +1690,7 @@ async function probeApiBase(candidate) {
     });
     if (!response.ok) return "";
     const data = await response.json();
-    return data?.app === APP_NAME ? clean : "";
+    return LEGACY_APP_NAMES.includes(data?.app) ? clean : "";
   } catch {
     return "";
   } finally {
@@ -1328,7 +1833,7 @@ async function shareNativeReport(blob, fileName) {
   const { Share } = await import("@capacitor/share");
   const uri = await saveNativeReport(blob, fileName, {
     directory: Directory.Cache,
-    folder: "Accounting Management Share",
+    folder: `${APP_NAME} Share`,
   });
   try {
     await Share.share({
@@ -1454,7 +1959,7 @@ function TermsGate({ onAccept }) {
         <div className="manager-brand">
           <AppBrandMark small />
           <div>
-            <strong>Accounting Management</strong>
+            <strong>{APP_NAME}</strong>
             <span>Service terms and cookie notice</span>
           </div>
         </div>
@@ -1520,7 +2025,7 @@ function SubscriptionGateModal({ state, onClose, onSubscribe }) {
                 ? "Payment grace period"
                 : "App access is paused"}
         </h2>
-        <p>{state.message || "Subscribe to continue using Accounting Management."}</p>
+        <p>{state.message || `Subscribe to continue using ${APP_NAME}.`}</p>
         {dateText && <strong>{String(dateText).slice(0, 10)}</strong>}
         <button type="button" className="primary" onClick={onSubscribe}>
           <WalletCards size={18} /> Open subscription settings
@@ -1546,7 +2051,7 @@ function SubscriptionBlockedNotice({ state, onPay }) {
       <h2>Pay to continue using the app benefits</h2>
       <p>
         {state?.message ||
-          "Payment is required before Accounting Management can be used again."}
+          `Payment is required before ${APP_NAME} can be used again.`}
       </p>
       {expiredAt && <strong>Expired: {String(expiredAt).slice(0, 10)}</strong>}
       <button type="button" className="primary" onClick={onPay}>
@@ -1574,6 +2079,7 @@ function mapRowToForm(row) {
     unit_code: row.unit_code || "sqm",
     measurement_mode: row.measurement_mode || "standard",
     document_status: row.document_status || "draft",
+    report_language: row.report_language === "en" ? "en" : "ar",
   };
 }
 
@@ -1583,8 +2089,16 @@ function App() {
   const [themeMode, setThemeMode] = useState(
     localStorage.getItem("priceOfferTheme") || "system",
   );
+  const [uiLanguage, setUiLanguage] = useState(
+    () => localStorage.getItem("easyCommercialUiLanguage") || "ar",
+  );
+  const [defaultReportLanguage, setDefaultReportLanguage] = useState(
+    () => localStorage.getItem("easyCommercialDefaultReportLanguage") || "ar",
+  );
   const [resolvedDark, setResolvedDark] = useState(false);
-  const [activeTab, setActiveTab] = useState(INITIAL_ACTIVE_TAB);
+  const [activeTab, setActiveTab] = useState(
+    () => localStorage.getItem("easyCommercialActiveTab") || INITIAL_ACTIVE_TAB,
+  );
   const [health, setHealth] = useState(null);
   const [bootstrap, setBootstrap] = useState(null);
   const [lookups, setLookups] = useState({
@@ -1597,10 +2111,16 @@ function App() {
   const [terms, setTerms] = useState({
     terms_retail: { sections: [] },
     terms_corporate: { sections: [] },
+    terms_retail_en: { sections: [] },
+    terms_corporate_en: { sections: [] },
   });
   const [reportBranding, setReportBranding] = useState(null);
   const [subscriptionPlans, setSubscriptionPlans] = useState([]);
-  const [entryForm, setEntryForm] = useState(() => variantEntryDefaults());
+  const [entryForm, setEntryForm] = useState(() =>
+    variantEntryDefaults({
+      report_language: defaultReportLanguage === "en" ? "en" : "ar",
+    }),
+  );
   const [editingId, setEditingId] = useState(null);
   const [entryDirty, setEntryDirty] = useState(false);
   const [editorContext, setEditorContext] = useState(null);
@@ -1612,6 +2132,42 @@ function App() {
   const closeNotice = useCallback((id) => {
     setNotices((current) => current.filter((notice) => notice.id !== id));
   }, []);
+
+  useEffect(() => {
+    const nextLanguage = uiLanguage === "en" ? "en" : "ar";
+    document.documentElement.lang = nextLanguage;
+    document.documentElement.dir = nextLanguage === "en" ? "ltr" : "rtl";
+    localStorage.setItem("easyCommercialUiLanguage", nextLanguage);
+  }, [uiLanguage]);
+
+  useEffect(() => {
+    const root = document.getElementById("root");
+    if (!root) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      applyUiTranslations(root, uiLanguage === "en" ? "en" : "ar");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [uiLanguage, activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "easyCommercialDefaultReportLanguage",
+      defaultReportLanguage === "en" ? "en" : "ar",
+    );
+  }, [defaultReportLanguage]);
+
+  useEffect(() => {
+    if (activeTab) localStorage.setItem("easyCommercialActiveTab", activeTab);
+  }, [activeTab]);
+
+  const newEntryDefaults = useCallback(
+    (patch = {}) =>
+      variantEntryDefaults({
+        report_language: defaultReportLanguage === "en" ? "en" : "ar",
+        ...patch,
+      }),
+    [defaultReportLanguage],
+  );
 
   const setMessage = useCallback((value, options = {}) => {
     if (!value) {
@@ -1664,9 +2220,12 @@ function App() {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [currentUser, setCurrentUser] = useState(() => {
     try {
-      localStorage.removeItem("priceOfferUser");
       return userWithFreshSession(
-        JSON.parse(sessionStorage.getItem("priceOfferUser") || "null"),
+        JSON.parse(
+          sessionStorage.getItem("priceOfferUser") ||
+            localStorage.getItem("priceOfferUser") ||
+            "null",
+        ),
       );
     } catch {
       return null;
@@ -1746,6 +2305,7 @@ function App() {
   useEffect(() => {
     if (!currentUser) return;
     sessionStorage.setItem("priceOfferUser", JSON.stringify(currentUser));
+    localStorage.setItem("priceOfferUser", JSON.stringify(currentUser));
   }, [currentUser]);
 
   useEffect(() => {
@@ -2092,7 +2652,7 @@ function App() {
         setUpdateInfo(normalized);
         if (!silent && !normalized.updateAvailable) {
           setMessage(
-            `Accounting Management is up to date (${normalized.currentVersion}).`,
+            `${APP_NAME} is up to date (${normalized.currentVersion}).`,
           );
         }
         return normalized;
@@ -2136,6 +2696,8 @@ function App() {
         api.request("/api/settings/terms").catch(() => ({
           terms_retail: { sections: [] },
           terms_corporate: { sections: [] },
+          terms_retail_en: { sections: [] },
+          terms_corporate_en: { sections: [] },
         })),
         api.request("/api/settings/report-branding").catch(() => null),
         api.request("/api/subscription/plans").catch(() => ({ plans: [] })),
@@ -2176,6 +2738,8 @@ function App() {
       setTerms({
         terms_retail: { sections: [] },
         terms_corporate: { sections: [] },
+        terms_retail_en: { sections: [] },
+        terms_corporate_en: { sections: [] },
         ...(termsData || {}),
       });
       setReportBranding(brandingData);
@@ -2346,7 +2910,7 @@ function App() {
         Math.floor((now.getTime() - new Date(sessionStartedAt).getTime()) / 1000),
       );
       return {
-        summary: "Accounting Management presence",
+        summary: `${APP_NAME} presence`,
         app: {
           name: APP_NAME,
           version: APP_VERSION,
@@ -2583,6 +3147,7 @@ function App() {
         });
       }
       sessionStorage.setItem("priceOfferUser", JSON.stringify(user));
+      localStorage.setItem("priceOfferUser", JSON.stringify(user));
       localStorage.setItem("priceOfferLastUsername", credentials.username || "");
       if (credentials.company_name) {
         localStorage.setItem("priceOfferLastCompany", credentials.company_name || "");
@@ -2648,7 +3213,7 @@ function App() {
         method: "POST",
         body: JSON.stringify({
           user_id: currentUser.id,
-          summary: "Accounting Management logout",
+          summary: `${APP_NAME} logout`,
           session_started_at: sessionStartedAt,
           session_ended_at: now.toISOString(),
         }),
@@ -3324,7 +3889,7 @@ function App() {
           updated_by: currentUser?.display_name,
         }),
       });
-      setEntryForm(variantEntryDefaults());
+      setEntryForm(newEntryDefaults());
       setEditingId(null);
       setEntryDirty(false);
       setMessage(editingId ? "تم تعديل البند." : "تم حفظ البند.");
@@ -3430,6 +3995,7 @@ function App() {
       document_id: document?.id || "",
       document_type: type,
       document_status: document?.status || meta.status,
+      report_language: document?.report_language === "en" ? "en" : "ar",
       serial: document?.document_no || "",
       operation_no: document?.operation_no || "",
       project: document?.project || "",
@@ -3503,11 +4069,11 @@ function App() {
     return (
       <>
         {showSplash && <SplashScreen />}
-        <main className="shell subscription-lock-shell" dir="rtl">
+        <main className="shell subscription-lock-shell" dir={uiLanguage === "en" ? "ltr" : "rtl"}>
           <section className="workspace subscription-lock-workspace">
             <header className="topbar">
               <div className="title-stack">
-                <h1>الإشتراك والدفع</h1>
+                <h1>{uiText("الإشتراك والدفع", uiLanguage)}</h1>
                 <span>Local server</span>
               </div>
               <img className="top-logo" src={companyHeaderLogo} alt={APP_NAME} />
@@ -3565,6 +4131,10 @@ function App() {
               setApiBase={setApiBase}
               themeMode={themeMode}
               setThemeMode={setThemeMode}
+              uiLanguage={uiLanguage}
+              setUiLanguage={setUiLanguage}
+              defaultReportLanguage={defaultReportLanguage}
+              setDefaultReportLanguage={setDefaultReportLanguage}
               health={health}
               bootstrap={bootstrap}
               terms={terms}
@@ -3589,10 +4159,24 @@ function App() {
     );
   }
 
+  const uiDir = uiLanguage === "en" ? "ltr" : "rtl";
+  const activeNavLabel = (
+    NAV_ITEMS.find((tab) => tab.id === activeTab) ||
+    NAV.find((tab) => tab.id === activeTab)
+  )?.label;
+  const localizedActiveNavLabel = uiText(activeNavLabel, uiLanguage);
+  const activeServerAddress = cleanApiBase(
+    health?.serverUrl ||
+      health?.localUrl ||
+      window.priceOfferDesktop?.apiBase ||
+      apiBase ||
+      DEFAULT_API_BASE,
+  );
+
   return (
     <>
       {showSplash && <SplashScreen />}
-      <main className="shell" dir="rtl">
+      <main className="shell" dir={uiDir}>
         <aside className="sidebar">
           <div className="brand">
             <AppBrandMark small />
@@ -3609,7 +4193,7 @@ function App() {
                 onClick={() => requestTabChange(id)}
               >
                 <Icon size={18} />
-                <span>{label}</span>
+                <span>{uiText(label, uiLanguage)}</span>
               </button>
             ))}
           </nav>
@@ -3618,8 +4202,15 @@ function App() {
         <section className="workspace">
           <header className="topbar">
             <div className="title-stack">
-              <h1>{(NAV_ITEMS.find((tab) => tab.id === activeTab) || NAV.find((tab) => tab.id === activeTab))?.label}</h1>
-              <span>{health?.ok ? "Local server" : APP_MARK}</span>
+              <h1>{localizedActiveNavLabel}</h1>
+              <button
+                type="button"
+                className="server-address-chip"
+                title={activeServerAddress}
+                onClick={() => copyTextToClipboard(activeServerAddress)}
+              >
+                {activeServerAddress}
+              </button>
             </div>
             <img className="top-logo" src={companyHeaderLogo} alt={APP_NAME} />
             <div className="top-actions">
@@ -3713,17 +4304,17 @@ function App() {
               </button>
               <button
                 className="icon-button"
-                title="تحديث"
+                title={uiText("تحديث", uiLanguage)}
                 onClick={refreshAll}
                 disabled={busy}
               >
                 <RefreshCw size={18} />
               </button>
-              <button className="icon-button" title="خروج" onClick={logout}>
+              <button className="icon-button" title={uiText("خروج", uiLanguage)} onClick={logout}>
                 <LogOut size={18} />
               </button>
               <span className={health?.ok ? "status ok" : "status bad"}>
-                {health?.ok ? "متصل" : "غير متصل"}
+                {health?.ok ? uiText("متصل", uiLanguage) : uiText("غير متصل", uiLanguage)}
               </span>
             </div>
           </header>
@@ -3762,6 +4353,8 @@ function App() {
               onNewRow={newRowFromContext}
               context={reportContexts.dashboard}
               setContext={(patch) => updateReportContext("dashboard", patch)}
+              defaultReportLanguage={defaultReportLanguage}
+              uiLanguage={uiLanguage}
             />
           )}
           {activeTab === "offer" && (
@@ -3781,6 +4374,8 @@ function App() {
               onNewRow={newRowFromContext}
               context={reportContexts.offer}
               setContext={(patch) => updateReportContext("offer", patch)}
+              defaultReportLanguage={defaultReportLanguage}
+              uiLanguage={uiLanguage}
             />
           )}
           {activeTab === "invoice" && (
@@ -3800,6 +4395,8 @@ function App() {
               onNewRow={newRowFromContext}
               context={reportContexts.invoice}
               setContext={(patch) => updateReportContext("invoice", patch)}
+              defaultReportLanguage={defaultReportLanguage}
+              uiLanguage={uiLanguage}
             />
           )}
           {activeTab === "statement" && (
@@ -3819,6 +4416,8 @@ function App() {
               onNewRow={newRowFromContext}
               context={reportContexts.statement}
               setContext={(patch) => updateReportContext("statement", patch)}
+              defaultReportLanguage={defaultReportLanguage}
+              uiLanguage={uiLanguage}
             />
           )}
           {activeTab === "contractor" && (
@@ -3828,18 +4427,19 @@ function App() {
                 currentUser={currentUser}
                 setMessage={setMessage}
                 refreshKey={refreshKey}
+                uiLanguage={uiLanguage}
               />
               <section className="panel contractor-entry-launcher">
                 <div>
-                  <h2>أعمال ودفعات المقاولين</h2>
-                  <p>إدخال المستخلصات والأعمال والدفعات الخاصة بالمقاولين من هذا القسم فقط.</p>
+                  <h2>{uiText("أعمال ودفعات المقاولين", uiLanguage)}</h2>
+                  <p>{uiText("إدخال المستخلصات والأعمال والدفعات الخاصة بالمقاولين من هذا القسم فقط.", uiLanguage)}</p>
                 </div>
                 <button
                   type="button"
                   className="primary"
                   onClick={() => newRowFromContext(WORKFLOWS.contractor, null, null)}
                 >
-                  <Plus size={17} /> إدخال مستخلص / أعمال مقاول
+                  <Plus size={17} /> {uiText("إدخال مستخلص / أعمال مقاول", uiLanguage)}
                 </button>
               </section>
               {editorContext?.workflowId === "contractor" && (
@@ -3860,10 +4460,12 @@ function App() {
                     setEditorContext(null);
                     setEditingId(null);
                     setEntryDirty(false);
-                    setEntryForm(variantEntryDefaults());
+                    setEntryForm(newEntryDefaults());
                     setActiveTab("contractor");
                   }}
                   onBack={() => setActiveTab("contractor")}
+                  defaultReportLanguage={defaultReportLanguage}
+                  uiLanguage={uiLanguage}
                   busy={busy}
                   currentUser={currentUser}
                   refreshAll={refreshLocalData}
@@ -3887,6 +4489,8 @@ function App() {
                 onNewRow={newRowFromContext}
                 context={reportContexts.contractor}
                 setContext={(patch) => updateReportContext("contractor", patch)}
+                defaultReportLanguage={defaultReportLanguage}
+                uiLanguage={uiLanguage}
               />
               <PaymentsView
                 api={api}
@@ -3896,6 +4500,7 @@ function App() {
                 setMessage={setMessage}
                 refreshAll={refreshLocalData}
                 partyRole="contractor"
+                uiLanguage={uiLanguage}
               />
             </div>
           )}
@@ -3905,6 +4510,7 @@ function App() {
               apiBase={apiBase}
               lookups={lookups}
               setMessage={setMessage}
+              uiLanguage={uiLanguage}
             />
           )}
           {activeTab === "payments" && (
@@ -3917,6 +4523,7 @@ function App() {
               refreshAll={refreshLocalData}
               focus={paymentFocus}
               partyRole="customer"
+              uiLanguage={uiLanguage}
             />
           )}
           {editorContext?.workflowId !== "contractor" && (
@@ -3950,7 +4557,7 @@ function App() {
                 setEditorContext(null);
                 setEditingId(null);
                 setEntryDirty(false);
-                setEntryForm(variantEntryDefaults());
+                setEntryForm(newEntryDefaults());
                 setMessage("");
                 setActiveTab(targetTab);
               }}
@@ -3965,10 +4572,12 @@ function App() {
                 setEditorContext(null);
                 setEditingId(null);
                 setEntryDirty(false);
-                setEntryForm(variantEntryDefaults());
+                setEntryForm(newEntryDefaults());
                 setMessage("");
                 setActiveTab("dashboard");
               }}
+              defaultReportLanguage={defaultReportLanguage}
+              uiLanguage={uiLanguage}
               busy={busy}
               currentUser={currentUser}
               refreshAll={refreshLocalData}
@@ -3985,6 +4594,10 @@ function App() {
               setApiBase={setApiBase}
               themeMode={themeMode}
               setThemeMode={setThemeMode}
+              uiLanguage={uiLanguage}
+              setUiLanguage={setUiLanguage}
+              defaultReportLanguage={defaultReportLanguage}
+              setDefaultReportLanguage={setDefaultReportLanguage}
               health={health}
               bootstrap={bootstrap}
               terms={terms}
@@ -4012,6 +4625,7 @@ function App() {
           currentUser={currentUser}
           setMessage={setMessage}
           onOpenMention={openChatMention}
+          uiLanguage={uiLanguage}
         />
       </main>
     </>
@@ -4023,21 +4637,11 @@ function AppBrandMark({ small = false }) {
     <div
       className={small ? "am-brand-mark small" : "am-brand-mark"}
       dir="ltr"
-      aria-label={`${APP_MARK} ${APP_BYLINE}`}
+      aria-label={`${APP_NAME} — ${APP_SLOGAN}`}
     >
-      <span className="brand-digit-cloud" aria-hidden="true">
-        {"0123456789".split("").map((digit, index) => (
-          <span key={`${digit}-${index}`} style={{ "--digit-index": index }}>
-            {digit}
-          </span>
-        ))}
-      </span>
-      <strong>
-        <span className="am-a">A</span>
-        <span className="am-dot">.</span>
-        <span className="am-m">M</span>
-      </strong>
-      <small>{APP_BYLINE}</small>
+      <img src={appIcon} alt="" aria-hidden="true" />
+      <strong>{small ? APP_MARK : APP_NAME}</strong>
+      {!small && <small>{APP_SLOGAN}</small>}
     </div>
   );
 }
@@ -4154,8 +4758,7 @@ function DocumentIdSearch({
 function SplashScreen() {
   return (
     <div className="splash-screen" dir="ltr" aria-label={`${APP_NAME} loading`}>
-      <AppBrandMark />
-      <span className="splash-title">{APP_NAME}</span>
+      <img className="splash-logo-full" src={appLogo} alt={APP_NAME} />
     </div>
   );
 }
@@ -4169,7 +4772,11 @@ function LoadingOverlay({ compact = false }) {
       dir="ltr"
       aria-label="Loading"
     >
-      <AppBrandMark small />
+      {compact ? (
+        <AppBrandMark small />
+      ) : (
+        <img className="splash-logo-full loading-logo-full" src={appLogo} alt={APP_NAME} />
+      )}
       <span className="splash-title">Loading</span>
     </div>
   );
@@ -5674,7 +6281,7 @@ function ManagerPortal({ api, apiBase, setApiBase, setMessage, message }) {
           <div className="manager-brand">
             <AppBrandMark small />
             <div>
-              <strong>Accounting Management</strong>
+              <strong>{APP_NAME}</strong>
               <span>/manager owner access</span>
             </div>
         </div>
@@ -5724,7 +6331,7 @@ function ManagerPortal({ api, apiBase, setApiBase, setMessage, message }) {
         <div className="manager-brand">
           <AppBrandMark small />
           <div>
-            <strong>{settings.businessName || "Accounting Management"}</strong>
+            <strong>{settings.businessName || APP_NAME}</strong>
             <span>{settings.publicUrl || "/manager"}</span>
           </div>
         </div>
@@ -5738,7 +6345,7 @@ function ManagerPortal({ api, apiBase, setApiBase, setMessage, message }) {
       <section className="manager-hero">
         <div>
           <span className="manager-kicker">Owner manager</span>
-          <h1>Accounting Management owner console</h1>
+          <h1>{APP_NAME} owner console</h1>
           <p>Plans, payment methods, subscriber companies, activation, and security settings.</p>
           <div className="manager-hero-actions">
             <a href="#manager-owner">Owner settings</a>
@@ -6335,25 +6942,64 @@ function DashboardCircle({ label, value, tone }) {
   );
 }
 
-function DashboardAnalytics({ data, range, setRange, from, setFrom, to, setTo }) {
+function DashboardAnalytics({ data, range, setRange, from, setFrom, to, setTo, uiLanguage = "ar" }) {
   if (!data) return <section className="panel"><LoadingOverlay compact /></section>;
+  const t = (ar, en) => (uiLanguage === "en" ? en || uiText(ar, "en") : ar);
   const totals = data.totals || {};
+  const operational = data.operational || {};
+  const operationalQuantityText = (operational.quantity_by_unit || [])
+    .map((row) => {
+      const unitCode = normalizeClientUnitCode(row.unit_code || row.unit_label);
+      const unit =
+        uiLanguage === "en"
+          ? unitCode === "sqm"
+            ? "m²"
+            : unitCode === "lm"
+              ? "lm"
+              : "units"
+          : unitCode === "count"
+            ? "بالعدد"
+            : UNITS.find((item) => item.value === unitCode)?.label || row.unit_label || "";
+      return uiLanguage === "en"
+        ? `${money(row.quantity)} ${unit}`
+        : unitCode === "count"
+          ? `${unit} ${money(row.quantity)}`
+          : `${money(row.quantity)} ${unit}`;
+    })
+    .filter(Boolean)
+    .join(" - ");
+  const paidRatio = Math.max(
+    0,
+    Math.min(100, totals.invoiced ? (Number(totals.paid || 0) / Number(totals.invoiced || 1)) * 100 : 0),
+  );
   const paidVsUnpaid = [
-    { label: "مدفوع من العملاء", amount: totals.paid || 0, color: "#20a464" },
-    { label: "مطلوب سداده - الفواتير المعتمدة", amount: totals.invoiced || 0, color: "#dc3f45" },
+    { label: t("مدفوع من العملاء", "Paid by customers"), amount: totals.paid || 0, color: "#20a464" },
+    { label: t("مطلوب سداده - الفواتير المعتمدة", "Must be paid - approved invoices"), amount: totals.invoiced || 0, color: "#dc3f45" },
   ];
+  const exportAnalyticsPdf = () => {
+    const previousTitle = document.title;
+    document.body.classList.add("print-dashboard-analytics");
+    document.title = `${APP_NAME} - ${t("التحليلات المالية والتشغيلية", "Financial and Operational Analytics")}`;
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(() => {
+        document.body.classList.remove("print-dashboard-analytics");
+        document.title = previousTitle;
+      }, 500);
+    }, 50);
+  };
   return (
     <section className="panel dashboard-analytics-panel">
       <div className="panel-head">
         <h2>
-          <Activity size={19} /> التحليلات المالية والتشغيلية
+          <Activity size={19} /> {t("التحليلات المالية والتشغيلية", "Financial and Operational Analytics")}
         </h2>
         <div className="dashboard-range-filters">
           {[
-            ["lifetime", "كل المدة"],
-            ["year", "السنة الحالية"],
-            ["month", "الشهر الحالي"],
-            ["custom", "فترة مخصصة"],
+            ["lifetime", t("كل المدة", "Lifetime")],
+            ["year", t("السنة الحالية", "Current year")],
+            ["month", t("الشهر الحالي", "Current month")],
+            ["custom", t("فترة مخصصة", "Custom range")],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -6364,85 +7010,109 @@ function DashboardAnalytics({ data, range, setRange, from, setFrom, to, setTo })
               {label}
             </button>
           ))}
+          <button type="button" onClick={exportAnalyticsPdf}>
+            <FileDown size={16} /> {t("تصدير PDF", "Export PDF")}
+          </button>
         </div>
       </div>
       {range === "custom" && (
         <div className="dashboard-custom-range">
-          <Field label="من">
+          <Field label={t("من", "From")}>
             <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
           </Field>
-          <Field label="إلى">
+          <Field label={t("إلى", "To")}>
             <input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
           </Field>
         </div>
       )}
-      <div className="dashboard-circle-row">
-        <DashboardCircle
-          label="المدفوع من العملاء"
-          value={totals.paid}
-          tone="paid"
-        />
-        <DashboardCircle
-          label="إجمالي الفواتير المعتمدة المطلوب سدادها"
-          value={totals.invoiced}
-          tone="due"
-        />
+      <div className="analytics-summary-strip">
+        <span>{t("ملخص الفترة", "Range summary")}</span>
+        <strong>{t("الدخل", "Income")}: {money(totals.paid)}</strong>
+        <strong>{t("غير المدفوع", "Unpaid")}: {money(totals.unpaid)}</strong>
+        <strong>{t("المطلوب سداده - الفواتير المعتمدة", "Must be paid - approved invoices")}: {money(totals.invoiced)}</strong>
+        <strong>
+          {t("ملخص الكميات", "Quantity summary")}: {operationalQuantityText || "-"}
+        </strong>
+      </div>
+      <div className="analytics-comparison-card">
+        <div className="analytics-comparison-head">
+          <strong>{t("تحليل المدفوع والمطلوب", "Paid and due analysis")}</strong>
+          <span>
+            {money(paidRatio)}% {t("مغطى من الفواتير المعتمدة", "covered from approved invoices")}
+          </span>
+        </div>
+        <div className="analytics-comparison-bars">
+          <div className="analytics-comparison-row paid">
+            <span>{t("المدفوع من العملاء", "Paid by customers")}</span>
+            <i style={{ width: `${Math.max(2, paidRatio)}%` }} />
+            <strong>{money(totals.paid)}</strong>
+          </div>
+          <div className="analytics-comparison-row due">
+            <span>{t("المطلوب سداده - الفواتير المعتمدة", "Must be paid - approved invoices")}</span>
+            <i style={{ width: "100%" }} />
+            <strong>{money(totals.invoiced)}</strong>
+          </div>
+        </div>
+        <div className="analytics-operational-facts">
+          <span>{t("بنود الفواتير المعتمدة", "Approved invoice rows")}: <strong>{money(operational.row_count || 0)}</strong></span>
+          <span>{t("عدد القطع", "Piece count")}: <strong>{money(operational.item_count || 0)}</strong></span>
+        </div>
       </div>
       <div className="metric-grid dashboard-financial-metrics">
-        <MetricCard label="إجمالي المدفوع من العملاء" value={money(totals.paid)} />
-        <MetricCard label="المطلوب سداده - الفواتير المعتمدة" value={money(totals.invoiced)} />
-        <MetricCard label="إجمالي غير المدفوع الحقيقي" value={money(totals.unpaid)} />
-        <MetricCard label="المتأخر غير المدفوع" value={money(totals.overdue)} />
-        <MetricCard label="إجمالي الفواتير" value={money(totals.invoiced)} />
-        <MetricCard label="مدفوع مدى الحياة" value={money(data.lifetime?.paid)} />
-        <MetricCard label="مدفوع السنة" value={money(data.yearly?.paid)} />
-        <MetricCard label="مدفوع الشهر" value={money(data.monthly?.paid)} />
+        <MetricCard label={t("إجمالي المدفوع من العملاء", "Total paid by customers")} value={money(totals.paid)} />
+        <MetricCard label={t("المطلوب سداده - الفواتير المعتمدة", "Must be paid - approved invoices")} value={money(totals.invoiced)} />
+        <MetricCard label={t("إجمالي غير المدفوع الحقيقي", "Real unpaid total")} value={money(totals.unpaid)} />
+        <MetricCard label={t("المتأخر غير المدفوع", "Overdue unpaid")} value={money(totals.overdue)} />
+        <MetricCard label={t("إجمالي الفواتير", "Total invoices")} value={money(totals.invoiced)} />
+        <MetricCard label={t("مدفوع مدى الحياة", "Lifetime paid")} value={money(data.lifetime?.paid)} />
+        <MetricCard label={t("مدفوع السنة", "Year paid")} value={money(data.yearly?.paid)} />
+        <MetricCard label={t("مدفوع الشهر", "Month paid")} value={money(data.monthly?.paid)} />
       </div>
       <div className="dashboard-chart-grid">
         <DashboardBarChart
-          title="المدفوع مقابل إجمالي الفواتير المعتمدة"
+          title={t("المدفوع مقابل إجمالي الفواتير المعتمدة", "Paid vs approved invoices")}
           rows={paidVsUnpaid}
           labelKey="label"
           valueKey="amount"
           color="#2f9e64"
         />
         <DashboardBarChart
-          title="الفواتير حسب الشهر"
+          title={t("الفواتير حسب الشهر", "Invoices by month")}
           rows={data.invoices_by_month}
           labelKey="month"
           valueKey="amount"
           color="#4387d8"
         />
         <DashboardBarChart
-          title="المدفوعات حسب الشهر"
+          title={t("المدفوعات حسب الشهر", "Payments by month")}
           rows={data.payments_by_month}
           labelKey="month"
           valueKey="amount"
           color="#2f9e64"
         />
         <DashboardBarChart
-          title="اتجاه التحصيل النقدي"
+          title={t("اتجاه التحصيل النقدي", "Cash collection trend")}
           rows={data.cash_collection_trend}
           labelKey="month"
           valueKey="amount"
           color="#8e5bd9"
         />
         <DashboardBarChart
-          title="أعمار الديون"
+          title={t("أعمار الديون", "Invoice aging")}
           rows={data.aging}
           labelKey="label"
           valueKey="amount"
           color="#d28a00"
         />
         <DashboardBarChart
-          title="غير المدفوع حسب العميل"
+          title={t("غير المدفوع حسب العميل", "Unpaid by customer")}
           rows={data.customers}
           labelKey="customer"
           valueKey="unpaid"
           color="#d94b4b"
         />
         <DashboardBarChart
-          title="المدفوع حسب العميل"
+          title={t("المدفوع حسب العميل", "Paid by customer")}
           rows={data.customers}
           labelKey="customer"
           valueKey="paid"
@@ -6455,6 +7125,8 @@ function DashboardAnalytics({ data, range, setRange, from, setFrom, to, setTo })
 
 function Dashboard(props) {
   const { api, setMessage, onOpenDocument, focus, ...workspaceProps } = props;
+  const uiLanguage = props.uiLanguage || "ar";
+  const t = (ar, en) => (uiLanguage === "en" ? en || uiText(ar, "en") : ar);
   const [analyticsRange, setAnalyticsRange] = useState("lifetime");
   const [analyticsFrom, setAnalyticsFrom] = useState("");
   const [analyticsTo, setAnalyticsTo] = useState("");
@@ -6501,8 +7173,8 @@ function Dashboard(props) {
         onClick={() => setAnalyticsOpen((current) => !current)}
       >
         <Activity size={19} />
-        التحليلات المالية والتشغيلية
-        <span>{analyticsOpen ? "إخفاء" : "عرض"}</span>
+        {t("التحليلات المالية والتشغيلية", "Financial and Operational Analytics")}
+        <span>{analyticsOpen ? t("إخفاء", "Hide") : t("عرض", "Show")}</span>
       </button>
       {analyticsOpen && (
         <DashboardAnalytics
@@ -6513,6 +7185,7 @@ function Dashboard(props) {
           setFrom={setAnalyticsFrom}
           to={analyticsTo}
           setTo={setAnalyticsTo}
+          uiLanguage={uiLanguage}
         />
       )}
       <CustomerExplorer
@@ -6842,7 +7515,8 @@ function CustomerExplorer({ api, setMessage, onOpenDocument, focus }) {
   );
 }
 
-function ContractorsView({ api, currentUser, setMessage, refreshKey }) {
+function ContractorsView({ api, currentUser, setMessage, refreshKey, uiLanguage = "ar" }) {
+  const t = (ar, en) => (uiLanguage === "en" ? en || uiText(ar, "en") : ar);
   const empty = {
     base_name: "",
     display_name: "",
@@ -6928,11 +7602,13 @@ function ContractorsView({ api, currentUser, setMessage, refreshKey }) {
     <section className="panel contractors-management-panel">
       <ConfirmationLayer
         dialog={
-          pendingDelete
+              pendingDelete
             ? {
-                title: "حذف سجل المقاول",
-                message: `سيتم حذف سجل ${pendingDelete.display_name}. المستندات القديمة ستحتفظ بالاسم المسجل داخلها.`,
-                confirmLabel: "حذف المقاول",
+                title: t("حذف سجل المقاول", "Delete Contractor Record"),
+                message: uiLanguage === "en"
+                  ? `The record ${pendingDelete.display_name} will be deleted. Old documents will keep their stored name.`
+                  : `سيتم حذف سجل ${pendingDelete.display_name}. المستندات القديمة ستحتفظ بالاسم المسجل داخلها.`,
+                confirmLabel: t("حذف المقاول", "Delete Contractor"),
                 danger: true,
               }
             : null
@@ -6946,26 +7622,26 @@ function ContractorsView({ api, currentUser, setMessage, refreshKey }) {
       />
       <div className="panel-head">
         <h2>
-          <Building2 size={19} /> إدارة المقاولين
+          <Building2 size={19} /> {t("إدارة المقاولين", "Contractors Management")}
         </h2>
         <div className="inline-field contractor-search">
           <Search size={16} />
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="بحث بالاسم أو ID"
+            placeholder={t("بحث بالاسم أو ID", "Search by name or ID")}
           />
         </div>
       </div>
       {canManage && (
         <form className="form-grid contractor-entry-form" onSubmit={save}>
           {[
-            ["base_name", "اسم المقاول"],
-            ["display_name", "الاسم الظاهر"],
-            ["phone", "الهاتف"],
-            ["email", "البريد الإلكتروني"],
-            ["address", "العنوان"],
-            ["tax_no", "الرقم الضريبي"],
+            ["base_name", t("اسم المقاول", "Contractor Name")],
+            ["display_name", t("الاسم الظاهر", "Display Name")],
+            ["phone", t("الهاتف", "Phone")],
+            ["email", t("البريد الإلكتروني", "Email")],
+            ["address", t("العنوان", "Address")],
+            ["tax_no", t("الرقم الضريبي", "Tax No.")],
           ].map(([key, label]) => (
             <Field key={key} label={label}>
               <input
@@ -6975,7 +7651,7 @@ function ContractorsView({ api, currentUser, setMessage, refreshKey }) {
               />
             </Field>
           ))}
-          <Field label="ملاحظات">
+          <Field label={t("ملاحظات", "Notes")}>
             <input
               value={draft.notes || ""}
               onChange={(event) => setDraft({ ...draft, notes: event.target.value })}
@@ -6983,7 +7659,7 @@ function ContractorsView({ api, currentUser, setMessage, refreshKey }) {
           </Field>
           <div className="action-row">
             <button type="submit" className="primary" disabled={busy || !draft.base_name}>
-              <Save size={16} /> {editingId ? "حفظ التعديل" : "إضافة المقاول"}
+              <Save size={16} /> {editingId ? t("حفظ التعديل", "Save Changes") : t("إضافة المقاول", "Add Contractor")}
             </button>
             {editingId && (
               <button
@@ -6993,7 +7669,7 @@ function ContractorsView({ api, currentUser, setMessage, refreshKey }) {
                   setDraft(empty);
                 }}
               >
-                إلغاء
+                {t("إلغاء", "Cancel")}
               </button>
             )}
           </div>
@@ -7004,10 +7680,10 @@ function ContractorsView({ api, currentUser, setMessage, refreshKey }) {
           <thead>
             <tr>
               <th>ID</th>
-              <th>المقاول</th>
-              <th>الهاتف</th>
-              <th>البريد</th>
-              <th>الرقم الضريبي</th>
+              <th>{t("المقاول", "Contractor")}</th>
+              <th>{t("الهاتف", "Phone")}</th>
+              <th>{t("البريد", "Email")}</th>
+              <th>{t("الرقم الضريبي", "Tax No.")}</th>
               <th></th>
             </tr>
           </thead>
@@ -7069,7 +7745,12 @@ function ReportWorkspace({
   onDocumentConverted,
   context = {},
   setContext = () => {},
+  defaultReportLanguage = "ar",
+  uiLanguage = "",
 }) {
+  const effectiveUiLanguage =
+    uiLanguage || (document.documentElement.lang === "en" ? "en" : "ar");
+  const t = (ar, en) => (effectiveUiLanguage === "en" ? en || uiText(ar, "en") : ar);
   const [currentWorkflow, setCurrentWorkflow] = useState(
     context.workflowId || workflowId,
   );
@@ -7096,11 +7777,20 @@ function ReportWorkspace({
     context.certificateFilter || "",
   );
   const [reportData, setReportData] = useState(context.reportData || null);
+  const initialReportLanguage = normalizeReportLanguage(
+    context.reportLanguage ||
+      storedReportLanguageFor(context.workflowId || workflowId, defaultReportLanguage),
+    defaultReportLanguage,
+  );
+  const [reportLanguage, setReportLanguage] = useState(
+    initialReportLanguage,
+  );
   const [contractorRows, setContractorRows] = useState([]);
   const [documentDraft, setDocumentDraft] = useState({
     status: "draft",
     discount_type: "none",
     discount_value: 0,
+    report_language: initialReportLanguage,
   });
   const [dimensionUnit, setDimensionUnit] = useState(
     context.dimensionUnit || "cm",
@@ -7134,6 +7824,13 @@ function ReportWorkspace({
     setDocumentSearch("");
     setDocuments([]);
     setReportData(null);
+    const nextLanguage = normalizeReportLanguage(
+      context.reportLanguage ||
+        storedReportLanguageFor(currentWorkflow, defaultReportLanguage),
+      defaultReportLanguage,
+    );
+    setReportLanguage(nextLanguage);
+    setDocumentDraft((draft) => ({ ...draft, report_language: nextLanguage }));
   }, [currentWorkflow]);
 
   useEffect(() => {
@@ -7157,6 +7854,11 @@ function ReportWorkspace({
       setWorkTypeFilter(context.workTypeFilter || "");
     if (context.certificateFilter !== undefined)
       setCertificateFilter(context.certificateFilter || "");
+    if (context.reportLanguage !== undefined) {
+      const nextLanguage = normalizeReportLanguage(context.reportLanguage);
+      setReportLanguage(nextLanguage);
+      saveStoredReportLanguage(currentWorkflow, nextLanguage);
+    }
     if (context.dimensionUnit !== undefined)
       setDimensionUnit(context.dimensionUnit || "cm");
     if (context.subtotalMode !== undefined)
@@ -7321,6 +8023,22 @@ function ReportWorkspace({
     setContext({ subtotalMode: next });
   }
 
+  function changeReportLanguage(value) {
+    const next = value === "en" ? "en" : "ar";
+    setReportLanguage(next);
+    saveStoredReportLanguage(currentWorkflow, next);
+    setDocumentDraft((draft) => ({ ...draft, report_language: next }));
+    setReportData(null);
+    setPreviewUrl("");
+    setPreviewKey("");
+    setContext({
+      reportLanguage: next,
+      reportData: null,
+      previewUrl: "",
+      previewKey: "",
+    });
+  }
+
   function chooseParty(party) {
     const nextPartyId = party?.id ? String(party.id) : "";
     const label = party?.display_name || party?.base_name || "";
@@ -7417,15 +8135,42 @@ function ReportWorkspace({
 
   useEffect(() => {
     if (selectedDocument) {
+      const hasSavedDocumentLanguage = ["ar", "en"].includes(
+        selectedDocument.report_language,
+      );
+      const nextReportLanguage = hasSavedDocumentLanguage
+        ? normalizeReportLanguage(selectedDocument.report_language)
+        : normalizeReportLanguage(
+            context.reportLanguage ||
+              storedReportLanguageFor(currentWorkflow, defaultReportLanguage),
+            defaultReportLanguage,
+          );
+      setReportLanguage(nextReportLanguage);
       setDocumentDraft({
         status: selectedDocument.status || workflow.defaultDocumentStatus,
         discount_type: selectedDocument.discount_type || "none",
         discount_value: selectedDocument.discount_value || 0,
         project: selectedDocument.project || "",
         building_unit: selectedDocument.building_unit || "",
+        report_language: nextReportLanguage,
       });
+      saveStoredReportLanguage(currentWorkflow, nextReportLanguage);
+      setContext({ reportLanguage: nextReportLanguage });
+    } else if (!context.reportLanguage) {
+      const fallbackLanguage = normalizeReportLanguage(
+        storedReportLanguageFor(currentWorkflow, defaultReportLanguage),
+        defaultReportLanguage,
+      );
+      setReportLanguage(fallbackLanguage);
+      setDocumentDraft((draft) => ({ ...draft, report_language: fallbackLanguage }));
     }
-  }, [selectedDocument, workflow.defaultDocumentStatus]);
+  }, [
+    selectedDocument,
+    workflow.defaultDocumentStatus,
+    defaultReportLanguage,
+    currentWorkflow,
+    context.reportLanguage,
+  ]);
 
   function reportQuery() {
     const query = new URLSearchParams();
@@ -7449,6 +8194,7 @@ function ReportWorkspace({
     }
     query.set("dimension_unit", dimensionUnit);
     query.set("subtotal_mode", subtotalMode);
+    query.set("report_language", reportLanguage === "en" ? "en" : "ar");
     if (currentUser?.display_name)
       query.set("user_name", currentUser.display_name);
     return query;
@@ -7524,6 +8270,7 @@ function ReportWorkspace({
         previewKey: key,
         dimensionUnit,
         subtotalMode,
+        reportLanguage,
         party: selectedParty,
         document: resolvedDocument,
       });
@@ -7623,6 +8370,7 @@ function ReportWorkspace({
         previewKey: "",
         dimensionUnit,
         subtotalMode,
+        reportLanguage,
         party: selectedParty,
         document: resolvedDocument,
       });
@@ -8094,51 +8842,63 @@ function ReportWorkspace({
             <button
               type="button"
               className="tiny-toggle"
-              title="تبديل ظهور المقاسات بين سنتيمتر ومتر"
+              title={t("تبديل ظهور المقاسات بين سنتيمتر ومتر", "Switch displayed measurements between centimeters and meters")}
               onClick={() => {
                 const next = dimensionUnit === "cm" ? "m" : "cm";
                 setDimensionUnit(next);
                 setContext({ dimensionUnit: next });
               }}
             >
-              المقاس: {dimensionUnit === "cm" ? "سم" : "م"}
+              {effectiveUiLanguage === "en"
+                ? `Measure: ${dimensionUnit === "cm" ? "cm" : "m"}`
+                : `المقاس: ${dimensionUnit === "cm" ? "سم" : "م"}`}
             </button>
           )}
+          <label className="tiny-select report-language-inline">
+            <span>{t("لغة التقرير", "Report Language")}</span>
+            <select
+              value={reportLanguage === "en" ? "en" : "ar"}
+              onChange={(event) => changeReportLanguage(event.target.value)}
+            >
+              <option value="ar">{t("العربية", "Arabic")}</option>
+              <option value="en">English</option>
+            </select>
+          </label>
           {(currentWorkflow === "offer" ||
             currentWorkflow === "invoice" ||
             currentWorkflow === "contractor") && (
             <>
               <button
                 type="button"
-                title="إظهار أو إخفاء إجمالي كل مبنى"
+                title={t("إظهار أو إخفاء إجمالي كل مبنى", "Show or hide each building total")}
                 className={subtotalFlags.building ? "tiny-toggle active" : "tiny-toggle"}
                 onClick={() => toggleSubtotalMode("building")}
               >
-                إجمالي مباني
+                {t("إجمالي مباني", "Building Totals")}
               </button>
               <button
                 type="button"
-                title="إظهار أو إخفاء إجمالي كل وحدة"
+                title={t("إظهار أو إخفاء إجمالي كل وحدة", "Show or hide each unit total")}
                 className={subtotalFlags.unit ? "tiny-toggle active" : "tiny-toggle"}
                 onClick={() => toggleSubtotalMode("unit")}
               >
-                إجمالي وحدات
+                {t("إجمالي وحدات", "Unit Totals")}
               </button>
             </>
           )}
           {currentWorkflow !== "statement" && (
             <>
               <button
-                title="نسخ المستند المحدد إلى ID جديد دون تغيير الأصل"
+                title={t("نسخ المستند المحدد إلى ID جديد دون تغيير الأصل", "Copy the selected document to a new ID without changing the original")}
                 onClick={() =>
                   onCopyDocument?.(selectedDocument, selectedParty, reportData)
                 }
                 disabled={!selectedDocument || !onCopyDocument}
               >
-                <Copy size={18} /> نسخ إلى مستند جديد
+                <Copy size={18} /> {t("نسخ إلى مستند جديد", "Copy to New Document")}
               </button>
               <button
-                title="تعديل المستند المحدد في صفحة الإدخال الذكية"
+                title={t("تعديل المستند المحدد في صفحة الإدخال الذكية", "Edit the selected document in smart entry")}
                 onClick={() => {
                   if (!selectedDocument) return;
                   if (onOpenDocument) {
@@ -8167,53 +8927,53 @@ function ReportWorkspace({
                 }}
                 disabled={!selectedDocument}
               >
-                <Pencil size={18} /> تعديل
+                <Pencil size={18} /> {t("تعديل", "Edit")}
               </button>
               <button
                 type="button"
                 className="danger"
-                title="حذف المستند المحدد نهائياً"
+                title={t("حذف المستند المحدد نهائياً", "Permanently delete the selected document")}
                 onClick={() => setPendingDocumentDelete(selectedDocument)}
                 disabled={
                   !selectedDocument ||
                   !canUser(currentUser, "can_change_status")
                 }
               >
-                <Trash2 size={18} /> حذف المستند
+                <Trash2 size={18} /> {t("حذف المستند", "Delete Document")}
               </button>
             </>
           )}
           <button
             className="primary"
-            title="عرض التقرير المحدد داخل التطبيق"
+            title={t("عرض التقرير المحدد داخل التطبيق", "Show the selected report inside the app")}
             onClick={loadReport}
             disabled={busy || !canRunReport}
           >
-            <Search size={18} /> عرض
+            <Search size={18} /> {t("عرض", "Show")}
           </button>
           <button
-            title="فتح معاينة التقرير قبل التصدير"
+            title={t("فتح معاينة التقرير قبل التصدير", "Open report preview before export")}
             onClick={showExportPreview}
             disabled={!canRunReport}
           >
-            <Eye size={18} /> معاينة PDF
+            <Eye size={18} /> {t("معاينة PDF", "PDF Preview")}
           </button>
           <button
-            title="تنزيل PDF على هذا الجهاز"
+            title={t("تنزيل PDF على هذا الجهاز", "Download PDF to this device")}
             onClick={() => exportReport("pdf")}
             disabled={!canRunReport}
           >
             <FileDown size={18} /> PDF
           </button>
           <button
-            title="تصدير PDF ثم فتح نافذة المشاركة"
+            title={t("تصدير PDF ثم فتح نافذة المشاركة", "Export PDF and open share window")}
             onClick={() => exportReport("pdf", { share: true })}
             disabled={!canRunReport}
           >
-            <Share2 size={18} /> مشاركة
+            <Share2 size={18} /> {t("مشاركة", "Share")}
           </button>
           <button
-            title="تنزيل ملف Excel XLSX منسق"
+            title={t("تنزيل ملف Excel XLSX منسق", "Download formatted Excel XLSX")}
             onClick={() => exportReport("xlsx")}
             disabled={!canRunReport}
           >
@@ -8224,7 +8984,7 @@ function ReportWorkspace({
 
       {selectedDocument && currentWorkflow !== "statement" && (
         <div className="document-strip">
-          <Field label="الحالة">
+          <Field label={t("الحالة", "Status")}>
             <select
               value={documentDraft.status}
               disabled={!canUser(currentUser, "can_change_status")}
@@ -8235,12 +8995,12 @@ function ReportWorkspace({
                 })
               }
             >
-              <option value="draft">مسودة</option>
-              <option value="approved">معتمد</option>
-              <option value="closed">مغلق</option>
+              <option value="draft">{t("مسودة", "Draft")}</option>
+              <option value="approved">{t("معتمد", "Approved")}</option>
+              <option value="closed">{t("مغلق", "Closed")}</option>
             </select>
           </Field>
-          <Field label="نوع الخصم">
+          <Field label={t("نوع الخصم", "Discount Type")}>
             <select
               value={documentDraft.discount_type}
               onChange={(event) =>
@@ -8250,12 +9010,12 @@ function ReportWorkspace({
                 })
               }
             >
-              <option value="none">بدون</option>
-              <option value="rate">نسبة</option>
-              <option value="amount">مبلغ</option>
+              <option value="none">{t("بدون", "None")}</option>
+              <option value="rate">{t("نسبة", "Percentage")}</option>
+              <option value="amount">{t("مبلغ", "Amount")}</option>
             </select>
           </Field>
-          <Field label="قيمة الخصم">
+          <Field label={t("قيمة الخصم", "Discount Value")}>
             <input
               type="text"
               inputMode="decimal"
@@ -8269,7 +9029,7 @@ function ReportWorkspace({
             />
           </Field>
           <button onClick={saveDocument} disabled={busy}>
-            <Save size={18} /> حفظ المستند
+            <Save size={18} /> {t("حفظ المستند", "Save Document")}
           </button>
         </div>
       )}
@@ -8295,7 +9055,7 @@ function ReportWorkspace({
       {previewUrl && (
         <section className="export-preview">
           <div className="panel-head">
-            <h2>معاينة التصدير</h2>
+            <h2>{t("معاينة التصدير", "Export Preview")}</h2>
             <button
               type="button"
               onClick={() => {
@@ -8304,7 +9064,7 @@ function ReportWorkspace({
                 setContext({ previewUrl: "", previewKey: "" });
               }}
             >
-              إغلاق المعاينة
+              {t("إغلاق المعاينة", "Close Preview")}
             </button>
           </div>
           <div className="preview-frame-wrap">
@@ -8316,7 +9076,8 @@ function ReportWorkspace({
   );
 }
 
-function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
+function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage, uiLanguage = "ar" }) {
+  const t = (ar, en) => (uiLanguage === "en" ? en || uiText(ar, "en") : ar);
   const now = new Date();
   const [period, setPeriod] = useState("month");
   const [year, setYear] = useState(String(now.getFullYear()));
@@ -8327,18 +9088,18 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
   const [busy, setBusy] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
   const months = [
-    ["01", "يناير"],
-    ["02", "فبراير"],
-    ["03", "مارس"],
-    ["04", "أبريل"],
-    ["05", "مايو"],
-    ["06", "يونيو"],
-    ["07", "يوليو"],
-    ["08", "أغسطس"],
-    ["09", "سبتمبر"],
-    ["10", "أكتوبر"],
-    ["11", "نوفمبر"],
-    ["12", "ديسمبر"],
+    ["01", t("يناير", "January")],
+    ["02", t("فبراير", "February")],
+    ["03", t("مارس", "March")],
+    ["04", t("أبريل", "April")],
+    ["05", t("مايو", "May")],
+    ["06", t("يونيو", "June")],
+    ["07", t("يوليو", "July")],
+    ["08", t("أغسطس", "August")],
+    ["09", t("سبتمبر", "September")],
+    ["10", t("أكتوبر", "October")],
+    ["11", t("نوفمبر", "November")],
+    ["12", t("ديسمبر", "December")],
   ];
   const unitGroups = rows.reduce((groups, row) => {
     const key = row.unit_label || row.unit || "عام";
@@ -8465,9 +9226,11 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
         {busy && <LoadingOverlay compact />}
         <div className="panel-head">
           <h2>
-            <FileSpreadsheet size={18} /> الكميات المنتجة
+            <FileSpreadsheet size={18} /> {t("الكميات المنتجة", "Produced Quantities")}
           </h2>
-          <span className="user-chip">{rows.length} بند</span>
+          <span className="user-chip">
+            {rows.length} {rows.length === 1 ? t("بند", "item") : t("بند", "items")}
+          </span>
         </div>
         <div className="productive-filter-row">
           <div className="segmented">
@@ -8476,17 +9239,17 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
               className={period === "month" ? "active" : ""}
               onClick={() => setPeriod("month")}
             >
-              شهري
+              {t("شهري", "Monthly")}
             </button>
             <button
               type="button"
               className={period === "year" ? "active" : ""}
               onClick={() => setPeriod("year")}
             >
-              سنوي
+              {t("سنوي", "Yearly")}
             </button>
           </div>
-          <Field label="السنة">
+          <Field label={t("السنة", "Year")}>
             <input
               type="text"
               inputMode="numeric"
@@ -8495,7 +9258,7 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
             />
           </Field>
           {period === "month" && (
-            <Field label="الشهر">
+            <Field label={t("الشهر", "Month")}>
               <select
                 value={month}
                 onChange={(event) => setMonth(event.target.value)}
@@ -8509,20 +9272,20 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
             </Field>
           )}
           <MultiComboField
-            label="نوع الأعمال"
+            label={t("نوع الأعمال", "Work Type")}
             values={workTypes}
             options={workTypeOptions}
             allLabel={
               periodWorkTypes.length
-                ? "كل أنواع الأعمال في الفترة"
-                : "لا توجد أنواع أعمال في الفترة"
+                ? t("كل أنواع الأعمال في الفترة", "All work types in this period")
+                : t("لا توجد أنواع أعمال في الفترة", "No work types in this period")
             }
-            multipleLabel="أنواع أعمال محددة"
-            clearLabel="عرض كل الأنواع"
+            multipleLabel={t("أنواع أعمال محددة", "Selected work types")}
+            clearLabel={t("عرض كل الأنواع", "Show all types")}
             onChange={setWorkTypes}
           />
           <button type="button" className="primary" onClick={loadRows} disabled={busy}>
-            <Search size={18} /> تحديث
+            <Search size={18} /> {t("تحديث", "Refresh")}
           </button>
           <button type="button" onClick={openPreview} disabled={busy}>
             <Eye size={18} /> Preview
@@ -8538,7 +9301,7 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
           <div className="quantity-summary-row">
             {Object.entries(unitGroups).map(([unit, total]) => (
               <span key={unit}>
-                {unit}: <strong>{money(total)}</strong>
+                {uiText(unit, uiLanguage)}: <strong>{money(total)}</strong>
               </span>
             ))}
           </div>
@@ -8547,36 +9310,36 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage }) {
           <table>
             <thead>
               <tr>
-                <th>المصدر</th>
-                <th>التاريخ</th>
-                <th>العميل</th>
-                <th>المقاول</th>
-                <th>المشروع</th>
-                <th>نوع الأعمال</th>
-                <th>الكمية</th>
-                <th>وحدة الكمية</th>
-                <th>نسبة العمل</th>
-                <th>المستند</th>
+                <th>{t("المصدر", "Source")}</th>
+                <th>{t("التاريخ", "Date")}</th>
+                <th>{t("العميل", "Customer")}</th>
+                <th>{t("المقاول", "Contractor")}</th>
+                <th>{t("المشروع", "Project")}</th>
+                <th>{t("نوع الأعمال", "Work Type")}</th>
+                <th>{t("الكمية", "Quantity")}</th>
+                <th>{t("وحدة الكمية", "Quantity Unit")}</th>
+                <th>{t("نسبة العمل", "Work %")}</th>
+                <th>{t("المستند", "Document")}</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={`${row.source_type}-${row.id}`}>
-                  <td>{row.source_label}</td>
+                  <td>{uiText(row.source_label, uiLanguage)}</td>
                   <td dir="ltr">{dateInputValue(row.entry_date)}</td>
                   <td>{text(row.customer)}</td>
                   <td>{text(row.contractor)}</td>
                   <td>{text(cleanProjectName(row.project))}</td>
-                  <td>{text(row.work_type)}</td>
+                  <td>{uiText(text(row.work_type), uiLanguage)}</td>
                   <td>{money(row.quantity)}</td>
-                  <td>{text(row.unit_label)}</td>
+                  <td>{uiText(text(row.unit_label), uiLanguage)}</td>
                   <td>{row.work_ratio ? `${money(row.work_ratio)}%` : "100%"}</td>
                   <td>{text(row.operation_no || row.document_no)}</td>
                 </tr>
               ))}
               {!rows.length && (
                 <tr>
-                  <td colSpan="10">لا توجد كميات منتجة في هذا الاختيار</td>
+                  <td colSpan="10">{t("لا توجد كميات منتجة في هذا الاختيار", "No produced quantities for this selection")}</td>
                 </tr>
               )}
             </tbody>
@@ -8609,8 +9372,10 @@ function PaymentsView({
   refreshAll,
   focus,
   partyRole = "customer",
+  uiLanguage = "ar",
 }) {
   const isContractorMode = partyRole === "contractor";
+  const t = (ar, en) => (uiLanguage === "en" ? en || uiText(ar, "en") : ar);
   const [form, setForm] = useState({
     payment_type: isContractorMode ? "out" : "income",
     party_category: "retail",
@@ -8953,11 +9718,11 @@ function PaymentsView({
         <div className="panel-head">
           <h2>
             <WalletCards size={18} />{" "}
-            {editingPayment ? "تعديل دفعة" : "الدفعات"}
+            {editingPayment ? t("تعديل دفعة", "Edit Payment") : t("الدفعات", "Payments")}
           </h2>
           {editingPayment && (
             <span className="user-chip">
-              {editingPayment.party_role === "contractor" ? "خصم" : "تحصيل"} -{" "}
+              {editingPayment.party_role === "contractor" ? t("خصم", "Deduction") : t("تحصيل", "Collection")} -{" "}
               {editingPayment.document_operation_no ||
                 editingPayment.operation_no ||
                 editingPayment.id}
@@ -8965,52 +9730,52 @@ function PaymentsView({
           )}
         </div>
         <div className="form-grid">
-          <Field label="نوع الحركة">
+          <Field label={t("نوع الحركة", "Transaction Type")}>
             <input
-              value={isContractorMode ? "دفعة / خصم مقاول" : "تحصيل عميل"}
+              value={isContractorMode ? t("دفعة / خصم مقاول", "Contractor payment / deduction") : t("تحصيل عميل", "Customer collection")}
               readOnly
             />
           </Field>
-          <Field label="التصنيف">
+          <Field label={t("التصنيف", "Classification")}>
             <select
               value={form.party_category}
               onChange={(event) => update("party_category", event.target.value)}
             >
-              <option value="unselected">بدون تصنيف</option>
-              <option value="retail">فرد</option>
-              <option value="engineer">مهندس</option>
-              <option value="corporate">شركة</option>
+              <option value="unselected">{t("بدون تصنيف", "Unclassified")}</option>
+              <option value="retail">{t("فرد", "Individual")}</option>
+              <option value="engineer">{t("مهندس", "Engineer")}</option>
+              <option value="corporate">{t("شركة", "Company")}</option>
             </select>
           </Field>
           <ComboField
             label={
               form.payment_type === "out"
-                ? "اسم المقاول بدون م. أو شركة"
-                : "اسم العميل بدون م. أو شركة"
+                ? t("اسم المقاول بدون م. أو شركة", "Contractor name without prefix")
+                : t("اسم العميل بدون م. أو شركة", "Customer name without prefix")
             }
             value={form.base_party_name}
             options={customerNames}
             onChange={updateCustomer}
           />
           <ComboField
-            label="المشروع"
+            label={t("المشروع", "Project")}
             value={form.project}
             options={projectOptions}
             onChange={(value) => update("project", value)}
           />
           <ComboField
-            label="المبنى / الوحدة"
+            label={t("المبنى / الوحدة", "Building / Unit")}
             value={form.building_unit}
             options={buildingOptions}
             onChange={(value) => update("building_unit", value)}
           />
           <ComboField
-            label="بيان الأعمال"
+            label={t("بيان الأعمال", "Work Description")}
             value={form.work_type}
             options={paymentWorkTypeOptions}
             onChange={(value) => update("work_type", value)}
           />
-          <Field label="قيمة الدفعة">
+          <Field label={t("قيمة الدفعة", "Payment Amount")}>
             <input
               type="text"
               inputMode="decimal"
@@ -9019,14 +9784,14 @@ function PaymentsView({
               required
             />
           </Field>
-          <Field label="التاريخ">
+          <Field label={t("التاريخ", "Date")}>
             <input
               type="date"
               value={dateInputValue(form.entry_date)}
               onChange={(event) => update("entry_date", event.target.value)}
             />
           </Field>
-          <Field label="ملاحظة">
+          <Field label={t("ملاحظة", "Note")}>
             <input
               value={form.note}
               onChange={(event) => update("note", event.target.value)}
@@ -9035,7 +9800,7 @@ function PaymentsView({
         </div>
         <div className="form-actions">
           <button className="primary" disabled={busy}>
-            <Save size={18} /> {editingPayment ? "حفظ التعديل" : "حفظ الدفعة"}
+            <Save size={18} /> {editingPayment ? t("حفظ التعديل", "Save Changes") : t("حفظ الدفعة", "Save Payment")}
           </button>
           {editingPayment && (
             <button
@@ -9043,38 +9808,38 @@ function PaymentsView({
               onClick={() => resetPaymentForm({ keepCustomer: true })}
               disabled={busy}
             >
-              إلغاء التعديل
+              {t("إلغاء التعديل", "Cancel Edit")}
             </button>
           )}
         </div>
       </form>
       <section className="panel">
         <div className="panel-head">
-          <h2>مراجعة الدفعات</h2>
+          <h2>{t("مراجعة الدفعات", "Payments Review")}</h2>
         </div>
         <div className="history-filter-row">
           <ComboField
-            label="اختيار الطرف"
+            label={t("اختيار الطرف", "Choose Party")}
             value={reviewCustomer}
             options={paymentCustomerNames}
             onChange={setReviewCustomer}
           />
           <button type="button" onClick={() => setReviewCustomer("")}>
-            كل الدفعات
+            {t("كل الدفعات", "All Payments")}
           </button>
         </div>
         <div className="table-scroll compact-table">
           <table>
             <thead>
               <tr>
-                <th>التاريخ</th>
-                <th>النوع</th>
-                <th>الطرف</th>
-                <th>المشروع</th>
-                <th>الوحدة</th>
-                <th>بيان الأعمال</th>
-                <th>المبلغ</th>
-                <th>ملاحظة</th>
+                <th>{t("التاريخ", "Date")}</th>
+                <th>{t("النوع", "Type")}</th>
+                <th>{t("الطرف", "Party")}</th>
+                <th>{t("المشروع", "Project")}</th>
+                <th>{t("الوحدة", "Unit")}</th>
+                <th>{t("بيان الأعمال", "Work Description")}</th>
+                <th>{t("المبلغ", "Amount")}</th>
+                <th>{t("ملاحظة", "Note")}</th>
                 <th></th>
               </tr>
             </thead>
@@ -9089,7 +9854,7 @@ function PaymentsView({
                   <td>{text(row.entry_date)}</td>
                   <td>
                     <span className={`status-badge ${row.party_role === "contractor" ? "status-closed" : "status-approved"}`}>
-                      {row.party_role === "contractor" ? "خصم" : "تحصيل"}
+                      {row.party_role === "contractor" ? t("خصم", "Deduction") : t("تحصيل", "Collection")}
                     </span>
                   </td>
                   <td>
@@ -9104,7 +9869,7 @@ function PaymentsView({
                     <button
                       type="button"
                       className="icon-button"
-                      title="تعديل الدفعة"
+                      title={t("تعديل الدفعة", "Edit payment")}
                       onClick={() => editPayment(row)}
                     >
                       <Pencil size={16} />
@@ -9112,7 +9877,7 @@ function PaymentsView({
                     <button
                       type="button"
                       className="icon-button danger"
-                      title="حذف الدفعة"
+                      title={t("حذف الدفعة", "Delete payment")}
                       onClick={() => deletePayment(row)}
                     >
                       <Trash2 size={16} />
@@ -9122,7 +9887,7 @@ function PaymentsView({
               ))}
               {!visiblePayments.length && (
                 <tr>
-                  <td colSpan="7">لا توجد دفعات لهذا الاختيار</td>
+                  <td colSpan="7">{t("لا توجد دفعات لهذا الاختيار", "No payments for this selection")}</td>
                 </tr>
               )}
             </tbody>
@@ -9152,7 +9917,9 @@ function EntryEditor({
   currentUser,
   refreshAll,
   onDocumentSaved,
+  defaultReportLanguage = "ar",
   scopeRole = "customer",
+  uiLanguage = "ar",
 }) {
   const [nextDoc, setNextDoc] = useState(null);
   const meta = documentTypeMeta(entryForm.document_type);
@@ -9204,6 +9971,15 @@ function EntryEditor({
     setEntryForm({ ...entryForm, [key]: value });
   }
 
+  const entryDefaults = useCallback(
+    (patch = {}) =>
+      variantEntryDefaults({
+        report_language: defaultReportLanguage === "en" ? "en" : "ar",
+        ...patch,
+      }),
+    [defaultReportLanguage],
+  );
+
   function changeDocumentType(value) {
     const nextMeta = documentTypeMeta(value);
     setEntryForm({
@@ -9221,7 +9997,7 @@ function EntryEditor({
   function resetForm() {
     if (!window.confirm("سيتم مسح نموذج الإدخال الحالي فقط. هل تريد المتابعة؟"))
       return;
-    setEntryForm(variantEntryDefaults());
+    setEntryForm(entryDefaults());
     setEditingId(null);
     setEntryDirty?.(false);
   }
@@ -9237,6 +10013,7 @@ function EntryEditor({
         setEntryDirty={setEntryDirty}
         nextDoc={nextDoc}
         setEditingId={setEditingId}
+        defaultReportLanguage={defaultReportLanguage}
         currentUser={currentUser}
         refreshAll={refreshAll}
         setMessage={setMessage}
@@ -9246,6 +10023,7 @@ function EntryEditor({
         onCloseContext={onCloseContext}
         onDocumentSaved={onDocumentSaved}
         scopeRole={scopeRole}
+        uiLanguage={uiLanguage}
       />
     );
   }
@@ -9646,6 +10424,7 @@ function smartRowFromExisting(row = {}) {
 function rowHasData(row) {
   const touched = row._touched || {};
   const realValues = [
+    row.statement_text,
     row.work_type,
     row.description,
     touched.building_unit && row.building_unit,
@@ -9665,6 +10444,61 @@ function rowHasData(row) {
     if (!normalized) return false;
     const numeric = Number(normalized.replace(/,/g, ""));
     return !Number.isFinite(numeric) || numeric !== 0;
+  });
+}
+
+const SMART_READY_COUNTER_KEYS = [
+  "work_type",
+  "statement_text",
+  "description",
+  "building_unit",
+  "floor_apartment",
+  "glass_spec",
+  "profile_spec",
+  "color",
+  "item_count",
+  "width_cm",
+  "height_cm",
+  "total_quantity",
+  "quantity",
+  "qty",
+  "area",
+  "length",
+  "rate",
+  "price",
+  "amount",
+  "building_unit_price",
+];
+
+const SMART_READY_COUNTER_IGNORED_KEYS = new Set([
+  "id",
+  "document_id",
+  "row_uuid",
+  "uuid",
+  "created_at",
+  "updated_at",
+  "created_by",
+  "modified_by",
+  "unit_code",
+  "measurement_mode",
+]);
+
+function isMeaningfulSmartReadyValue(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return false;
+  const numeric = Number(normalized.replace(/,/g, ""));
+  return !Number.isFinite(numeric) || numeric !== 0;
+}
+
+function rowHasReadyCounterData(row) {
+  if (!row) return false;
+  if (row._gridGhost && !rowHasData(row)) return false;
+  if (SMART_READY_COUNTER_KEYS.some((key) => isMeaningfulSmartReadyValue(row[key]))) {
+    return true;
+  }
+  return Object.entries(row).some(([key, value]) => {
+    if (key.startsWith("_") || SMART_READY_COUNTER_IGNORED_KEYS.has(key)) return false;
+    return isMeaningfulSmartReadyValue(value);
   });
 }
 
@@ -9988,10 +10822,12 @@ function SmartTableSearchPanel({
   onNext,
   onJump,
   onReplaceAll,
+  uiLanguage = "ar",
 }) {
   const [query, setQuery] = useState(initialQuery || "");
   const [replacement, setReplacement] = useState("");
   const inputRef = useRef(null);
+  const t = (ar, en) => (uiLanguage === "en" ? en || uiText(ar, "en") : ar);
 
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
@@ -10035,15 +10871,15 @@ function SmartTableSearchPanel({
   return (
     <section
       className="smart-table-search-panel"
-      dir="rtl"
-      aria-label="بحث واستبدال في الجدول"
+      dir={uiLanguage === "en" ? "ltr" : "rtl"}
+      aria-label={t("بحث واستبدال في الجدول", "Search and replace in table")}
     >
       <div className="smart-search-head">
-        <strong>بحث في الجدول</strong>
+        <strong>{t("بحث في الجدول", "Search Table")}</strong>
         <button
           type="button"
           className="icon-button"
-          title="إغلاق البحث"
+          title={t("إغلاق البحث", "Close search")}
           onClick={onClose}
         >
           <X size={16} />
@@ -10053,7 +10889,7 @@ function SmartTableSearchPanel({
         ref={inputRef}
         data-smart-search-input="true"
         value={query}
-        placeholder="اكتب النص أو الرقم المطلوب..."
+        placeholder={t("اكتب النص أو الرقم المطلوب...", "Type the required text or number...")}
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
@@ -10069,7 +10905,7 @@ function SmartTableSearchPanel({
         }}
       />
       <label className="smart-search-replace-field">
-        <span>استبدال بـ:</span>
+        <span>{t("استبدال بـ:", "Replace with:")}</span>
         <input
           value={replacement}
           onChange={(event) => setReplacement(event.target.value)}
@@ -10078,14 +10914,18 @@ function SmartTableSearchPanel({
       <div className="smart-search-actions">
         <span>
           {results.length
-            ? `${safeCurrentIndex + 1} من ${results.length}`
-            : "0 نتيجة"}
+            ? uiLanguage === "en"
+              ? `${safeCurrentIndex + 1} of ${results.length}`
+              : `${safeCurrentIndex + 1} من ${results.length}`
+            : uiLanguage === "en"
+              ? "0 results"
+              : "0 نتيجة"}
         </span>
         <button type="button" onClick={onPrevious} disabled={!results.length}>
-          السابق
+          {t("السابق", "Previous")}
         </button>
         <button type="button" onClick={onNext} disabled={!results.length}>
-          التالي
+          {t("التالي", "Next")}
         </button>
         <button
           type="button"
@@ -10093,7 +10933,7 @@ function SmartTableSearchPanel({
           disabled={!query.trim() || !results.length}
           onClick={() => onReplaceAll(query, replacement)}
         >
-          استبدال الكل
+          {t("استبدال الكل", "Replace All")}
         </button>
       </div>
       {!!results.length && (
@@ -10110,7 +10950,7 @@ function SmartTableSearchPanel({
               >
                 <div>
                   <strong>
-                    الصف {result.visibleRowNumber} —{" "}
+                    {uiLanguage === "en" ? "Row" : "الصف"} {result.visibleRowNumber} —{" "}
                     {columnLabel(result.columnKey)}
                   </strong>
                   {highlightedValue(result)}
@@ -10119,7 +10959,7 @@ function SmartTableSearchPanel({
                   type="button"
                   onClick={() => onJump(result, resultIndex)}
                 >
-                  انتقال
+                  {t("انتقال", "Go")}
                 </button>
               </article>
             );
@@ -10146,8 +10986,11 @@ function SmartEntryEditor({
   editorContext,
   onCloseContext,
   onDocumentSaved,
+  defaultReportLanguage = "ar",
   scopeRole = "customer",
+  uiLanguage = "ar",
 }) {
+  const t = (ar, en) => (uiLanguage === "en" ? en || uiText(ar, "en") : ar);
   const gridRenderStartedAt = performanceStart();
   const [rows, setRows] = useState([smartRowFrom(entryForm)]);
   const [deletedRowIds, setDeletedRowIds] = useState([]);
@@ -10174,6 +11017,17 @@ function SmartEntryEditor({
   const [cellMenu, setCellMenu] = useState(null);
   const [rowMenu, setRowMenu] = useState(null);
   const [columnMenu, setColumnMenu] = useState(null);
+  const [columnMenuSize, setColumnMenuSize] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("smartTableColumnMenuSizeV1") || "{}");
+      return {
+        width: Math.max(280, Math.min(Number(saved.width || 340), window.innerWidth - 24)),
+        height: Math.max(260, Math.min(Number(saved.height || 520), window.innerHeight - 24)),
+      };
+    } catch {
+      return { width: 340, height: 520 };
+    }
+  });
   const [columnFilterQuery, setColumnFilterQuery] = useState("");
   const [smartSort, setSmartSort] = useState(null);
   const [smartFilters, setSmartFilters] = useState({});
@@ -10232,6 +11086,15 @@ function SmartEntryEditor({
   currentSearchResultIndexRef.current = currentSearchResultIndex;
   undoStackRef.current = undoStack;
   redoStackRef.current = redoStack;
+
+  const smartEntryDefaults = useCallback(
+    (patch = {}) =>
+      variantEntryDefaults({
+        report_language: defaultReportLanguage === "en" ? "en" : "ar",
+        ...patch,
+      }),
+    [defaultReportLanguage],
+  );
 
   historyShortcutHandlerRef.current = (event) => {
     const modifier = event.ctrlKey || event.metaKey;
@@ -10351,9 +11214,36 @@ function SmartEntryEditor({
       !entryForm.party_category ||
       party.category === entryForm.party_category,
   );
+  function rowsWithSmartReadyCounterDrafts(list = rows) {
+    const drafts = cellDraftsRef.current;
+    if (!drafts.size) return list;
+    let nextRows = list;
+    for (const [cellKey, value] of drafts.entries()) {
+      const separator = String(cellKey || "").indexOf(":");
+      if (separator <= 0) continue;
+      const index = Number(String(cellKey).slice(0, separator));
+      const key = String(cellKey).slice(separator + 1);
+      if (!Number.isInteger(index) || !key || key.startsWith("_") || !nextRows[index]) {
+        continue;
+      }
+      if (nextRows === list) nextRows = list.slice();
+      const row = nextRows[index];
+      nextRows[index] = {
+        ...row,
+        [key]: String(value ?? ""),
+        _gridGhost: false,
+        _manualBlank: false,
+        _touched: { ...(row._touched || {}), [key]: true },
+      };
+    }
+    return nextRows;
+  }
+
+  const readyCounterRows = rowsWithSmartReadyCounterDrafts(rows);
   const rowData = rows
     .filter(rowHasData)
     .map((row) => ({ ...row, _touched: { ...(row._touched || {}) } }));
+  const smartReadyCount = readyCounterRows.filter(rowHasReadyCounterData).length;
   const isDocumentEdit = !!editorContext?.document?.id;
   const scopedHistoryRows = historyRows.filter(
     (row) =>
@@ -10429,6 +11319,13 @@ function SmartEntryEditor({
   useEffect(() => {
     localStorage.setItem("smartTableColumnWidthsV2", JSON.stringify(columnWidths));
   }, [columnWidths]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "smartTableColumnMenuSizeV1",
+      JSON.stringify(columnMenuSize),
+    );
+  }, [columnMenuSize]);
 
   useLayoutEffect(() => {
     logDevelopmentPerformance("Grid render", gridRenderStartedAt);
@@ -10629,10 +11526,10 @@ function SmartEntryEditor({
   );
 
   function smartColumnLabel(columnKey) {
-    return (
+    const label =
       smartDisplayColumns.find((column) => column.key === columnKey)?.label ||
-      columnKey
-    );
+      columnKey;
+    return uiText(label, uiLanguage);
   }
 
   function visibleSmartCellValue(row, columnKey) {
@@ -10645,9 +11542,9 @@ function SmartEntryEditor({
     }
     if (columnKey === "measurement_mode") {
       return row?.measurement_mode === "engineering"
-        ? "هندسي"
+        ? uiText("هندسي", uiLanguage)
         : row?.measurement_mode === "standard"
-          ? "قياسي"
+          ? uiText("قياسي", uiLanguage)
           : row?.measurement_mode || "";
     }
     return row?.[columnKey] ?? "";
@@ -10663,7 +11560,7 @@ function SmartEntryEditor({
   }
 
   function smartFilterValueLabel(value) {
-    return value ? value : "القيم الفارغة";
+    return value ? uiText(value, uiLanguage) : uiText("القيم الفارغة", uiLanguage);
   }
 
   function smartFilterOptionValues(columnKey) {
@@ -10777,7 +11674,10 @@ function SmartEntryEditor({
     const viewportRight = viewportLeft + viewportWidth;
     const viewportBottom = viewportTop + viewportHeight;
     const openerRect = event.currentTarget?.getBoundingClientRect?.();
-    const menuWidth = Math.min(380, Math.max(320, viewportWidth - 16));
+    const menuWidth = Math.min(
+      Math.max(280, columnMenuSize.width || 340),
+      viewportWidth - 24,
+    );
     const availableBelow = openerRect
       ? viewportBottom - openerRect.bottom - 12
       : viewportHeight - event.clientY - 12;
@@ -10785,20 +11685,17 @@ function SmartEntryEditor({
       ? openerRect.top - viewportTop - 12
       : event.clientY - viewportTop - 12;
     const openAbove = availableBelow < 300 && availableAbove > availableBelow;
-    const maxHeight = Math.max(
-      180,
-      Math.min(
-        560,
-        viewportHeight - 16,
-        Math.max(openAbove ? availableAbove : availableBelow, 260),
-      ),
+    const menuHeight = Math.min(
+      Math.max(260, columnMenuSize.height || 520),
+      viewportHeight - 24,
+      Math.max(openAbove ? availableAbove : availableBelow, 260),
     );
     const preferredLeft = openerRect
       ? openerRect.right - menuWidth
       : event.clientX - menuWidth + 18;
     const preferredTop = openerRect
       ? openAbove
-        ? openerRect.top - maxHeight - 6
+        ? openerRect.top - menuHeight - 6
         : openerRect.bottom + 6
       : event.clientY;
     setCellMenu(null);
@@ -10812,10 +11709,72 @@ function SmartEntryEditor({
       ),
       top: Math.max(
         viewportTop + 8,
-        Math.min(preferredTop, viewportBottom - maxHeight - 8),
+        Math.min(preferredTop, viewportBottom - menuHeight - 8),
       ),
-      maxHeight,
+      width: menuWidth,
+      height: menuHeight,
     });
+  }
+
+  function beginSmartColumnMenuResize(event) {
+    if (!columnMenu) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = columnMenu.width || columnMenuSize.width || 340;
+    const startHeight = columnMenu.height || columnMenuSize.height || 520;
+    const startLeft = columnMenu.left;
+    const startTop = columnMenu.top;
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft || 0;
+    const viewportTop = viewport?.offsetTop || 0;
+    const viewportRight = viewportLeft + (viewport?.width || window.innerWidth);
+    const viewportBottom = viewportTop + (viewport?.height || window.innerHeight);
+    const pointerId = event.pointerId;
+    event.currentTarget.setPointerCapture?.(pointerId);
+    const resize = (moveEvent) => {
+      const nextWidth = Math.max(
+        280,
+        Math.min(
+          viewportRight - startLeft - 8,
+          startWidth + (moveEvent.clientX - startX),
+        ),
+      );
+      const nextHeight = Math.max(
+        260,
+        Math.min(
+          viewportBottom - startTop - 8,
+          startHeight + (moveEvent.clientY - startY),
+        ),
+      );
+      setColumnMenuSize({ width: nextWidth, height: nextHeight });
+      setColumnMenu((current) =>
+        current
+          ? {
+              ...current,
+              width: nextWidth,
+              height: nextHeight,
+              left: Math.max(
+                viewportLeft + 8,
+                Math.min(current.left, viewportRight - nextWidth - 8),
+              ),
+              top: Math.max(
+                viewportTop + 8,
+                Math.min(current.top, viewportBottom - nextHeight - 8),
+              ),
+            }
+          : current,
+      );
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", resize);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+    window.addEventListener("pointermove", resize);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
   }
 
   function applySmartColumnSort(columnKey, direction) {
@@ -11026,7 +11985,7 @@ function SmartEntryEditor({
       searchText: query,
     });
     if (!latestMatches.length) {
-      setMessage("لا توجد نتائج قابلة للاستبدال.");
+      setMessage(t("لا توجد نتائج قابلة للاستبدال.", "No replaceable results found."));
       return;
     }
     const matchKeys = new Set(
@@ -11069,15 +12028,17 @@ function SmartEntryEditor({
       if (Object.keys(patch).length) patches.set(row._gridId, patch);
     }
     if (!changedCells) {
-      setMessage("لا توجد نتائج قابلة للاستبدال.");
+      setMessage(t("لا توجد نتائج قابلة للاستبدال.", "No replaceable results found."));
       return;
     }
     if (
       changedCells > 1 &&
       !(await askForConfirmation({
-        title: "استبدال الكل",
-        message: `سيتم استبدال النص في ${changedCells} خلية.`,
-        confirmLabel: "استبدال الكل",
+        title: t("استبدال الكل", "Replace All"),
+        message: uiLanguage === "en"
+          ? `Text will be replaced in ${changedCells} cells.`
+          : `سيتم استبدال النص في ${changedCells} خلية.`,
+        confirmLabel: t("استبدال الكل", "Replace All"),
       }))
     ) {
       return;
@@ -11106,7 +12067,9 @@ function SmartEntryEditor({
     setPreviewData(null);
     setEntryDirty?.(true);
     setMessage(
-      `تم الاستبدال في ${changedCells} خلية (${replacedOccurrences} تطابق).`,
+      uiLanguage === "en"
+        ? `Replaced ${changedCells} cells (${replacedOccurrences} matches).`
+        : `تم الاستبدال في ${changedCells} خلية (${replacedOccurrences} تطابق).`,
     );
     logDevelopmentPerformance(
       `Replace all ${changedCells} cells`,
@@ -11681,6 +12644,72 @@ function SmartEntryEditor({
     if (!appliedGrid.length || !appliedGrid[0]?.length) return false;
     const startColumn = smartCellOrder.indexOf(key);
     if (startColumn < 0) return false;
+    if (destinationRange) {
+      recordSmartHistory();
+      setPreviewData(null);
+      setEntryDirty?.(true);
+      const nextRows = cloneSmartRows(rowsRef.current);
+      const viewEntries = smartViewRowsRef.current;
+      const targetIndexes = [];
+      for (let rowOffset = 0; rowOffset < appliedGrid.length; rowOffset += 1) {
+        const viewEntry = viewEntries[destinationRange.rowStart + rowOffset];
+        if (viewEntry?.row?._gridId) {
+          const actualIndex = nextRows.findIndex(
+            (row) => String(row?._gridId || "") === String(viewEntry.row._gridId),
+          );
+          if (actualIndex >= 0) {
+            targetIndexes.push(actualIndex);
+            continue;
+          }
+        }
+        nextRows.push(smartRowFrom());
+        targetIndexes.push(nextRows.length - 1);
+      }
+      appliedGrid.forEach((line, rowOffset) => {
+        const rowIndex = targetIndexes[rowOffset];
+        if (rowIndex < 0) return;
+        const row = nextRows[rowIndex] || smartRowFrom();
+        const touched = { ...(row._touched || {}) };
+        const patch = {};
+        line.forEach((value, columnOffset) => {
+          const targetKey = smartCellOrder[startColumn + columnOffset];
+          if (!targetKey) return;
+          patch[targetKey] = normalizeSmartClipboardValue(value, targetKey);
+          touched[targetKey] = true;
+        });
+        nextRows[rowIndex] = {
+          ...row,
+          ...patch,
+          _gridGhost: false,
+          _manualBlank: false,
+          _touched: touched,
+        };
+      });
+      const normalized = normalizeSmartRows(nextRows);
+      rowsRef.current = normalized;
+      markGridMutation();
+      setRows(normalized);
+      const endColumn = Math.min(
+        smartCellOrder.length - 1,
+        startColumn + Math.max(...appliedGrid.map((line) => line.length)) - 1,
+      );
+      const lastIndex = targetIndexes.at(-1) ?? index;
+      updateSmartSelection(
+        selectionForCells(
+          targetIndexes[0] ?? index,
+          key,
+          lastIndex,
+          smartCellOrder[endColumn] || key,
+        ),
+      );
+      setCellMenu(null);
+      setRowMenu(null);
+      logDevelopmentPerformance(
+        `Paste ${appliedGrid.length} visible rows locally`,
+        startedAt,
+      );
+      return true;
+    }
     recordSmartHistory();
     setPreviewData(null);
     setEntryDirty?.(true);
@@ -11857,7 +12886,7 @@ function SmartEntryEditor({
       const row = viewRows[rowIndex];
       if (row?._gridId) selectedRowIds.add(row._gridId);
     }
-    const nextRows = rowsRef.current.map((row, rowIndex) => {
+    const nextRows = rowsRef.current.map((row) => {
       if (!selectedRowIds.has(row._gridId)) return row;
       const patch = {};
       const touched = { ...(row._touched || {}) };
@@ -12116,17 +13145,30 @@ function SmartEntryEditor({
   async function copyFieldDown(index, key) {
     dismissSmartCellUi();
     const source = rowsRef.current[index];
-    const lastIndex = lastActiveRowIndex();
-    if (!source || index >= lastIndex) {
+    if (!source?._gridId) {
       setMessage("لا توجد صفوف نشطة أسفل هذا الحقل للنسخ إليها.");
       restoreInputInteractivity();
       return;
     }
+    const visibleRows = currentSmartViewRowList();
+    const sourceVisibleIndex = visibleRows.findIndex(
+      (row) => String(row?._gridId || "") === String(source._gridId),
+    );
+    const destinationIds = visibleRows
+      .slice(sourceVisibleIndex + 1)
+      .filter((row) => row?._gridId && rowHasData(row))
+      .map((row) => row._gridId);
+    if (sourceVisibleIndex < 0 || !destinationIds.length) {
+      setMessage("لا توجد صفوف نشطة ظاهرة أسفل هذا الحقل للنسخ إليها.");
+      restoreInputInteractivity();
+      return;
+    }
+    const destinationIdSet = new Set(destinationIds);
     recordSmartHistory();
     setPreviewData(null);
     setEntryDirty?.(true);
     const nextRows = rowsRef.current.map((row, rowIndex) => {
-      if (rowIndex <= index || rowIndex > lastIndex || !rowHasData(row))
+      if (!destinationIdSet.has(row._gridId))
         return row;
       return {
         ...row,
@@ -12375,6 +13417,13 @@ function SmartEntryEditor({
     updateSmartSuggestionIndex(-1);
   }
 
+  function requestSmartDraftRender() {
+    window.cancelAnimationFrame(suggestionDraftFrameRef.current);
+    suggestionDraftFrameRef.current = window.requestAnimationFrame(() => {
+      setSuggestionDraftVersion((current) => current + 1);
+    });
+  }
+
   function smartCellDraftValue(index, key) {
     const cellKey = `${index}:${key}`;
     if (cellDraftsRef.current.has(cellKey)) {
@@ -12397,15 +13446,12 @@ function SmartEntryEditor({
     suggestionCommittedCellsRef.current.delete(cellKey);
     cellDraftsRef.current.set(cellKey, String(value ?? ""));
     updateSmartSuggestionIndex(-1);
+    requestSmartDraftRender();
     if (Date.now() < nativeHistoryUntilRef.current) return;
     if (optionsForCell(key).length) {
       if (activeCellRef.current !== cellKey || !suggestionRect) {
         openCellSuggestions(cellKey, target);
       }
-      window.cancelAnimationFrame(suggestionDraftFrameRef.current);
-      suggestionDraftFrameRef.current = window.requestAnimationFrame(() => {
-        setSuggestionDraftVersion((current) => current + 1);
-      });
     }
   }
 
@@ -12432,6 +13478,19 @@ function SmartEntryEditor({
     cellDraftsRef.current.delete(cellKey);
     updateRow(index, key, value);
     return value;
+  }
+
+  function commitActiveSmartEditor() {
+    const cellKey = editingCellRef.current || "";
+    const separator = cellKey.indexOf(":");
+    if (separator <= 0) return false;
+    const index = Number(cellKey.slice(0, separator));
+    const key = cellKey.slice(separator + 1);
+    if (!Number.isInteger(index) || !smartCellOrder.includes(key)) return false;
+    commitSmartCellEdit(index, key, smartCellDraftValue(index, key), {
+      sessionId: activeEditSessionRef.current,
+    });
+    return true;
   }
 
   function finishSmartCellEdit(index, key, {
@@ -12587,7 +13646,7 @@ function SmartEntryEditor({
     setPreviewData(null);
     setDeletedRowIds([]);
     setSaving(false);
-    setRows([smartRowFrom(variantEntryDefaults())]);
+    setRows([smartRowFrom(smartEntryDefaults())]);
     updateSmartSelection(null);
     setEditingId?.(null);
     setEntryDirty?.(false);
@@ -12636,12 +13695,16 @@ function SmartEntryEditor({
   }
 
   function buildPreview() {
+    const committedRows = rowsWithCommittedSmartEditorBuffer();
+    const previewRowData = committedRows
+      .filter(rowHasData)
+      .map((row) => ({ ...row, _touched: { ...(row._touched || {}) } }));
     const validation = validateMain();
     if (validation) {
       setMessage(validation);
       return null;
     }
-    if (!rowData.length && !isDocumentEdit) {
+    if (!previewRowData.length && !isDocumentEdit) {
       setMessage(
         "لا يمكن الحفظ أو المعاينة بدون إدخال بند واحد على الأقل في الجدول.",
       );
@@ -12649,12 +13712,12 @@ function SmartEntryEditor({
     }
     if (
       entryForm.document_type === "contractor_certificate" &&
-      rowData.some((row) => !String(row.work_type || "").trim())
+      previewRowData.some((row) => !String(row.work_type || "").trim())
     ) {
       setMessage("اختر نوع الأعمال لكل بند في مستخلص المقاول.");
       return null;
     }
-    const calculatedRows = rowData.map((row, index) =>
+    const calculatedRows = previewRowData.map((row, index) =>
       calculateDraftRow(
         {
           ...row,
@@ -12711,6 +13774,8 @@ function SmartEntryEditor({
           : entryForm.document_type === "contractor_certificate"
             ? "contractor"
             : "offer",
+      report_language: entryForm.report_language || "ar",
+      report_direction: entryForm.report_language === "en" ? "ltr" : "rtl",
       vat_enabled: !!entryForm.vat_enabled,
       vat_terms_only: !!entryForm.vat_terms_only,
       operation_no: entryForm.operation_no || nextDoc?.operation_no || "Auto",
@@ -12866,6 +13931,7 @@ function SmartEntryEditor({
             project: entryForm.project,
             building_unit: documentLocation,
             entry_date: entryForm.entry_date,
+            report_language: entryForm.report_language || "ar",
             party_id: firstSaved?.party_id || lastSaved?.party_id || entryForm.party_id || null,
             party_role: entryForm.party_role,
             party_category: entryForm.party_category,
@@ -12883,6 +13949,7 @@ function SmartEntryEditor({
         document_id: documentId,
         document_type: updatedDocument?.document_type || entryForm.document_type,
         status: updatedDocument?.status || entryForm.document_status,
+        report_language: updatedDocument?.report_language || entryForm.report_language || "ar",
         operation_no: operationNo,
         document_no: serial,
         party_id:
@@ -12899,7 +13966,7 @@ function SmartEntryEditor({
         project: entryForm.project,
         building_unit: documentLocation,
       };
-      const resetEntry = variantEntryDefaults({
+      const resetEntry = smartEntryDefaults({
         document_type: entryForm.document_type,
         document_status: meta.status,
         party_role: meta.role,
@@ -13130,6 +14197,13 @@ function SmartEntryEditor({
   }
 
   function selectSmartCell(index, key, extend = false) {
+    const destinationCellKey = `${index}:${key}`;
+    if (
+      editingCellRef.current &&
+      editingCellRef.current !== destinationCellKey
+    ) {
+      commitActiveSmartEditor();
+    }
     updateSmartEditingCell("");
     updateSmartActiveCell("");
     setSuggestionRect(null);
@@ -13308,7 +14382,7 @@ function SmartEntryEditor({
       setSuggestionRect(null);
       const focusCell = selection?.focusCell || smartCellPoint(index, key);
       const destination = findSmartCtrlArrowDestination({
-        rows: rowsRef.current,
+        rows: currentSmartViewRowList(),
         columnOrder: smartCellOrder,
         focusCell,
         direction: event.key,
@@ -13610,7 +14684,11 @@ function SmartEntryEditor({
         data-suggestions-open={showSuggestions ? "true" : "false"}
         tabIndex={0}
         aria-expanded={showSuggestions}
-        aria-label={`${smartDisplayColumns.find((column) => column.key === key)?.label || key}، الصف ${index + 1}`}
+        aria-label={
+          uiLanguage === "en"
+            ? `${smartColumnLabel(key)}, row ${index + 1}`
+            : `${smartDisplayColumns.find((column) => column.key === key)?.label || key}، الصف ${index + 1}`
+        }
         onContextMenu={(event) => openSmartCellMenu(event, index, key)}
         onPointerDown={(event) => {
           if (event.button === 2) return;
@@ -13691,7 +14769,7 @@ function SmartEntryEditor({
           <button
             type="button"
             className="cell-copy-down-button"
-            title="نسخ قيمة هذا الحقل إلى الصفوف التالية"
+            title={t("نسخ قيمة هذا الحقل إلى الصفوف التالية", "Copy this field value to following rows")}
             onPointerDown={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -13779,7 +14857,7 @@ function SmartEntryEditor({
       <button
         type="button"
         className="cell-copy-down-button"
-        title="نسخ قيمة هذا الحقل إلى الصفوف التالية"
+        title={t("نسخ قيمة هذا الحقل إلى الصفوف التالية", "Copy this field value to following rows")}
         onPointerDown={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -13840,6 +14918,52 @@ function SmartEntryEditor({
   const bottomVirtualSpacerHeight =
     (smartViewRows.length - virtualEnd) * virtualRowHeight;
 
+  function currentShortcutSelection() {
+    const existing = rangeSelectionRef.current;
+    if (existing?.focusCell) return existing;
+    const firstEditable = smartViewRowsRef.current.find((entry) => entry.row?._gridId);
+    if (!firstEditable) return null;
+    return selectionForCells(firstEditable.index, smartCellOrder[0]);
+  }
+
+  function openSmartSearchFromShortcut() {
+    window.clearTimeout(suggestionTimerRef.current);
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    updateSmartSuggestionIndex(-1);
+    setCellMenu(null);
+    setRowMenu(null);
+    setSearchOpen(true);
+    window.requestAnimationFrame(() => {
+      const searchInput = document.querySelector("[data-smart-search-input='true']");
+      searchInput?.focus({ preventScroll: true });
+      searchInput?.select?.();
+    });
+  }
+
+  function runSmartCtrlArrowShortcut(direction, extendSelection = false) {
+    const selection = currentShortcutSelection();
+    if (!selection?.focusCell) return;
+    const destination = findSmartCtrlArrowDestination({
+      rows: currentSmartViewRowList(),
+      columnOrder: smartCellOrder,
+      focusCell: selection.focusCell,
+      direction,
+    });
+    const nextSelection = smartSelectionAfterNavigation({
+      selection,
+      destination,
+      extendSelection,
+    });
+    updateSmartSelection(nextSelection);
+    updateSmartEditingCell("");
+    updateSmartActiveCell("");
+    setSuggestionRect(null);
+    updateSmartSuggestionIndex(-1);
+    focusSmartCellPoint(nextSelection?.focusCell);
+  }
+
   return (
     <div className="page-stack">
       <ConfirmationLayer
@@ -13850,7 +14974,7 @@ function SmartEntryEditor({
         <div
           className="smart-cell-context-menu"
           role="menu"
-          dir="rtl"
+          dir={uiLanguage === "en" ? "ltr" : "rtl"}
           style={{ left: `${cellMenu.left}px`, top: `${cellMenu.top}px` }}
           onContextMenu={(event) => event.preventDefault()}
         >
@@ -13859,14 +14983,14 @@ function SmartEntryEditor({
             role="menuitem"
             onClick={copySmartCellMenuContent}
           >
-            <Copy size={16} /> نسخ المحتوى
+            <Copy size={16} /> {t("نسخ المحتوى", "Copy content")}
           </button>
           <button
             type="button"
             role="menuitem"
             onClick={pasteSmartCellMenuContent}
           >
-            <ClipboardList size={16} /> لصق
+            <ClipboardList size={16} /> {t("لصق", "Paste")}
           </button>
           <button
             type="button"
@@ -13874,7 +14998,7 @@ function SmartEntryEditor({
             className="danger"
             onClick={clearSmartCellMenuContent}
           >
-            <Trash2 size={16} /> مسح
+            <Trash2 size={16} /> {t("مسح الخلية", "Clear cell")}
           </button>
         </div>,
         document.body,
@@ -13883,7 +15007,7 @@ function SmartEntryEditor({
         <div
           className="smart-row-context-menu"
           role="menu"
-          dir="rtl"
+          dir={uiLanguage === "en" ? "ltr" : "rtl"}
           style={{ left: `${rowMenu.left}px`, top: `${rowMenu.top}px` }}
           onContextMenu={(event) => event.preventDefault()}
         >
@@ -13892,14 +15016,14 @@ function SmartEntryEditor({
             role="menuitem"
             onClick={() => insertEmptySmartRow(rowMenu.rowId, "above")}
           >
-            <Plus size={16} /> إضافة صف فارغ بالأعلى
+            <Plus size={16} /> {t("إضافة صف فارغ بالأعلى", "Insert empty row above")}
           </button>
           <button
             type="button"
             role="menuitem"
             onClick={() => insertEmptySmartRow(rowMenu.rowId, "below")}
           >
-            <Plus size={16} /> إضافة صف فارغ بالأسفل
+            <Plus size={16} /> {t("إضافة صف فارغ بالأسفل", "Insert empty row below")}
           </button>
           <button
             type="button"
@@ -13907,7 +15031,7 @@ function SmartEntryEditor({
             className="danger"
             onClick={deleteSmartRowFromMenu}
           >
-            <Trash2 size={16} /> حذف هذا الصف
+            <Trash2 size={16} /> {t("حذف هذا الصف", "Delete this row")}
           </button>
         </div>,
         document.body,
@@ -13916,11 +15040,12 @@ function SmartEntryEditor({
         <div
           className="smart-column-menu"
           role="menu"
-          dir="rtl"
+          dir={uiLanguage === "en" ? "ltr" : "rtl"}
           style={{
             left: `${columnMenu.left}px`,
             top: `${columnMenu.top}px`,
-            "--smart-column-menu-max-height": `${columnMenu.maxHeight || 520}px`,
+            "--smart-column-menu-width": `${columnMenu.width || columnMenuSize.width || 340}px`,
+            "--smart-column-menu-height": `${columnMenu.height || columnMenuSize.height || 520}px`,
           }}
           onContextMenu={(event) => event.preventDefault()}
           onPointerDown={(event) => event.stopPropagation()}
@@ -13928,11 +15053,11 @@ function SmartEntryEditor({
           onWheel={(event) => event.stopPropagation()}
         >
           <div className="smart-column-menu-head">
-            <strong>{columnMenuColumn.label}</strong>
+            <strong>{smartColumnLabel(columnMenuColumn.key)}</strong>
             <button
               type="button"
               className="smart-column-menu-close"
-              aria-label="إغلاق"
+              aria-label={t("إغلاق", "Close")}
               onClick={() => setColumnMenu(null)}
             >
               ×
@@ -13948,8 +15073,8 @@ function SmartEntryEditor({
             >
               <span aria-hidden="true">↑</span>
               {smartColumnType(columnMenuColumn.key) === "number"
-                ? "ترتيب من الأصغر إلى الأكبر"
-                : "ترتيب من أ إلى ي"}
+                ? t("ترتيب من الأصغر إلى الأكبر", "Sort smallest to largest")
+                : t("ترتيب من أ إلى ي", "Sort A to Z")}
             </button>
             <button
               type="button"
@@ -13960,15 +15085,15 @@ function SmartEntryEditor({
             >
               <span aria-hidden="true">↓</span>
               {smartColumnType(columnMenuColumn.key) === "number"
-                ? "ترتيب من الأكبر إلى الأصغر"
-                : "ترتيب من ي إلى أ"}
+                ? t("ترتيب من الأكبر إلى الأصغر", "Sort largest to smallest")
+                : t("ترتيب من ي إلى أ", "Sort Z to A")}
             </button>
             <button
               type="button"
               role="menuitem"
               onClick={() => clearSmartColumnSort(columnMenuColumn.key)}
             >
-              مسح الترتيب
+              {t("مسح الترتيب", "Clear sort")}
             </button>
           </div>
           <div className="smart-column-menu-section smart-column-menu-search">
@@ -13976,7 +15101,7 @@ function SmartEntryEditor({
               type="text"
               value={columnFilterQuery}
               onChange={(event) => setColumnFilterQuery(event.target.value)}
-              placeholder="بحث في القيم..."
+              placeholder={t("بحث في القيم...", "Search values...")}
               autoComplete="off"
             />
             <label className="smart-column-menu-check smart-column-menu-check-all">
@@ -13991,7 +15116,7 @@ function SmartEntryEditor({
                   }
                 }}
               />
-              <span>تحديد الكل</span>
+              <span>{t("تحديد الكل", "Select all")}</span>
             </label>
             {columnMenuHasBlankValue && (
               <label className="smart-column-menu-check">
@@ -14026,9 +15151,16 @@ function SmartEntryEditor({
               role="menuitem"
               onClick={() => clearSmartColumnFilter(columnMenuColumn.key)}
             >
-              مسح عامل التصفية
+              {t("مسح عامل التصفية", "Clear filter")}
             </button>
           </div>
+          <button
+            type="button"
+            className="smart-column-menu-resize"
+            aria-label={t("تغيير حجم القائمة", "Resize menu")}
+            title={t("تغيير حجم القائمة", "Resize menu")}
+            onPointerDown={beginSmartColumnMenuResize}
+          />
         </div>,
         document.body,
       )}
@@ -14037,10 +15169,10 @@ function SmartEntryEditor({
         onSubmit={(event) => event.preventDefault()}
       >
         <div className="panel-head">
-          <h2>{isDocumentEdit ? "تعديل مستند" : "إدخال مستند جديد"}</h2>
+          <h2>{isDocumentEdit ? t("تعديل مستند", "Edit Document") : t("إدخال مستند جديد", "New Document Entry")}</h2>
           {(onCloseContext || onBack) && (
-            <button type="button" onClick={handleCloseEditor} title="إغلاق والرجوع">
-              <X size={17} /> إغلاق
+            <button type="button" onClick={handleCloseEditor} title={t("إغلاق والرجوع", "Close and return")}>
+              <X size={17} /> {t("إغلاق", "Close")}
             </button>
           )}
           <div className="document-id">
@@ -14052,9 +15184,9 @@ function SmartEntryEditor({
         </div>
 
         <section className="form-section fixed-data-section">
-          <h3>بيانات ثابتة للمستند</h3>
+          <h3>{t("بيانات ثابتة للمستند", "Fixed Document Data")}</h3>
           <div className="form-grid smart-fixed-grid">
-            <Field label="نوع المستند">
+            <Field label={t("نوع المستند", "Document Type")}>
               <select
                 value={entryForm.document_type}
                 disabled={!!APP_VARIANT.forcedDocumentType}
@@ -14066,36 +15198,36 @@ function SmartEntryEditor({
                     : item.value !== "contractor_certificate",
                 ).map((item) => (
                   <option key={item.value} value={item.value}>
-                    {item.label}
+                    {uiText(item.label, uiLanguage)}
                   </option>
                 ))}
               </select>
             </Field>
-            <Field label="الطرف">
+            <Field label={t("الطرف", "Party")}>
               <select
                 value={scopeRole}
                 disabled
               >
                 <option value={scopeRole}>
-                  {scopeRole === "contractor" ? "مقاول" : "عميل"}
+                  {scopeRole === "contractor" ? t("مقاول", "Contractor") : t("عميل", "Customer")}
                 </option>
               </select>
             </Field>
-            <Field label="تصنيف العميل">
+            <Field label={t("تصنيف العميل", "Customer Classification")}>
               <select
                 value={entryForm.party_category}
                 onChange={(event) =>
                   updateFixed({ party_category: event.target.value })
                 }
               >
-                <option value="unselected">بدون تصنيف</option>
-                <option value="retail">فرد</option>
-                <option value="engineer">مهندس</option>
-                <option value="corporate">شركة</option>
+                <option value="unselected">{t("بدون تصنيف", "Unclassified")}</option>
+                <option value="retail">{t("فرد", "Individual")}</option>
+                <option value="engineer">{t("مهندس", "Engineer")}</option>
+                <option value="corporate">{t("شركة", "Company")}</option>
               </select>
             </Field>
             <ComboField
-              label="اسم العميل/المقاول بدون م. أو شركة"
+              label={t("اسم العميل/المقاول بدون م. أو شركة", "Customer/contractor name without prefix")}
               value={entryForm.base_party_name || ""}
               options={filteredParties.map(
                 (party) => party.base_name || party.display_name,
@@ -14116,7 +15248,7 @@ function SmartEntryEditor({
             />
             {entryForm.document_type === "contractor_certificate" && (
               <ComboField
-                label="العميل مصدر الأعمال"
+                label={t("العميل مصدر الأعمال", "Source Customer")}
                 value={entryForm.source_customer_name || ""}
                 options={sourceCustomerOptions}
                 onChange={(value) => {
@@ -14133,7 +15265,7 @@ function SmartEntryEditor({
               />
             )}
             <ComboField
-              label="المشروع"
+              label={t("المشروع", "Project")}
               value={entryForm.project || ""}
               options={projectOptions}
               onChange={(value) =>
@@ -14147,12 +15279,12 @@ function SmartEntryEditor({
             />
             {entryForm.document_type === "contractor_certificate" ? (
               <MultiComboField
-                label="أنواع الأعمال داخل المستخلص"
+                label={t("أنواع الأعمال داخل المستخلص", "Work Types in Certificate")}
                 values={selectedWorkTypes}
                 options={workTypeOptions.map((value) => ({ value, label: value }))}
-                allLabel="اختر أنواع الأعمال"
-                multipleLabel="أنواع أعمال"
-                clearLabel="مسح الاختيار"
+                allLabel={t("اختر أنواع الأعمال", "Choose work types")}
+                multipleLabel={t("أنواع أعمال", "Work types")}
+                clearLabel={t("مسح الاختيار", "Clear selection")}
                 onChange={(values) =>
                   updateFixed({
                     work_types: values,
@@ -14162,14 +15294,14 @@ function SmartEntryEditor({
               />
             ) : (
               <ComboField
-                label="نوع الأعمال"
+                label={t("نوع الأعمال", "Work Type")}
                 value={entryForm.work_type || ""}
                 options={workTypeOptions}
                 onChange={(value) => updateFixed({ work_type: value })}
               />
             )}
             {entryForm.document_type === "contractor_certificate" && (
-              <Field label="رقم المستخلص">
+              <Field label={t("رقم المستخلص", "Certificate No.")}>
                 <div className="certificate-number-field">
                   <input
                     inputMode="numeric"
@@ -14178,13 +15310,15 @@ function SmartEntryEditor({
                   />
                   {certificateInfo && (
                     <small>
-                      آخر مستخلص لهذا المقاول والمشروع: {certificateInfo.last_no || "لا يوجد"} — التالي: {certificateInfo.next_no}
+                      {uiLanguage === "en"
+                        ? `Last certificate for this contractor/project: ${certificateInfo.last_no || "None"} — Next: ${certificateInfo.next_no}`
+                        : `آخر مستخلص لهذا المقاول والمشروع: ${certificateInfo.last_no || "لا يوجد"} — التالي: ${certificateInfo.next_no}`}
                     </small>
                   )}
                 </div>
               </Field>
             )}
-            <Field label="التاريخ">
+            <Field label={t("التاريخ", "Date")}>
               <input
                 type="date"
                 value={dateInputValue(entryForm.entry_date)}
@@ -14193,17 +15327,17 @@ function SmartEntryEditor({
                 }
               />
             </Field>
-            <Field label="رقم المستند">
+            <Field label={t("رقم المستند", "Document No.")}>
               <input
                 dir="ltr"
                 value={entryForm.operation_no || ""}
                 placeholder={nextDoc?.operation_no || "Auto"}
                 readOnly
                 aria-readonly="true"
-                title="رقم المستند يُنشأ تلقائياً ولا يمكن تعديله"
+                title={t("رقم المستند يُنشأ تلقائياً ولا يمكن تعديله", "Document number is generated automatically and cannot be edited")}
               />
             </Field>
-            <Field label="الرقم التسلسلي">
+            <Field label={t("الرقم التسلسلي", "Serial No.")}>
               <input
                 type="text"
                 inputMode="numeric"
@@ -14212,10 +15346,10 @@ function SmartEntryEditor({
                 placeholder={nextDoc?.next_no || ""}
                 readOnly
                 aria-readonly="true"
-                title="الرقم التسلسلي يُنشأ تلقائياً ولا يمكن تعديله"
+                title={t("الرقم التسلسلي يُنشأ تلقائياً ولا يمكن تعديله", "Serial number is generated automatically and cannot be edited")}
               />
             </Field>
-            <Field label="الحالة">
+            <Field label={t("الحالة", "Status")}>
               <select
                 value={entryForm.document_status || meta.status}
                 disabled={!canUser(currentUser, "can_change_status")}
@@ -14223,24 +15357,35 @@ function SmartEntryEditor({
                   updateFixed({ document_status: event.target.value })
                 }
               >
-                <option value="draft">مسودة</option>
-                <option value="approved">معتمد</option>
-                <option value="closed">مغلق</option>
+                <option value="draft">{t("مسودة", "Draft")}</option>
+                <option value="approved">{t("معتمد", "Approved")}</option>
+                <option value="closed">{t("مغلق", "Closed")}</option>
               </select>
             </Field>
-            <Field label="نوع الخصم">
+            <Field label={t("لغة التقرير", "Report Language")}>
+              <select
+                value={entryForm.report_language || "ar"}
+                onChange={(event) =>
+                  updateFixed({ report_language: event.target.value })
+                }
+              >
+                <option value="ar">{t("العربية", "Arabic")}</option>
+                <option value="en">English</option>
+              </select>
+            </Field>
+            <Field label={t("نوع الخصم", "Discount Type")}>
               <select
                 value={entryForm.discount_type || "none"}
                 onChange={(event) =>
                   updateFixed({ discount_type: event.target.value })
                 }
               >
-                <option value="none">بدون</option>
-                <option value="rate">نسبة</option>
-                <option value="amount">مبلغ</option>
+                <option value="none">{t("بدون", "None")}</option>
+                <option value="rate">{t("نسبة", "Percentage")}</option>
+                <option value="amount">{t("مبلغ", "Amount")}</option>
               </select>
             </Field>
-            <Field label="قيمة الخصم">
+            <Field label={t("قيمة الخصم", "Discount Value")}>
               <input
                 type="text"
                 inputMode="decimal"
@@ -14254,10 +15399,10 @@ function SmartEntryEditor({
         </section>
 
         <section className="form-section compact-tax-section">
-          <h3>الضرائب والتأمينات</h3>
+          <h3>{t("الضرائب والتأمينات", "Taxes and Insurance")}</h3>
           <div className="tax-grid compact-tax-grid">
             {TAXES.map((tax) => (
-              <label key={tax.key} className="check-tile" title={tax.label}>
+              <label key={tax.key} className="check-tile" title={uiText(tax.label, uiLanguage)}>
                 <input
                   type="checkbox"
                   checked={!!entryForm[tax.key]}
@@ -14265,13 +15410,13 @@ function SmartEntryEditor({
                     updateFixed({ [tax.key]: event.target.checked })
                   }
                 />
-                <span>{tax.label}</span>
+                <span>{uiText(tax.label, uiLanguage)}</span>
               </label>
             ))}
             {entryForm.document_type === "price_offer" && (
               <label
                 className="check-tile vat-terms-only-tile"
-                title="يضيف شرط أن الأسعار شاملة ضريبة 14% إلى التقرير، بدون إضافة الضريبة إلى الحساب"
+                title={t("يضيف شرط أن الأسعار شاملة ضريبة 14% إلى التقرير، بدون إضافة الضريبة إلى الحساب", "Adds a 14% VAT terms note to the report without adding VAT to calculations")}
               >
                 <input
                   type="checkbox"
@@ -14280,7 +15425,7 @@ function SmartEntryEditor({
                     updateFixed({ vat_terms_only: event.target.checked })
                   }
                 />
-                <span>{VAT_TERMS_ONLY_OPTION.label}</span>
+                <span>{uiText(VAT_TERMS_ONLY_OPTION.label, uiLanguage)}</span>
               </label>
             )}
           </div>
@@ -14290,14 +15435,14 @@ function SmartEntryEditor({
           className={`form-section smart-table-section${tableExpanded ? " expanded" : ""}`}
         >
           <div className="section-title-row">
-            <h3>بنود المستند</h3>
+            <h3>{t("بنود المستند", "Document items")}</h3>
             <div className="section-title-actions">
-              <ItemReadyBadge count={rowData.length} />
+              <ItemReadyBadge count={smartReadyCount} suffix={t("بند جاهز", "ready item")} />
               <button
                 type="button"
                 className="icon-button"
-                title="لصق بيانات الحافظة في النطاق المحدد"
-                aria-label="لصق بيانات الحافظة في النطاق المحدد"
+                title={t("لصق بيانات الحافظة في النطاق المحدد", "Paste clipboard data into the selected range")}
+                aria-label={t("لصق بيانات الحافظة في النطاق المحدد", "Paste clipboard data into the selected range")}
                 onClick={pasteIntoCurrentSmartSelection}
               >
                 <ClipboardList size={17} />
@@ -14307,8 +15452,8 @@ function SmartEntryEditor({
                 className="icon-button expand-table-button"
                 title={
                   tableExpanded
-                    ? "تصغير جدول البنود"
-                    : "توسيع جدول البنود لملء الشاشة"
+                    ? t("تصغير جدول البنود", "Shrink items table")
+                    : t("توسيع جدول البنود لملء الشاشة", "Expand items table to full screen")
                 }
                 onClick={() => setTableExpanded((current) => !current)}
               >
@@ -14332,21 +15477,81 @@ function SmartEntryEditor({
               onNext={() => navigateSmartSearchResults(1)}
               onJump={jumpToSmartSearchResult}
               onReplaceAll={replaceAllSmartSearch}
+              uiLanguage={uiLanguage}
             />
           )}
           {(smartSort || activeSmartFilterKeys.length > 0) && (
             <div className="smart-table-view-actions">
               <span>
-                {smartViewRows.length} صف ظاهر من {rows.length}
+                {uiLanguage === "en"
+                  ? `${smartViewRows.length} visible rows of ${rows.length}`
+                  : `${smartViewRows.length} صف ظاهر من ${rows.length}`}
               </span>
               <button type="button" onClick={() => setSmartFilters({})}>
-                مسح جميع عوامل التصفية
+                {t("مسح جميع عوامل التصفية", "Clear all filters")}
               </button>
               <button type="button" onClick={() => setSmartSort(null)}>
-                مسح جميع الترتيبات
+                {t("مسح جميع الترتيبات", "Clear all sorts")}
               </button>
               <button type="button" onClick={resetSmartTableView}>
-                إعادة ضبط العرض
+                {t("إعادة ضبط العرض", "Reset view")}
+              </button>
+            </div>
+          )}
+          {tableExpanded && (
+            <div className="smart-table-shortcut-bar" dir={uiLanguage === "en" ? "ltr" : "rtl"}>
+              <button
+                type="button"
+                title={`${t("بحث في الجدول", "Search Table")} — Ctrl+F`}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={openSmartSearchFromShortcut}
+              >
+                <Search size={14} /> <span>{t("بحث", "Search")}</span> <kbd>Ctrl+F</kbd>
+              </button>
+              <button
+                type="button"
+                title={`${t("نسخ أول صف في النطاق إلى بقية الصفوف المحددة", "Copy the first selected row to the rest of the selected rows")} — Ctrl+D`}
+                disabled={!rangeSelection}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={copySelectedRangeDown}
+              >
+                <ArrowDown size={14} /> <span>{t("نسخ للأسفل", "Copy down")}</span> <kbd>Ctrl+D</kbd>
+              </button>
+              <button
+                type="button"
+                title={`${t("الانتقال لأول خلية ظاهرة للأعلى", "Jump to first visible cell")} — Ctrl+↑`}
+                disabled={!smartViewRows.length}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => runSmartCtrlArrowShortcut("ArrowUp")}
+              >
+                <span>⇈</span> <kbd>Ctrl+↑</kbd>
+              </button>
+              <button
+                type="button"
+                title={`${t("الانتقال لآخر خلية ظاهرة للأسفل", "Jump to last visible cell")} — Ctrl+↓`}
+                disabled={!smartViewRows.length}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => runSmartCtrlArrowShortcut("ArrowDown")}
+              >
+                <span>⇊</span> <kbd>Ctrl+↓</kbd>
+              </button>
+              <button
+                type="button"
+                title={`${t("مد التحديد للأعلى", "Extend selection upward")} — Ctrl+Shift+↑`}
+                disabled={!smartViewRows.length}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => runSmartCtrlArrowShortcut("ArrowUp", true)}
+              >
+                <span>{t("تحديد ↑", "Select ↑")}</span> <kbd>Ctrl+Shift+↑</kbd>
+              </button>
+              <button
+                type="button"
+                title={`${t("مد التحديد للأسفل", "Extend selection downward")} — Ctrl+Shift+↓`}
+                disabled={!smartViewRows.length}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => runSmartCtrlArrowShortcut("ArrowDown", true)}
+              >
+                <span>{t("تحديد ↓", "Select ↓")}</span> <kbd>Ctrl+Shift+↓</kbd>
               </button>
             </div>
           )}
@@ -14395,7 +15600,7 @@ function SmartEntryEditor({
                       }
                     >
                       <div className="smart-column-head-content">
-                        <span>{column.label}</span>
+                        <span>{smartColumnLabel(column.key)}</span>
                         {smartSort?.key === column.key && (
                           <span className="smart-column-state">
                             {smartSort.direction === "asc" ? "↑" : "↓"}
@@ -14408,8 +15613,8 @@ function SmartEntryEditor({
                           <button
                             type="button"
                             className="smart-column-menu-button"
-                            title={`ترتيب وتصفية عمود ${column.label}`}
-                            aria-label={`Sort and filter ${column.label}`}
+                            title={uiLanguage === "en" ? `Sort and filter ${smartColumnLabel(column.key)}` : `ترتيب وتصفية عمود ${column.label}`}
+                            aria-label={`Sort and filter ${smartColumnLabel(column.key)}`}
                             onPointerDown={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
@@ -14424,8 +15629,8 @@ function SmartEntryEditor({
                         <button
                           type="button"
                           className="column-resize-handle"
-                          title={`اسحب لتغيير عرض عمود ${column.label}`}
-                          aria-label={`Resize ${column.label} column`}
+                          title={uiLanguage === "en" ? `Resize ${smartColumnLabel(column.key)} column` : `اسحب لتغيير عرض عمود ${column.label}`}
+                          aria-label={`Resize ${smartColumnLabel(column.key)} column`}
                           onPointerDown={(event) =>
                             beginColumnResize(column.key, event)
                           }
@@ -14464,12 +15669,13 @@ function SmartEntryEditor({
                   >
                     <td
                       className="smart-row-index-cell"
-                      title="انقر لتحديد الصف بالكامل، واستخدم Shift لتحديد عدة صفوف"
+                      title={t("انقر لتحديد الصف بالكامل، واستخدم Shift لتحديد عدة صفوف", "Click to select the full row; use Shift to select multiple rows")}
                       onContextMenu={(event) => openSmartRowMenu(event, row)}
                       onPointerDown={(event) => {
                         if (event.button === 2) return;
                         if (event.target.closest?.(".row-resize-handle")) return;
                         event.preventDefault();
+                        commitActiveSmartEditor();
                         updateSmartEditingCell("");
                         updateSmartActiveCell("");
                         setSuggestionRect(null);
@@ -14494,7 +15700,7 @@ function SmartEntryEditor({
                       <button
                         type="button"
                         className="row-resize-handle"
-                        title="اسحب لتغيير ارتفاع كل الصفوف"
+                        title={t("اسحب لتغيير ارتفاع كل الصفوف", "Drag to resize all rows")}
                         onPointerDown={beginRowResize}
                       />
                     </td>
@@ -14552,7 +15758,7 @@ function SmartEntryEditor({
                         "unit_code",
                         UNITS.map((unit) => (
                           <option key={unit.value} value={unit.value}>
-                            {unit.label}
+                            {uiText(unit.label, uiLanguage)}
                           </option>
                         )),
                       )}
@@ -14593,8 +15799,8 @@ function SmartEntryEditor({
                         index,
                         "measurement_mode",
                         <>
-                          <option value="standard">قياسي</option>
-                          <option value="engineering">هندسي</option>
+                          <option value="standard">{t("قياسي", "Standard")}</option>
+                          <option value="engineering">{t("هندسي", "Engineering")}</option>
                         </>,
                       )}
                     </td>
@@ -14602,7 +15808,7 @@ function SmartEntryEditor({
                       <button
                         type="button"
                         className="icon-button danger copy-spec-down-button"
-                        title="نسخ مواصفات الصف للأسفل مع الحفاظ على المقاسات والكميات"
+                        title={t("نسخ مواصفات الصف للأسفل مع الحفاظ على المقاسات والكميات", "Copy row specifications downward while preserving measurements and quantities")}
                         onClick={() => copyRowSpecDown(index)}
                       >
                         <ArrowDown size={15} />
@@ -14610,7 +15816,7 @@ function SmartEntryEditor({
                       <button
                         type="button"
                         className="icon-button"
-                        title="نسخ الصف بالكامل إلى نهاية الجدول"
+                        title={t("نسخ الصف بالكامل إلى نهاية الجدول", "Copy full row to the end of the table")}
                         onClick={() => copyFullRowToBottom(index)}
                       >
                         <Copy size={15} />
@@ -14618,7 +15824,7 @@ function SmartEntryEditor({
                       <button
                         type="button"
                         className="row-fill-handle"
-                        title="اسحب لنسخ الصف للأسفل"
+                        title={t("اسحب لنسخ الصف للأسفل", "Drag to fill row downward")}
                         onPointerDown={(event) => beginDragFill(index, event)}
                       >
                         <CornerUpLeft size={14} />
@@ -14626,7 +15832,7 @@ function SmartEntryEditor({
                       <button
                         type="button"
                         className="icon-button danger"
-                        title="حذف هذا البند"
+                        title={t("حذف هذا البند", "Delete this item")}
                         onClick={() => deleteSmartRow(index)}
                       >
                         <Trash2 size={15} />
@@ -14687,24 +15893,24 @@ function SmartEntryEditor({
             onClick={previewDraft}
             disabled={busy || saving}
           >
-            <Eye size={18} /> حفظ ومعاينة
+            <Eye size={18} /> {t("حفظ ومعاينة", "Save and Preview")}
           </button>
           <button
             type="button"
             onClick={submitDraft}
             disabled={busy || saving || !previewData}
           >
-            <Save size={18} /> اعتماد وحفظ
+            <Save size={18} /> {t("اعتماد وحفظ", "Approve and Save")}
           </button>
           <button
             type="button"
             onClick={() => {
-              if (!window.confirm("مسح نموذج الإدخال الحالي؟")) {
+              if (!window.confirm(t("مسح نموذج الإدخال الحالي؟", "Clear the current entry form?"))) {
                 restoreInputInteractivity();
                 return;
               }
               recordSmartHistory();
-              const resetEntry = variantEntryDefaults();
+              const resetEntry = smartEntryDefaults();
               setEntryForm(resetEntry);
               setRows([smartRowFrom(resetEntry)]);
               setPreviewData(null);
@@ -14712,18 +15918,18 @@ function SmartEntryEditor({
               restoreInputInteractivity();
             }}
           >
-            <Plus size={18} /> مسح النموذج
+            <Plus size={18} /> {t("مسح النموذج", "Clear Form")}
           </button>
-          <ItemReadyBadge count={rowData.length} suffix="بند جاهز للحفظ" />
+          <ItemReadyBadge count={smartReadyCount} suffix={t("بند جاهز للحفظ", "ready item to save")} />
         </div>
       </form>
 
       {previewData && (
         <section className="panel linked-report">
           <div className="panel-head">
-            <h2>معاينة قبل الحفظ</h2>
+            <h2>{t("معاينة قبل الحفظ", "Preview Before Saving")}</h2>
             <button type="button" onClick={() => setPreviewData(null)}>
-              العودة للتعديل
+              {t("العودة للتعديل", "Back to Edit")}
             </button>
           </div>
           <DocumentPreview data={previewData} readOnly />
@@ -14758,6 +15964,7 @@ function InlineDocumentEditor({
     work_type: data.overall_work_type || "",
     entry_date: rows[0]?.entry_date || new Date().toISOString().slice(0, 10),
     status: document?.status || rows[0]?.document_status || "draft",
+    report_language: document?.report_language === "en" ? "en" : "ar",
     discount_type: document?.discount_type || rows[0]?.discount_type || "none",
     discount_value: document?.discount_value ?? rows[0]?.discount_value ?? "",
     ...initialTaxFlags,
@@ -14782,6 +15989,7 @@ function InlineDocumentEditor({
         project: main.project,
         building_unit: main.building_unit,
         status: main.status,
+        report_language: main.report_language || "ar",
         discount_type: main.discount_type || "none",
         discount_value: Number(main.discount_value || 0),
       };
@@ -14911,6 +16119,17 @@ function InlineDocumentEditor({
               <option value="draft">مسودة</option>
               <option value="approved">معتمد</option>
               <option value="closed">مغلق</option>
+            </select>
+          </Field>
+          <Field label="لغة التقرير">
+            <select
+              value={main.report_language || "ar"}
+              onChange={(event) =>
+                setMain({ ...main, report_language: event.target.value })
+              }
+            >
+              <option value="ar">العربية</option>
+              <option value="en">English</option>
             </select>
           </Field>
           <Field label="نوع الخصم">
@@ -15146,7 +16365,7 @@ function InlineDocumentEditor({
   );
 }
 
-function previewQuantityParts(rows = []) {
+function previewQuantityParts(rows = [], locale = "ar") {
   const totals = { sqm: 0, lm: 0, count: 0 };
   for (const row of rows || []) {
     const unit = normalizeClientUnitCode(row.unit_code || row.unit);
@@ -15154,13 +16373,13 @@ function previewQuantityParts(rows = []) {
   }
   return [
     totals.sqm
-      ? { value: money(totals.sqm), unit: "م²" }
+      ? { value: money(totals.sqm), unit: locale === "en" ? "m²" : "م²" }
       : null,
     totals.lm
-      ? { value: money(totals.lm), unit: "م.ط" }
+      ? { value: money(totals.lm), unit: locale === "en" ? "lm" : "م.ط" }
       : null,
     totals.count
-      ? { prefix: "بالعدد", value: money(totals.count), unit: "" }
+      ? { prefix: locale === "en" ? "" : "بالعدد", value: money(totals.count), unit: locale === "en" ? "count" : "" }
       : null,
   ].filter(Boolean);
 }
@@ -15182,6 +16401,7 @@ function ReportTotalCard({
   unit = "",
   parts = null,
   className = "",
+  locale = "ar",
 }) {
   const valueParts = Array.isArray(parts)
     ? parts
@@ -15189,7 +16409,7 @@ function ReportTotalCard({
   return (
     <span
       className={`report-total-card${className ? ` ${className}` : ""}`}
-      dir="rtl"
+      dir={locale === "en" ? "ltr" : "rtl"}
     >
       <span className="report-total-card__label">
         {label}
@@ -15207,15 +16427,24 @@ function ReportTotalCard({
                 -
               </span>
             )}
-            <span className="report-total-value-part">
+            <span
+              className="report-total-value-part"
+              dir="ltr"
+            >
               {part.prefix && (
-                <span className="report-total-prefix" dir="rtl">
+                <span
+                  className="report-total-prefix"
+                  dir={locale === "en" ? "ltr" : "rtl"}
+                >
                   {part.prefix}
                 </span>
               )}
               <bdi dir="ltr">{part.value}</bdi>
               {part.unit && (
-                <span className="report-total-unit" dir="rtl">
+                <span
+                  className="report-total-unit"
+                  dir="ltr"
+                >
                   {part.unit}
                 </span>
               )}
@@ -15239,6 +16468,66 @@ function DocumentPreview({
   if (!data) {
     return <div className="empty-state"> </div>;
   }
+  const reportLanguage = data.report_language === "en" ? "en" : "ar";
+  const reportLabels = reportLanguage === "en"
+    ? {
+        afterDiscount: "after discount",
+        afterDiscountTax: "after discount and VAT",
+        afterRate: "After work %",
+        afterTax: "after VAT",
+        amount: "Amount",
+        amountDue: "Amount due",
+        balance: "Balance",
+        beforeDiscount: "before discount",
+        beforeDiscountTax: "before discount and VAT",
+        beforeRate: "Before work %",
+        beforeTax: "before VAT",
+        collection: "Collection",
+        count: "Count",
+        date: "Date",
+        description: "Description",
+        details: "Details",
+        discount: "Discount",
+        gross: "Total",
+        net: "Net",
+        project: "Project",
+        quantity: "Quantity",
+        rate: "Rate",
+        size: "Size",
+        subtotal: "Total",
+        unit: "Unit",
+        work: "Works",
+        workRate: "Work %",
+      }
+    : {
+        afterDiscount: "بعد الخصم",
+        afterDiscountTax: "بعد الخصم والضريبة",
+        afterRate: "بعد النسبة",
+        afterTax: "بعد الضريبة",
+        amount: "المبلغ",
+        amountDue: "إجمالي المستحق",
+        balance: "الرصيد",
+        beforeDiscount: "قبل الخصم",
+        beforeDiscountTax: "قبل الخصم والضريبة",
+        beforeRate: "قبل نسبة العمل",
+        beforeTax: "قبل الضريبة",
+        collection: "التحصيل",
+        count: "العدد",
+        date: "التاريخ",
+        description: "البيان",
+        details: "التفاصيل",
+        discount: "خصم",
+        gross: "الإجمالي",
+        net: "الصافي",
+        project: "المشروع",
+        quantity: "الكمية",
+        rate: "الفئة",
+        size: "المقاس",
+        subtotal: "إجمالي",
+        unit: "الوحدة",
+        work: "الأعمال",
+        workRate: "نسبة العمل",
+      };
   const rows = data.rows || [];
   const statementRows = data.statementRows || [];
   const paymentRows = data.paymentRows || [];
@@ -15272,25 +16561,25 @@ function DocumentPreview({
   const hasTaxOrDiscount =
     hasTax || hasDiscount;
   const beforeAdjustmentLabel = hasTax && hasDiscount
-    ? "قبل الخصم والضريبة"
+    ? reportLabels.beforeDiscountTax
     : hasTax
-      ? "قبل الضريبة"
+      ? reportLabels.beforeTax
       : hasDiscount
-        ? "قبل الخصم"
+        ? reportLabels.beforeDiscount
         : "";
   const afterAdjustmentLabel = hasTax && hasDiscount
-    ? "بعد الخصم والضريبة"
+    ? reportLabels.afterDiscountTax
     : hasTax
-      ? "بعد الضريبة"
+      ? reportLabels.afterTax
       : hasDiscount
-        ? "بعد الخصم"
+        ? reportLabels.afterDiscount
         : "";
   const hasPayments = statementRows.length > 0 || paymentRows.length > 0;
   const showContractorProjectColumn =
     data.type === "contractor" && Number(data.project_selection_count || 0) !== 1;
   const moneyOrBlank = (value) =>
     Number(value || 0) ? money(value) : "";
-  const quantityParts = previewQuantityParts(rows);
+  const quantityParts = previewQuantityParts(rows, reportLanguage);
   const itemCountTotal = previewItemCount(rows);
   const reportBlocks = buildReportRowBlocks(rows, data.subtotal_mode || "none");
   const previewBranding = data.branding || {};
@@ -15306,6 +16595,7 @@ function DocumentPreview({
   return (
     <div
       className="document-preview"
+      dir={reportLanguage === "en" ? "ltr" : "rtl"}
       style={{
         "--preview-brand-color": previewBranding.companyNameColor || "var(--accent)",
         "--preview-line-color": previewBranding.lineColor || "var(--line)",
@@ -15341,41 +16631,46 @@ function DocumentPreview({
         <div className="totals-row totals-primary">
           {!statementRows.length && quantityParts.length > 0 && (
             <ReportTotalCard
-              label="الكمية"
+              label={reportLabels.quantity}
               parts={quantityParts}
               monetary={false}
+              locale={reportLanguage}
             />
           )}
           {!statementRows.length && itemCountTotal > 0 && (
             <ReportTotalCard
-              label="العدد"
+              label={reportLabels.count}
               value={money(itemCountTotal)}
               monetary={false}
+              locale={reportLanguage}
             />
           )}
           {statementRows.length && data.totals?.quantity ? (
             <ReportTotalCard
-              label="الكمية"
+              label={reportLabels.quantity}
               value={money(data.totals.quantity)}
               monetary={false}
+              locale={reportLanguage}
             />
           ) : null}
           {hasWorkRateTotal ? (
             <>
-              <ReportTotalCard label="قبل نسبة العمل" value={realGrossTotal} />
-              <ReportTotalCard label="بعد نسبة العمل" value={workGrossTotal} />
+              <ReportTotalCard label={reportLabels.beforeRate} value={realGrossTotal} locale={reportLanguage} />
+              <ReportTotalCard label={reportLabels.afterRate} value={workGrossTotal} locale={reportLanguage} />
             </>
           ) : hasTaxOrDiscount || hasPayments ? (
             <ReportTotalCard
-              label="الإجمالي"
+              label={reportLabels.gross}
               subLabel={hasTaxOrDiscount ? beforeAdjustmentLabel : ""}
               value={data.totals?.gross_total || data.totals?.debit}
+              locale={reportLanguage}
             />
           ) : (
             <ReportTotalCard
-              label="الصافي"
+              label={reportLabels.net}
               value={data.totals?.net_total}
               className="emphasis"
+              locale={reportLanguage}
             />
           )}
         </div>
@@ -15386,6 +16681,7 @@ function DocumentPreview({
                 key={tax.key || tax.label}
                 label={tax.label}
                 value={tax.amount}
+                locale={reportLanguage}
               />
             ))}
             {data.discount_label && (
@@ -15393,36 +16689,39 @@ function DocumentPreview({
                 label={data.discount_label}
                 value={data.totals?.discount_amount}
                 className="discount"
+                locale={reportLanguage}
               />
             )}
             {hasPayments &&
               hasTaxOrDiscount &&
               Number(data.totals?.credit || 0) !== 0 && (
                 <ReportTotalCard
-                  label="الإجمالي"
+                  label={reportLabels.gross}
                   subLabel={afterAdjustmentLabel}
                   value={
                     Number(data.totals?.net_total || 0) +
                     Number(data.totals?.credit || 0)
                   }
+                  locale={reportLanguage}
                 />
               )}
             {hasPayments && (
-              <ReportTotalCard label="التحصيل" value={data.totals?.credit} />
+              <ReportTotalCard label={reportLabels.collection} value={data.totals?.credit} locale={reportLanguage} />
             )}
             <ReportTotalCard
               label={
                 hasPayments
                   ? data.type === "contractor"
-                    ? "إجمالي المستحق"
-                    : "الرصيد"
-                  : "الإجمالي"
+                    ? reportLabels.amountDue
+                    : reportLabels.balance
+                  : reportLabels.gross
               }
               subLabel={
                 hasTaxOrDiscount && !hasPayments ? afterAdjustmentLabel : ""
               }
               value={data.totals?.net_total}
               className="emphasis"
+              locale={reportLanguage}
             />
           </div>
         )}
@@ -15440,16 +16739,16 @@ function DocumentPreview({
           <table>
             <thead>
               <tr>
-                <th>التاريخ</th>
-                <th>المستند</th>
-                <th>المشروع</th>
-                <th className="details-cell">التفاصيل</th>
-                <th>الكمية</th>
-                {showCompletion && <th>نسبة العمل</th>}
-                <th>خصم</th>
-                {showCompletion && <th>قبل النسبة</th>}
-                <th>الإجمالي</th>
-                <th>الرصيد</th>
+                <th>{reportLabels.date}</th>
+                <th>{data.title || "Document"}</th>
+                <th>{reportLabels.project}</th>
+                <th className="details-cell">{reportLabels.details}</th>
+                <th>{reportLabels.quantity}</th>
+                {showCompletion && <th>{reportLabels.workRate}</th>}
+                <th>{reportLabels.discount}</th>
+                {showCompletion && <th>{reportLabels.beforeRate}</th>}
+                <th>{reportLabels.gross}</th>
+                <th>{reportLabels.balance}</th>
               </tr>
             </thead>
             <tbody>
@@ -15459,7 +16758,9 @@ function DocumentPreview({
                   className={row.is_payment ? "payment-row" : ""}
                 >
                   <td>{text(row.entry_date)}</td>
-                  <td className="statement-doc">{text(row.description)}</td>
+                  <td className="statement-doc">
+                    {text(localizedStatementDescription(row.description, reportLanguage))}
+                  </td>
                   <td>
                     {text(
                       row.project_label ||
@@ -15505,17 +16806,17 @@ function DocumentPreview({
           <table>
             <thead>
               <tr>
-                <th>تاريخ الدفعة</th>
-                <th>بيان الأعمال</th>
-                <th>بيان الدفعة</th>
-                <th>المبلغ</th>
+                <th>{reportLabels.date}</th>
+                <th>{reportLabels.work}</th>
+                <th>{reportLabels.details}</th>
+                <th>{reportLabels.amount}</th>
               </tr>
             </thead>
             <tbody>
               {paymentRows.map((row, index) => (
                 <tr key={`${row.id || index}-payment`} className="payment-row">
                   <td>{text(row.entry_date)}</td>
-                  <td>{text(row.work_type || row.description || "تحصيل")}</td>
+                  <td>{text(row.work_type || row.description || reportLabels.collection)}</td>
                   <td>{text(row.collection_note || row.notes)}</td>
                   <td>{money(paymentRowAmount(row))}</td>
                 </tr>
@@ -15535,19 +16836,19 @@ function DocumentPreview({
           <table>
             <thead>
               <tr>
-                <th>التاريخ</th>
-                <th>الأعمال</th>
-                <th>البيان</th>
-                {showContractorProjectColumn && <th>المشروع</th>}
-                {showDimensions && <th>المقاس</th>}
-                <th>الوحدة</th>
-                <th>العدد</th>
-                <th>الكمية</th>
-                {showCompletion && <th>نسبة العمل</th>}
-                <th>الفئة</th>
-                <th>الإجمالي</th>
-                {showCompletion && <th>بعد النسبة</th>}
-                <th>الصافي</th>
+                <th>{reportLabels.date}</th>
+                <th>{reportLabels.work}</th>
+                <th>{reportLabels.description}</th>
+                {showContractorProjectColumn && <th>{reportLabels.project}</th>}
+                {showDimensions && <th>{reportLabels.size}</th>}
+                <th>{reportLabels.unit}</th>
+                <th>{reportLabels.count}</th>
+                <th>{reportLabels.quantity}</th>
+                {showCompletion && <th>{reportLabels.workRate}</th>}
+                <th>{reportLabels.rate}</th>
+                <th>{reportLabels.gross}</th>
+                {showCompletion && <th>{reportLabels.afterRate}</th>}
+                <th>{reportLabels.net}</th>
                 {!readOnly && <th></th>}
               </tr>
             </thead>
@@ -15570,7 +16871,7 @@ function DocumentPreview({
                       key={`subtotal-${block.level}-${block.label}-${index}`}
                       className={`report-subtotal-row ${block.level}-subtotal-row`}
                     >
-                      <td colSpan={subtotalLabelColSpan}>إجمالي {text(block.label)}</td>
+                      <td colSpan={subtotalLabelColSpan}>{reportLabels.subtotal} {text(block.label)}</td>
                       <td>{moneyOrBlank(totals.item_count)}</td>
                       <td>{money(totals.quantity)}</td>
                       {showCompletion && <td></td>}
@@ -15753,6 +17054,10 @@ function SettingsView({
   setApiBase,
   themeMode,
   setThemeMode,
+  uiLanguage = "ar",
+  setUiLanguage,
+  defaultReportLanguage = "ar",
+  setDefaultReportLanguage,
   health,
   bootstrap,
   terms,
@@ -15779,6 +17084,12 @@ function SettingsView({
   );
   const [corporateTerms, setCorporateTerms] = useState(
     terms.terms_corporate || { sections: [] },
+  );
+  const [retailTermsEn, setRetailTermsEn] = useState(
+    terms.terms_retail_en || { sections: [] },
+  );
+  const [corporateTermsEn, setCorporateTermsEn] = useState(
+    terms.terms_corporate_en || { sections: [] },
   );
   const [users, setUsers] = useState([]);
   const [newUser, setNewUser] = useState({
@@ -15868,6 +17179,8 @@ function SettingsView({
   const canEditTerms = canUser(currentUser, "can_edit_terms");
   const canEditTableStyles = canUser(currentUser, "can_edit_table_styles");
   const canEditServerSettings = canEditCompanySettings || adminUnlocked;
+  const t = useCallback((value) => uiText(value, uiLanguage), [uiLanguage]);
+  const l = useCallback((ar, en) => (uiLanguage === "en" ? en : ar), [uiLanguage]);
   const activeConnectionMode =
     desktopSettings?.connectionMode ||
     localStorage.getItem("priceOfferConnectionMode") ||
@@ -15889,6 +17202,32 @@ function SettingsView({
     selectedManagerPlan?.currency ||
     managerSubscriptionConfig?.paypal?.currency ||
     "USD";
+  const managerCheckoutValidation = useMemo(() => {
+    if (managerSubscriptionLoading) return "";
+    if (!selectedManagerPlan) {
+      return l("اختر خطة اشتراك أولاً.", "Choose a subscription plan first.");
+    }
+    if (selectedManagerPlan.active === false || selectedManagerPlan.enabled === false) {
+      return l("هذه الخطة غير مفعلة من Manager.", "This plan is disabled in Manager.");
+    }
+    if (!Number.isFinite(managerCheckoutAmount) || managerCheckoutAmount <= 0) {
+      return l(
+        "إعدادات Manager لا تحتوي على سعر صالح لهذه الخطة والفترة، لذلك تم تعطيل الدفع.",
+        "Manager did not return a valid amount for this plan and billing period, so checkout is disabled.",
+      );
+    }
+    if (!String(managerCurrency || "").trim()) {
+      return l("لم يرسل Manager عملة دفع صالحة.", "Manager did not return a valid currency.");
+    }
+    return "";
+  }, [
+    l,
+    managerCheckoutAmount,
+    managerCurrency,
+    managerSubscriptionLoading,
+    selectedManagerPlan,
+  ]);
+  const managerCheckoutReady = !managerCheckoutValidation && !managerSubscriptionLoading;
   const activeManagerSubscription = managerSubscriptionStatus?.subscription || null;
   const managerSubscriptionCancelsAtPeriodEnd =
     !!managerSubscriptionStatus?.cancel_at_period_end ||
@@ -15902,6 +17241,57 @@ function SettingsView({
     !!activeManagerSubscription &&
     !!managerSubscriptionStatus?.has_access &&
     !managerSubscriptionCancelsAtPeriodEnd;
+  const serverDisplayValue = (...values) =>
+    values
+      .map((value) => String(value ?? "").trim())
+      .find((value) => value && value !== "-") || "";
+  const serverStatusLineValue = (label) => {
+    const escapedLabel = String(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = String(serverStatus?.text || "").match(
+      new RegExp(`^${escapedLabel}:\\s*(.+)$`, "im"),
+    );
+    return serverDisplayValue(match?.[1]);
+  };
+  const displayedServerUrl = serverDisplayValue(serverDraft.serverUrl, serverStatus?.serverUrl, apiBase);
+  const displayedDataDir = serverDisplayValue(
+    serverDraft.activeDataDir,
+    serverStatus?.dataDir,
+    serverStatusLineValue("Data folder"),
+    serverDraft.dataDir,
+    desktopSettings?.activeDataDir,
+    desktopSettings?.dataDir,
+  );
+  const displayedDbPath = serverDisplayValue(
+    serverDraft.activeDbPath,
+    serverStatus?.dbPath,
+    serverStatusLineValue("Database file"),
+    serverDraft.dbPath,
+    desktopSettings?.activeDbPath,
+    desktopSettings?.dbPath,
+  );
+  const serverFactsText = [
+    isRemoteServerConnection
+      ? `${APP_NAME} client connection status`
+      : `${APP_NAME} local server status`,
+    isRemoteServerConnection
+      ? "Connection mode: REMOTE SERVER / TUNNEL"
+      : "Connection mode: LOCAL SERVER",
+    `Configured server: ${displayedServerUrl || "-"}`,
+    !isRemoteServerConnection && `Data folder: ${displayedDataDir || "-"}`,
+    !isRemoteServerConnection && `Database file: ${displayedDbPath || "-"}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const serverProcessText = serverStatus?.text
+    ? `${serverFactsText}\n\n${serverStatus.text}`
+    : [
+        serverFactsText,
+        isRemoteServerConnection
+          ? "PowerShell client diagnostics will appear here after refresh in the Windows desktop app."
+          : "PowerShell server process details will appear here after refresh.",
+      ]
+        .filter(Boolean)
+        .join("\n");
 
   useEffect(() => {
     let cancelled = false;
@@ -15985,7 +17375,7 @@ function SettingsView({
               connected,
               serverUrl: apiBase,
               text: [
-                "Accounting Management client connection status",
+                `${APP_NAME} client connection status`,
                 `Generated: ${new Date().toISOString()}`,
                 "Connection mode: REMOTE SERVER / TUNNEL",
                 `Configured server: ${apiBase}`,
@@ -16002,8 +17392,20 @@ function SettingsView({
         setServerStatus(data);
         if (notify) setMessage("تم تحديث حالة السيرفر.", { type: "success" });
       } catch (error) {
+        const desktopFallback = await window.priceOfferDesktop?.getDesktopSettings?.().catch?.(() => null);
+        if (desktopFallback) setDesktopSettings(desktopFallback);
         setServerStatus({
-          text: `Could not read server status: ${error.message}`,
+          ok: false,
+          dataDir: desktopFallback?.activeDataDir || desktopFallback?.dataDir || "",
+          dbPath: desktopFallback?.activeDbPath || desktopFallback?.dbPath || "",
+          text: [
+            `Could not read server status: ${error.message}`,
+            desktopFallback?.activeDataDir && `Data folder: ${desktopFallback.activeDataDir}`,
+            desktopFallback?.activeDbPath && `Database file: ${desktopFallback.activeDbPath}`,
+            "Use Start server or Restart server, then refresh.",
+          ]
+            .filter(Boolean)
+            .join("\n"),
         });
         if (notify) setMessage(`تعذر قراءة حالة السيرفر: ${error.message}`);
       } finally {
@@ -16122,6 +17524,86 @@ function SettingsView({
     }
   }
 
+  async function startDesktopLocalServer(restart = false) {
+    if (!canEditServerSettings) {
+      setMessage(l("هذا المستخدم غير مسموح له بتشغيل السيرفر.", "This user cannot manage the local server."));
+      return;
+    }
+    const action = restart
+      ? window.priceOfferDesktop?.restartLocalServer
+      : window.priceOfferDesktop?.startLocalServer;
+    if (!action) {
+      setMessage(l("أدوات سطح المكتب غير متاحة في هذا الوضع.", "Desktop server controls are not available in this mode."));
+      return;
+    }
+    setServerBusy(true);
+    try {
+      const data = await action({
+        dataDir: serverDraft.dataDir,
+        dbPath: serverDraft.dbPath,
+        restart,
+      });
+      const nextServer = cleanApiBase(data.localUrl || data.serverUrl || data.apiBase || "");
+      if (nextServer) {
+        setApiBase(nextServer, { connectionMode: "local" });
+        updateServerDraft("serverUrl", nextServer);
+      }
+      const settings = await window.priceOfferDesktop?.getDesktopSettings?.();
+      if (settings) setDesktopSettings(settings);
+      await refreshServerStatus();
+      setMessage(
+        data.message ||
+          (restart
+            ? l("تمت إعادة تشغيل السيرفر المحلي.", "Local server restarted.")
+            : l("تم تشغيل السيرفر المحلي.", "Local server started.")),
+        { type: "success" },
+      );
+    } catch (error) {
+      setMessage(
+        `${restart ? l("تعذر إعادة تشغيل السيرفر المحلي", "Could not restart local server") : l("تعذر تشغيل السيرفر المحلي", "Could not start local server")}: ${error.message}`,
+        { type: "error" },
+      );
+    } finally {
+      setServerBusy(false);
+    }
+  }
+
+  async function stopDesktopLocalServer() {
+    if (!canEditServerSettings) {
+      setMessage(l("هذا المستخدم غير مسموح له بإيقاف السيرفر.", "This user cannot stop the local server."));
+      return;
+    }
+    if (!window.priceOfferDesktop?.stopLocalServer) return;
+    setServerBusy(true);
+    try {
+      const settings = await window.priceOfferDesktop.stopLocalServer();
+      if (settings) setDesktopSettings(settings);
+      await refreshServerStatus();
+      setMessage(l("تم إيقاف السيرفر المحلي.", "Local server stopped."), { type: "success" });
+    } catch (error) {
+      setMessage(`${l("تعذر إيقاف السيرفر المحلي", "Could not stop local server")}: ${error.message}`, {
+        type: "error",
+      });
+    } finally {
+      setServerBusy(false);
+    }
+  }
+
+  async function openDesktopPath(kind) {
+    const opener =
+      kind === "database"
+        ? window.priceOfferDesktop?.openDatabaseDirectory
+        : window.priceOfferDesktop?.openDataDirectory;
+    if (!opener) return;
+    try {
+      await opener();
+    } catch (error) {
+      setMessage(`${l("تعذر فتح المسار", "Could not open path")}: ${error.message}`, {
+        type: "error",
+      });
+    }
+  }
+
   async function migrateDatabase() {
     if (!canEditServerSettings) {
       setMessage("هذا المستخدم غير مسموح له بترحيل قاعدة البيانات.");
@@ -16154,7 +17636,7 @@ function SettingsView({
   }
 
   async function copyServerStatus() {
-    const text = serverStatus?.text || "";
+    const text = serverProcessText || "";
     if (!text) return;
     if (await copyTextToClipboard(text)) {
       setMessage("تم نسخ حالة السيرفر.", { type: "success" });
@@ -16167,7 +17649,7 @@ function SettingsView({
     if (!plan) return 0;
     const amount =
       billingCycle === "annually"
-        ? plan.annually ?? plan.annual ?? plan.yearly ?? plan.monthly
+        ? plan.annually ?? plan.annual ?? plan.yearly ?? plan.yearly_price
         : plan.monthly ?? plan.amount ?? plan.price;
     return Number(amount || 0);
   }
@@ -16321,7 +17803,7 @@ function SettingsView({
         method: "POST",
         body: JSON.stringify({
           requester_user_id: currentUser?.id,
-          reason: "Canceled from Accounting Management settings.",
+          reason: `Canceled from ${APP_NAME} settings.`,
         }),
       });
       if (result.status) setManagerSubscriptionStatus(result.status);
@@ -16394,6 +17876,11 @@ function SettingsView({
       return undefined;
     }
     if (!selectedManagerPlan) return undefined;
+    if (managerCheckoutValidation) {
+      setManagerCheckoutError(managerCheckoutValidation);
+      setManagerCheckoutLoading(false);
+      return undefined;
+    }
 
     async function mountPayPal() {
       setManagerCheckoutLoading(true);
@@ -16484,6 +17971,7 @@ function SettingsView({
     currentUser?.username,
     managerBillingCycle,
     managerCheckoutAmount,
+    managerCheckoutValidation,
     managerPaymentMode,
     managerCurrency,
     refreshManagerState,
@@ -16495,6 +17983,8 @@ function SettingsView({
   useEffect(() => {
     setRetailTerms(terms.terms_retail || { sections: [] });
     setCorporateTerms(terms.terms_corporate || { sections: [] });
+    setRetailTermsEn(terms.terms_retail_en || { sections: [] });
+    setCorporateTermsEn(terms.terms_corporate_en || { sections: [] });
   }, [terms]);
   useEffect(() => {
     if (reportBranding) setBrandingDraft(reportBranding);
@@ -16562,9 +18052,15 @@ function SettingsView({
         method: "PUT",
         body: JSON.stringify({ password, requester_user_id: currentUser?.id, value }),
       });
+      const keyMap = {
+        retail: "terms_retail",
+        corporate: "terms_corporate",
+        retail_en: "terms_retail_en",
+        corporate_en: "terms_corporate_en",
+      };
       setTerms((current) => ({
         ...current,
-        [key === "corporate" ? "terms_corporate" : "terms_retail"]: value,
+        [keyMap[key] || "terms_retail"]: value,
       }));
       setMessage("تم حفظ الشروط والأحكام.");
     } catch (error) {
@@ -16670,19 +18166,19 @@ function SettingsView({
       <section className="panel application-version-panel">
         <div className="panel-head">
           <h2>
-            <RefreshCw size={18} /> إصدار التطبيق والتحديثات
+            <RefreshCw size={18} /> {t("إصدار التطبيق والتحديثات")}
           </h2>
         </div>
         <div className="facts application-version-facts">
           <span>
-            الإصدار المثبت: <strong dir="ltr">v{String(APP_VERSION).replace(/^v/i, "")}</strong>
+            {t("الإصدار المثبت:")} <strong dir="ltr">v{String(APP_VERSION).replace(/^v/i, "")}</strong>
           </span>
           <span>
-            أحدث إصدار متاح:{" "}
+            {t("أحدث إصدار متاح:")}{" "}
             <strong dir="ltr">{updateInfo?.latestVersion || (checkingUpdate ? "..." : "—")}</strong>
           </span>
           <span>
-            إصدار قاعدة البيانات:{" "}
+            {t("إصدار قاعدة البيانات:")}{" "}
             <strong dir="ltr">{health?.databaseSchemaVersion ?? "—"}</strong>
           </span>
         </div>
@@ -16693,7 +18189,7 @@ function SettingsView({
             disabled={checkingUpdate || updateInfo?.status === "downloading"}
           >
             <RefreshCw size={16} className={checkingUpdate ? "animate-spin" : ""} />
-            {checkingUpdate ? "جارٍ فحص التحديثات" : "فحص التحديثات"}
+            {checkingUpdate ? t("جارٍ فحص التحديثات") : t("فحص التحديثات")}
           </button>
           {(updateInfo?.updateAvailable || updateInfo?.canInstall) && (
             <button
@@ -16703,32 +18199,80 @@ function SettingsView({
               disabled={updateInfo?.status === "downloading"}
             >
               {updateInfo?.canInstall
-                ? "إعادة التشغيل والتثبيت"
+                ? l("إعادة التشغيل والتثبيت", "Restart and install")
                 : updateInfo?.status === "downloading"
-                  ? `جارٍ التنزيل ${Math.round(updateInfo.downloadPercent || 0)}%`
-                  : "تنزيل التحديث"}
+                  ? l(
+                      `جارٍ التنزيل ${Math.round(updateInfo.downloadPercent || 0)}%`,
+                      `Downloading ${Math.round(updateInfo.downloadPercent || 0)}%`,
+                    )
+                  : l("تنزيل التحديث", "Download update")}
             </button>
           )}
         </div>
         {updateInfo?.status === "current" && (
-          <p className="muted">التطبيق محدّث.</p>
+          <p className="muted">{t("التطبيق محدّث.")}</p>
         )}
         {updateInfo?.error && <p className="error-text">{updateInfo.error}</p>}
+      </section>
+      <section className="panel language-settings-panel">
+        <div className="panel-head">
+          <h2>
+            <Languages size={18} /> {t("اللغة")}
+          </h2>
+        </div>
+        <div className="language-settings-grid">
+          <Field label={t("لغة واجهة التطبيق")}>
+            <div className="segmented">
+              <button
+                type="button"
+                className={uiLanguage !== "en" ? "active" : ""}
+                onClick={() => setUiLanguage?.("ar")}
+              >
+                {t("العربية")}
+              </button>
+              <button
+                type="button"
+                className={uiLanguage === "en" ? "active" : ""}
+                onClick={() => setUiLanguage?.("en")}
+              >
+                English
+              </button>
+            </div>
+          </Field>
+          <Field label={t("لغة التقرير الافتراضية للمستندات الجديدة")}>
+            <div className="segmented">
+              <button
+                type="button"
+                className={defaultReportLanguage !== "en" ? "active" : ""}
+                onClick={() => setDefaultReportLanguage?.("ar")}
+              >
+                {t("العربية")}
+              </button>
+              <button
+                type="button"
+                className={defaultReportLanguage === "en" ? "active" : ""}
+                onClick={() => setDefaultReportLanguage?.("en")}
+              >
+                English
+              </button>
+            </div>
+          </Field>
+        </div>
       </section>
       {desktopSettings && (
         <section className="panel report-save-settings-panel">
           <div className="panel-head">
             <h2>
-              <FileDown size={18} /> حفظ التقارير
+              <FileDown size={18} /> {t("حفظ التقارير")}
             </h2>
           </div>
           <div className="form-grid report-save-settings-grid">
-            <Field label="مجلد حفظ التقارير الافتراضي">
+            <Field label={t("مجلد حفظ التقارير الافتراضي")}>
               <div className="path-input-row">
                 <input
                   dir="ltr"
                   value={desktopSettings.reportSaveDirectory || ""}
-                  placeholder="اتركه فارغاً لاختيار المجلد عند كل حفظ"
+                  placeholder={t("اتركه فارغاً لاختيار المجلد عند كل حفظ")}
                   disabled={desktopSettingsBusy}
                   onChange={(event) =>
                     setDesktopSettings((current) => ({
@@ -16745,7 +18289,7 @@ function SettingsView({
                   onClick={chooseReportSaveDirectory}
                   disabled={desktopSettingsBusy}
                 >
-                  <HardDrive size={16} /> اختيار
+                  <HardDrive size={16} /> {t("اختيار")}
                 </button>
                 {!!desktopSettings.reportSaveDirectory && (
                   <button
@@ -16754,7 +18298,7 @@ function SettingsView({
                     onClick={() => updateDesktopSetting("reportSaveDirectory", "")}
                     disabled={desktopSettingsBusy}
                   >
-                    استخدام نافذة الحفظ
+                    {t("استخدام نافذة الحفظ")}
                   </button>
                 )}
               </div>
@@ -16768,12 +18312,12 @@ function SettingsView({
                   updateDesktopSetting("openPdfAfterSaving", event.target.checked)
                 }
               />
-              <span>فتح PDF تلقائياً بعد الحفظ للمراجعة</span>
+              <span>{t("فتح PDF تلقائياً بعد الحفظ للمراجعة")}</span>
             </label>
             {!desktopSettings.reportSaveDirectory &&
               desktopSettings.lastReportSaveDirectory && (
                 <small dir="ltr">
-                  Last used folder: {desktopSettings.lastReportSaveDirectory}
+                  {l("آخر مجلد مستخدم", "Last used folder")}: {desktopSettings.lastReportSaveDirectory}
                 </small>
               )}
           </div>
@@ -16783,7 +18327,7 @@ function SettingsView({
         <div className="server-settings-panel">
           <div className="panel-head">
             <h2>
-              <Server size={18} /> الخادم
+              <Server size={18} /> {t("الخادم")}
             </h2>
             <button
               type="button"
@@ -16791,11 +18335,11 @@ function SettingsView({
               onClick={() => refreshServerStatus(true)}
               disabled={serverStatusLoading}
             >
-              <RefreshCw size={16} /> تحديث
+              <RefreshCw size={16} /> {t("تحديث")}
             </button>
           </div>
           <form className="form-grid server-control-grid" onSubmit={saveServerConfig}>
-            <Field label="Server URL">
+            <Field label={l("رابط السيرفر", "Server URL")}>
               <input
                 dir="ltr"
                 value={serverDraft.serverUrl || ""}
@@ -16855,23 +18399,25 @@ function SettingsView({
             )}
             {isRemoteServerConnection ? (
               <div className="remote-server-connection-card">
-                <strong>Remote server / tunnel mode</strong>
+                <strong>{l("وضع السيرفر البعيد / النفق", "Remote server / tunnel mode")}</strong>
                 <span dir="ltr">{serverDraft.serverUrl || apiBase}</span>
                 <p>
-                  This computer remains pinned to this address. Database folders and
-                  database files are managed by the remote host and are not required here.
+                  {l(
+                    "سيظل هذا الجهاز مثبتاً على هذا العنوان. مجلدات وملفات قاعدة البيانات تُدار على السيرفر البعيد ولا يلزم تحديدها هنا.",
+                    "This computer remains pinned to this address. Database folders and database files are managed by the remote host and are not required here.",
+                  )}
                 </p>
                 <button
                   type="submit"
                   className="primary"
                   disabled={serverBusy}
                 >
-                  <Save size={17} /> Save and pin this connection
+                  <Save size={17} /> {l("حفظ وتثبيت الاتصال", "Save and pin this connection")}
                 </button>
               </div>
             ) : (
               <>
-            <Field label="Data folder">
+            <Field label={l("مجلد البيانات", "Data folder")}>
               <div className="server-path-row">
                 <input
                   dir="ltr"
@@ -16883,11 +18429,11 @@ function SettingsView({
                   onClick={chooseServerDirectory}
                   disabled={!window.priceOfferDesktop?.chooseDirectory}
                 >
-                  Browse <HardDrive size={16} />
+                  {l("استعراض", "Browse")} <HardDrive size={16} />
                 </button>
               </div>
             </Field>
-            <Field label="Database file">
+            <Field label={l("ملف قاعدة البيانات", "Database file")}>
               <div className="server-path-row">
                 <input
                   dir="ltr"
@@ -16899,11 +18445,11 @@ function SettingsView({
                   onClick={() => chooseDatabaseFile("dbPath")}
                   disabled={!window.priceOfferDesktop?.chooseDatabaseFile}
                 >
-                  Browse <Database size={16} />
+                  {l("استعراض", "Browse")} <Database size={16} />
                 </button>
               </div>
             </Field>
-            <Field label="Migrate from old database">
+            <Field label={l("الترحيل من قاعدة بيانات قديمة", "Migrate from old database")}>
               <div className="server-path-row">
                 <input
                   dir="ltr"
@@ -16917,11 +18463,11 @@ function SettingsView({
                   onClick={() => chooseDatabaseFile("migrateFromDbPath")}
                   disabled={!window.priceOfferDesktop?.chooseDatabaseFile}
                 >
-                  Browse <Database size={16} />
+                  {l("استعراض", "Browse")} <Database size={16} />
                 </button>
               </div>
             </Field>
-            <Field label="Migrate to new database">
+            <Field label={l("الترحيل إلى قاعدة بيانات جديدة", "Migrate to new database")}>
               <div className="server-path-row">
                 <input
                   dir="ltr"
@@ -16935,11 +18481,11 @@ function SettingsView({
                   onClick={() => chooseDatabaseFile("migrateToDbPath")}
                   disabled={!window.priceOfferDesktop?.chooseDatabaseFile}
                 >
-                  Browse <Database size={16} />
+                  {l("استعراض", "Browse")} <Database size={16} />
                 </button>
               </div>
             </Field>
-            <Field label="Remote database URL">
+            <Field label={l("رابط قاعدة البيانات البعيدة", "Remote database URL")}>
               <input
                 dir="ltr"
                 value={serverDraft.remoteDatabaseUrl || ""}
@@ -16948,7 +18494,7 @@ function SettingsView({
                 }
               />
             </Field>
-            <Field label="Database provider">
+            <Field label={l("مزود قاعدة البيانات", "Database provider")}>
               <select
                 value={serverDraft.databaseProvider || "local"}
                 onChange={(event) =>
@@ -16962,13 +18508,34 @@ function SettingsView({
             <div className="action-row server-actions">
               <button
                 type="button"
+                onClick={() => startDesktopLocalServer(false)}
+                disabled={serverBusy || !canEditServerSettings || !window.priceOfferDesktop?.startLocalServer}
+              >
+                <Server size={17} /> {l("تشغيل السيرفر", "Start server")}
+              </button>
+              <button
+                type="button"
+                onClick={() => startDesktopLocalServer(true)}
+                disabled={serverBusy || !canEditServerSettings || !window.priceOfferDesktop?.restartLocalServer}
+              >
+                <RefreshCw size={17} /> {l("إعادة تشغيل السيرفر", "Restart server")}
+              </button>
+              <button
+                type="button"
+                onClick={stopDesktopLocalServer}
+                disabled={serverBusy || !canEditServerSettings || !window.priceOfferDesktop?.stopLocalServer}
+              >
+                <X size={17} /> {l("إيقاف السيرفر", "Stop server")}
+              </button>
+              <button
+                type="button"
                 onClick={startHosting}
                 disabled={serverBusy || !canEditServerSettings}
               >
-                <Server size={17} /> تشغيل الاستضافة
+                <Server size={17} /> {t("تشغيل الاستضافة")}
               </button>
               <button type="button" onClick={createBackup} disabled={busy}>
-                <Database size={17} /> نسخة احتياطية
+                <Database size={17} /> {t("نسخة احتياطية")}
               </button>
             </div>
             <div className="action-row server-admin-actions">
@@ -16978,7 +18545,7 @@ function SettingsView({
                 title="Save selected data/database paths"
                 disabled={serverBusy || !canEditServerSettings}
               >
-                <Save size={17} /> Save paths
+                <Save size={17} /> {t("حفظ المسارات")}
               </button>
               <button
                 type="button"
@@ -16986,7 +18553,7 @@ function SettingsView({
                 title="Copy data from an old database file into the selected new database file"
                 disabled={serverBusy || !canEditServerSettings}
               >
-                <Database size={17} /> Migrate DB
+                <Database size={17} /> {t("ترحيل قاعدة البيانات")}
               </button>
             </div>
               </>
@@ -17004,8 +18571,8 @@ function SettingsView({
               </button>
               <span>
                 {isRemoteServerConnection
-                  ? "Tunnel client connection details"
-                  : "Server process details"}
+                  ? l("تفاصيل اتصال النفق", "Tunnel client connection details")
+                  : t("تفاصيل عملية الخادم")}
               </span>
               <button
                 type="button"
@@ -17019,24 +18586,34 @@ function SettingsView({
             {serverStatusExpanded && (
               <pre dir="ltr">
                 {serverStatusLoading
-                  ? "Reading PowerShell status..."
-                  : serverStatus?.text || "No server process messages yet."}
+                  ? l("جارٍ قراءة حالة PowerShell...", "Reading PowerShell status...")
+                  : serverProcessText}
               </pre>
             )}
           </div>
           <div className="facts server-facts">
-            {!isRemoteServerConnection && (
+            {(!isRemoteServerConnection || displayedDataDir || displayedDbPath) && (
               <>
-                <span>
-                  <HardDrive size={16} /> {serverDraft.activeDataDir || serverDraft.dataDir || "-"}
+                <span title={l("مجلد البيانات", "Data folder")}>
+                  <HardDrive size={16} /> <span dir="ltr">{displayedDataDir || "-"}</span>
+                  {window.priceOfferDesktop?.openDataDirectory && (
+                    <button type="button" onClick={() => openDesktopPath("data")}>
+                      {l("فتح", "Open")}
+                    </button>
+                  )}
                 </span>
-                <span>
-                  <Database size={16} /> {serverDraft.activeDbPath || serverDraft.dbPath || "-"}
+                <span title={l("ملف قاعدة البيانات", "Database file")}>
+                  <Database size={16} /> <span dir="ltr">{displayedDbPath || "-"}</span>
+                  {window.priceOfferDesktop?.openDatabaseDirectory && (
+                    <button type="button" onClick={() => openDesktopPath("database")}>
+                      {l("فتح", "Open")}
+                    </button>
+                  )}
                 </span>
               </>
             )}
-            <span>
-              <Smartphone size={16} /> {serverDraft.serverUrl || apiBase}
+            <span title={l("رابط السيرفر", "Server URL")}>
+              <Smartphone size={16} /> <span dir="ltr">{displayedServerUrl || "-"}</span>
             </span>
             {!isRemoteServerConnection && (serverStatus?.lanUrls || serverDraft.lanIps || []).map((url) => (
               <span key={url}>
@@ -17048,7 +18625,7 @@ function SettingsView({
 
         <div>
           <div className="panel-head">
-            <h2>المظهر</h2>
+          <h2>{t("المظهر")}</h2>
           </div>
           <div className="segmented">
             <button
@@ -17056,31 +18633,31 @@ function SettingsView({
               className={themeMode === "system" ? "active" : ""}
               onClick={() => setThemeMode("system")}
             >
-              <Monitor size={17} /> النظام
+              <Monitor size={17} /> {t("النظام")}
             </button>
             <button
               type="button"
               className={themeMode === "light" ? "active" : ""}
               onClick={() => setThemeMode("light")}
             >
-              <Sun size={17} /> فاتح
+              <Sun size={17} /> {t("فاتح")}
             </button>
             <button
               type="button"
               className={themeMode === "dark" ? "active" : ""}
               onClick={() => setThemeMode("dark")}
             >
-              <Moon size={17} /> داكن
+              <Moon size={17} /> {t("داكن")}
             </button>
             <button
               type="button"
               className={themeMode === "gold" ? "active" : ""}
               onClick={() => setThemeMode("gold")}
             >
-              <Activity size={17} /> ذهبي
+              <Activity size={17} /> {t("ذهبي")}
             </button>
           </div>
-          <Field label="كلمة مرور الإدارة">
+          <Field label={t("كلمة مرور الإدارة")}>
             <input
               type="password"
               value={password}
@@ -17088,7 +18665,7 @@ function SettingsView({
             />
           </Field>
           <span className={adminUnlocked ? "unlock ok" : "unlock"}>
-            {adminUnlocked ? "تم فتح أدوات الإدارة" : "أدوات الإدارة مقفلة"}
+            {adminUnlocked ? t("تم فتح أدوات الإدارة") : t("أدوات الإدارة مقفلة")}
           </span>
           {isCompanyAdmin && (
             <form
@@ -17327,7 +18904,7 @@ function SettingsView({
       <section className="panel subscription-panel">
         <div className="panel-head">
           <h2>
-            <WalletCards size={18} /> الإشتراك والدفع
+            <WalletCards size={18} /> {t("الإشتراك والدفع")}
           </h2>
           <button
             type="button"
@@ -17335,7 +18912,7 @@ function SettingsView({
             onClick={syncManagerNow}
             disabled={managerSyncing}
           >
-            <RefreshCw size={16} /> تحديث Manager
+            <RefreshCw size={16} /> {t("تحديث Manager")}
           </button>
         </div>
         {managerSubscriptionError && (
@@ -17347,14 +18924,14 @@ function SettingsView({
             className={managerPaymentMode === "recurring" ? "active" : ""}
             onClick={() => setManagerPaymentMode("recurring")}
           >
-            اشتراك متجدد
+            {t("اشتراك متجدد")}
           </button>
           <button
             type="button"
             className={managerPaymentMode === "one_time" ? "active" : ""}
             onClick={() => setManagerPaymentMode("one_time")}
           >
-            دفع مرة واحدة
+            {t("دفع مرة واحدة")}
           </button>
         </div>
         <div className="subscription-cycle" role="tablist" aria-label="Billing cycle">
@@ -17363,14 +18940,14 @@ function SettingsView({
             className={managerBillingCycle === "monthly" ? "active" : ""}
             onClick={() => setManagerBillingCycle("monthly")}
           >
-            شهري
+            {t("شهري")}
           </button>
           <button
             type="button"
             className={managerBillingCycle === "annually" ? "active" : ""}
             onClick={() => setManagerBillingCycle("annually")}
           >
-            سنوي
+            {t("سنوي")}
           </button>
         </div>
         <div className="subscription-plans">
@@ -17382,33 +18959,36 @@ function SettingsView({
               onClick={() => setSelectedManagerPlanId(plan.id)}
             >
               <strong>{plan.name}</strong>
-              <span>{plan.users || 1} مستخدم</span>
+              <span>{plan.users || 1} {l("مستخدم", "users")}</span>
               <b>
                 {money(managerPlanPrice(plan))} {plan.currency || managerCurrency}
               </b>
             </button>
           ))}
           {!managerSubscriptionLoading && !managerSubscriptionPlans.length && (
-            <div className="empty-state">لا توجد خطط اشتراك جاهزة من المدير الآن.</div>
+            <div className="empty-state">{t("لا توجد خطط اشتراك جاهزة من المدير الآن.")}</div>
           )}
         </div>
         {(managerSubscriptionStatus || managerPayments.length > 0) && (
           <div className="manager-sync-summary">
             {managerSubscriptionStatus && (
               <span>
-                الحالة:{" "}
-                {managerSubscriptionStatus.has_access ? "نشط" : "يحتاج مراجعة"}
+                {t("الحالة:")}{" "}
+                {managerSubscriptionStatus.has_access ? t("نشط") : t("يحتاج مراجعة")}
               </span>
             )}
             {activeManagerSubscription?.plan_name && (
               <span>{activeManagerSubscription.plan_name}</span>
             )}
-            {managerPaidThroughLabel && <span>مدفوع حتى {managerPaidThroughLabel}</span>}
+            {managerPaidThroughLabel && <span>{t("مدفوع حتى")} {managerPaidThroughLabel}</span>}
             {managerSubscriptionCancelsAtPeriodEnd && (
-              <span>لن يتم التجديد بعد نهاية الفترة</span>
+              <span>{t("لن يتم التجديد بعد نهاية الفترة")}</span>
             )}
             {managerPayments.length > 0 && (
-              <span>{managerPayments.length} دفعة مسجلة في المدير</span>
+              <span>
+                {managerPayments.length}{" "}
+                {managerPayments.length === 1 ? t("دفعة مسجلة في المدير") : t("دفعات مسجلة في المدير")}
+              </span>
             )}
             {managerCanCancelSubscription && (
               <button
@@ -17417,7 +18997,7 @@ function SettingsView({
                 onClick={cancelManagerSubscription}
                 disabled={managerCanceling}
               >
-                <X size={16} /> إلغاء التجديد
+                <X size={16} /> {t("إلغاء التجديد")}
               </button>
             )}
           </div>
@@ -17442,14 +19022,20 @@ function SettingsView({
                   : "One-time payment"}
               </span>
               <strong>
-                {money(managerCheckoutAmount)} {managerCurrency}
+                {managerCheckoutReady
+                  ? `${money(managerCheckoutAmount)} ${managerCurrency}`
+                  : "—"}
               </strong>
             </div>
           </div>
           {managerSubscriptionLoading && (
             <div className="manager-muted">Loading manager plans...</div>
           )}
-          <div ref={managerPaypalButtonsRef} className="paypal-buttons-host" />
+          <div
+            ref={managerPaypalButtonsRef}
+            className="paypal-buttons-host"
+            hidden={!managerCheckoutReady}
+          />
           {managerPaymentMode === "one_time" && (
             <>
               <div className="paypal-divider">
@@ -17462,7 +19048,7 @@ function SettingsView({
                 className="paypal-card-submit"
                 hidden
               >
-                Pay securely {money(managerCheckoutAmount)} {managerCurrency}
+                Pay securely {managerCheckoutReady ? money(managerCheckoutAmount) : "—"} {managerCurrency}
               </button>
             </>
           )}
@@ -17476,11 +19062,13 @@ function SettingsView({
         <div className="account-danger-zone">
           <div>
             <strong>
-              <AlertTriangle size={17} /> Delete company account
+              <AlertTriangle size={17} /> {l("حذف حساب الشركة", "Delete company account")}
             </strong>
             <span>
-              Creates a database archive, then removes local saved users, chat,
-              documents, payments, and subscription state from this app.
+              {l(
+                "ينشئ أرشيفاً لقاعدة البيانات، ثم يحذف المستخدمين والدردشة والمستندات والدفعات وحالة الاشتراك المحفوظة محلياً من هذا التطبيق.",
+                "Creates a database archive, then removes local saved users, chat, documents, payments, and subscription state from this app.",
+              )}
             </span>
           </div>
           <input
@@ -17500,7 +19088,7 @@ function SettingsView({
               managerDeletingAccount
             }
           >
-            <Trash2 size={17} /> Delete account
+            <Trash2 size={17} /> {l("حذف الحساب", "Delete account")}
           </button>
         </div>
       </section>
@@ -17508,12 +19096,12 @@ function SettingsView({
       <section className="panel users-panel">
         <div className="panel-head">
           <h2>
-            <Users size={18} /> المستخدمون
+            <Users size={18} /> {t("المستخدمون")}
           </h2>
           <span className="user-chip">{currentUser?.display_name}</span>
         </div>
         <form className="form-grid user-form" onSubmit={changeMyPassword}>
-          <Field label="كلمة المرور الحالية">
+          <Field label={t("كلمة المرور الحالية")}>
             <input
               type="password"
               value={passwordDraft.current_password}
@@ -17525,7 +19113,7 @@ function SettingsView({
               }
             />
           </Field>
-          <Field label="كلمة المرور الجديدة">
+          <Field label={t("كلمة المرور الجديدة")}>
             <input
               type="password"
               value={passwordDraft.new_password}
@@ -17539,13 +19127,13 @@ function SettingsView({
             />
           </Field>
           <button type="submit">
-            <KeyRound size={18} /> تغيير كلمتي
+            <KeyRound size={18} /> {t("تغيير كلمتي")}
           </button>
         </form>
         {isCompanyAdmin ? (
           <>
             <form className="form-grid user-form" onSubmit={addUser}>
-              <Field label="اسم الدخول">
+              <Field label={t("اسم الدخول")}>
                 <input
                   value={newUser.username}
                   onChange={(event) =>
@@ -17554,7 +19142,7 @@ function SettingsView({
                   required
                 />
               </Field>
-              <Field label="الاسم في التقارير">
+              <Field label={t("الاسم في التقارير")}>
                 <input
                   value={newUser.display_name}
                   onChange={(event) =>
@@ -17564,7 +19152,7 @@ function SettingsView({
                   required
                 />
               </Field>
-              <Field label="كلمة المرور">
+              <Field label={t("كلمة المرور")}>
                 <input
                   type="password"
                   value={newUser.password}
@@ -17574,23 +19162,23 @@ function SettingsView({
                   required
                 />
               </Field>
-              <Field label="الدور">
+              <Field label={t("الدور")}>
                 <select
                   value={newUser.role}
                   onChange={(event) =>
                     setNewUser({ ...newUser, role: event.target.value })
                   }
                 >
-                  <option value="user">مستخدم</option>
+                  <option value="user">{t("مستخدم")}</option>
                   <option value="manager">Manager</option>
-                  <option value="admin">مدير</option>
+                  <option value="admin">{t("مدير")}</option>
                 </select>
               </Field>
               {USER_PERMISSION_FIELDS.map((permission) => (
                 <label
                   key={permission.key}
                   className="check-tile"
-                  title={permission.title}
+                  title={t(permission.title)}
                 >
                   <input
                     type="checkbox"
@@ -17602,11 +19190,11 @@ function SettingsView({
                       })
                     }
                   />
-                  <span>{permission.label}</span>
+                  <span>{t(permission.label)}</span>
                 </label>
               ))}
               <button type="submit" className="primary">
-                <UserPlus size={18} /> إضافة مستخدم
+                <UserPlus size={18} /> {t("إضافة مستخدم")}
               </button>
             </form>
             <div className="table-scroll compact-table">
@@ -17614,16 +19202,16 @@ function SettingsView({
                 <thead>
                   <tr>
                     <th>ID</th>
-                    <th>اسم الدخول</th>
-                    <th>اسم التقرير</th>
-                    <th>الدور</th>
-                    <th>الحالة</th>
-                    <th>آخر ظهور</th>
-                    <th>وقت العمل</th>
+                    <th>{t("اسم الدخول")}</th>
+                    <th>{t("اسم التقرير")}</th>
+                    <th>{t("الدور")}</th>
+                    <th>{t("الحالة")}</th>
+                    <th>{t("آخر ظهور")}</th>
+                    <th>{t("وقت العمل")}</th>
                     {USER_PERMISSION_FIELDS.map((permission) => (
-                      <th key={permission.key}>{permission.shortLabel}</th>
+                      <th key={permission.key}>{t(permission.shortLabel)}</th>
                     ))}
-                    <th>كلمة مرور جديدة</th>
+                    <th>{t("كلمة مرور جديدة")}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -17684,8 +19272,8 @@ function SettingsView({
                                 })
                               }
                             >
-                              <option value="1">نشط</option>
-                              <option value="0">موقوف</option>
+                              <option value="1">{t("نشط")}</option>
+                              <option value="0">{t("موقوف")}</option>
                             </select>
                           </td>
                           <td>{formatUserDateTime(user.last_seen_at)}</td>
@@ -17711,7 +19299,7 @@ function SettingsView({
                                       : 0,
                                   })
                                 }
-                                title={permission.title}
+                                title={t(permission.title)}
                               />
                             </td>
                           ))}
@@ -17731,7 +19319,7 @@ function SettingsView({
                             <button
                               type="button"
                               className="icon-button"
-                              title="حفظ"
+                              title={t("حفظ")}
                               onClick={() => saveUser(user.id)}
                             >
                               <Save size={16} />
@@ -17739,7 +19327,7 @@ function SettingsView({
                             <button
                               type="button"
                               className="icon-button"
-                              title="إلغاء"
+                              title={t("إلغاء")}
                               onClick={() => {
                                 setEditingUserId(null);
                                 setEditingUser({});
@@ -17766,7 +19354,7 @@ function SettingsView({
                             </span>
                           </td>
                           <td>{user.role}</td>
-                          <td>{user.is_active ? "نشط" : "موقوف"}</td>
+                          <td>{user.is_active ? t("نشط") : t("موقوف")}</td>
                           <td>{formatUserDateTime(user.last_seen_at)}</td>
                           <td>
                             {user.work_time_label ||
@@ -17774,7 +19362,7 @@ function SettingsView({
                           </td>
                           {USER_PERMISSION_FIELDS.map((permission) => (
                             <td key={permission.key}>
-                              {user[permission.key] ? "نعم" : "-"}
+                              {user[permission.key] ? t("نعم") : "-"}
                             </td>
                           ))}
                           <td> </td>
@@ -17782,7 +19370,7 @@ function SettingsView({
                             <button
                               type="button"
                               className="icon-button"
-                              title="تعديل"
+                              title={t("تعديل")}
                               onClick={() => {
                                 setEditingUserId(user.id);
                                 setEditingUser({ ...user, password: "" });
@@ -17793,7 +19381,7 @@ function SettingsView({
                             <button
                               type="button"
                               className="icon-button danger"
-                              title="إيقاف"
+                              title={t("إيقاف")}
                               onClick={() => deleteUser(user.id)}
                             >
                               <Trash2 size={16} />
@@ -17808,24 +19396,40 @@ function SettingsView({
             </div>
           </>
         ) : (
-          <div className="empty-state">إدارة المستخدمين للمدير فقط</div>
+          <div className="empty-state">{t("إدارة المستخدمين للمدير فقط")}</div>
         )}
       </section>
 
       <section className="terms-layout">
         <TermEditor
-          title="شروط الأفراد"
+          title="الشروط والأحكام العربية — الأفراد"
           value={retailTerms}
           onChange={setRetailTerms}
           onSave={() => saveTerms("retail", retailTerms)}
           disabled={!canEditTerms}
         />
         <TermEditor
-          title="شروط الشركات"
+          title="الشروط والأحكام العربية — الشركات"
           value={corporateTerms}
           onChange={setCorporateTerms}
           onSave={() => saveTerms("corporate", corporateTerms)}
           disabled={!canEditTerms}
+        />
+        <TermEditor
+          title="الشروط والأحكام الإنجليزية — الأفراد"
+          value={retailTermsEn}
+          onChange={setRetailTermsEn}
+          onSave={() => saveTerms("retail_en", retailTermsEn)}
+          disabled={!canEditTerms}
+          language="en"
+        />
+        <TermEditor
+          title="الشروط والأحكام الإنجليزية — الشركات"
+          value={corporateTermsEn}
+          onChange={setCorporateTermsEn}
+          onSave={() => saveTerms("corporate_en", corporateTermsEn)}
+          disabled={!canEditTerms}
+          language="en"
         />
       </section>
 
@@ -17837,7 +19441,8 @@ function SettingsView({
   );
 }
 
-function TermEditor({ title, value, onChange, onSave, disabled = false }) {
+function TermEditor({ title, value, onChange, onSave, disabled = false, language = "ar" }) {
+  const [open, setOpen] = useState(false);
   const sections = value.sections || [];
   function updateSection(index, patch) {
     const next = sections.map((section, itemIndex) =>
@@ -17855,9 +19460,20 @@ function TermEditor({ title, value, onChange, onSave, disabled = false }) {
     });
   }
   return (
-    <section className="panel term-editor">
-      <div className="panel-head">
-        <h2>{title}</h2>
+    <section className="panel term-editor" dir={language === "en" ? "ltr" : "rtl"}>
+      <button
+        type="button"
+        className="term-editor-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="term-editor-toggle-title">{title}</span>
+        <span>{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <>
+      <div className="panel-head term-editor-actions">
+        <span />
         <div className="action-row">
           <button type="button" onClick={addSection} disabled={disabled}>
             <Plus size={17} /> قسم
@@ -17901,6 +19517,8 @@ function TermEditor({ title, value, onChange, onSave, disabled = false }) {
           </div>
         ))}
       </div>
+        </>
+      )}
     </section>
   );
 }
@@ -18056,6 +19674,8 @@ function initialsForName(value = "") {
 
 function ComboField({ label, value, options = [], onChange }) {
   const [open, setOpen] = useState(false);
+  const language = document.documentElement.lang === "en" ? "en" : "ar";
+  const t = (ar, en) => (language === "en" ? en || uiText(ar, "en") : ar);
   const cleanOptions = uniqueValues(options);
   const typed = normalizeArabic(value || "");
   const shownOptions = typed
@@ -18068,7 +19688,7 @@ function ComboField({ label, value, options = [], onChange }) {
   return (
     <label
       className="field combo-field"
-      title={`${label} - اكتب للبحث أو اختر من البيانات السابقة`}
+      title={`${label} - ${t("اكتب للبحث أو اختر من البيانات السابقة", "Type to search or choose from previous data")}`}
     >
       <span>{label}</span>
       <input
@@ -18111,7 +19731,7 @@ function ComboField({ label, value, options = [], onChange }) {
           if (event.target.value) onChange(event.target.value);
         }}
       >
-        <option value="">اختيار من البيانات السابقة</option>
+        <option value="">{t("اختيار من البيانات السابقة", "Choose from previous data")}</option>
         {shownOptions.map((option) => (
           <option key={option} value={option}>
             {option}
@@ -18346,7 +19966,14 @@ function ChatWidget({
   currentUser,
   setMessage,
   onOpenMention,
+  uiLanguage = "ar",
 }) {
+  const chatLocale = uiLanguage === "en" ? "en" : "ar";
+  const chatDir = chatLocale === "en" ? "ltr" : "rtl";
+  const chatText = useCallback(
+    (ar, en) => (chatLocale === "en" ? en : ar),
+    [chatLocale],
+  );
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState([]);
   const [text, setText] = useState("");
@@ -19217,7 +20844,12 @@ function ChatWidget({
       `[data-message-id="${id}"]`,
     );
     if (!target) {
-      setMessage?.("The replied message is not in the loaded chat history.");
+      setMessage?.(
+        chatText(
+          "الرسالة المشار إليها غير موجودة في محفوظات الدردشة المحملة.",
+          "The replied message is not in the loaded chat history.",
+        ),
+      );
       return;
     }
     target.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -19358,10 +20990,10 @@ function ChatWidget({
         </div>
       )}
       {open && (
-        <section className="chat-panel" dir="rtl" ref={chatPanelRef}>
+        <section className="chat-panel" dir={chatDir} ref={chatPanelRef}>
           <div className="chat-head">
-            <strong>Team Chat</strong>
-            <button type="button" onClick={() => setOpen(false)} title="Close">
+            <strong>{chatText("دردشة الفريق", "Team Chat")}</strong>
+            <button type="button" onClick={() => setOpen(false)} title={chatText("إغلاق", "Close")}>
               <X size={16} />
             </button>
           </div>
@@ -19406,7 +21038,7 @@ function ChatWidget({
                   onContextMenu={(event) => openReactionPicker(event, row)}
                 >
                   <div className="chat-meta">
-                    <strong>{isOwn ? "You" : row.sender || "User"}</strong>
+                    <strong>{isOwn ? chatText("أنت", "You") : row.sender || chatText("مستخدم", "User")}</strong>
                     <span>{chatDate(row.created_at)}</span>
                   </div>
                   {row.reply && (
@@ -19414,17 +21046,17 @@ function ChatWidget({
                       type="button"
                       className="chat-reply-preview"
                       onClick={() => focusRepliedMessage(row.reply.id)}
-                      title="Go to replied message"
+                      title={chatText("انتقل إلى الرسالة المشار إليها", "Go to replied message")}
                     >
                       <strong>
                         {row.reply.sender === currentUserName
-                          ? "You"
-                          : row.reply.sender || "User"}
+                          ? chatText("أنت", "You")
+                          : row.reply.sender || chatText("مستخدم", "User")}
                       </strong>
                       <span>
                         {row.reply.message ||
                           row.reply.attachment_name ||
-                          "Attachment"}
+                          chatText("مرفق", "Attachment")}
                       </span>
                     </button>
                   )}
@@ -19437,17 +21069,17 @@ function ChatWidget({
                         onClick={() =>
                           setPreviewAttachment({
                             url: attachmentUrl,
-                            name: row.attachment_name || "Image attachment",
+                            name: row.attachment_name || chatText("مرفق صورة", "Image attachment"),
                             type: "image",
                           })
                         }
                       >
-                        <img src={attachmentUrl} alt={row.attachment_name || "Attachment"} />
+                        <img src={attachmentUrl} alt={row.attachment_name || chatText("مرفق", "Attachment")} />
                       </button>
                     ) : isAudio ? (
                       <WaveformAudio
                         src={attachmentUrl}
-                        label={row.attachment_name || "Voice message"}
+                        label={row.attachment_name || chatText("رسالة صوتية", "Voice message")}
                       />
                     ) : isPdf ? (
                       <button
@@ -19456,17 +21088,17 @@ function ChatWidget({
                         onClick={() =>
                           setPreviewAttachment({
                             url: attachmentUrl,
-                            name: row.attachment_name || "PDF attachment",
+                            name: row.attachment_name || chatText("مرفق PDF", "PDF attachment"),
                             type: "pdf",
                           })
                         }
                       >
                         <FileText size={18} />
-                        <span>{row.attachment_name || "PDF attachment"}</span>
+                        <span>{row.attachment_name || chatText("مرفق PDF", "PDF attachment")}</span>
                       </button>
                     ) : (
                       <a href={attachmentUrl} target="_blank" rel="noreferrer">
-                        {row.attachment_name || "Attachment"}
+                        {row.attachment_name || chatText("مرفق", "Attachment")}
                       </a>
                     ))}
                   {!!managedAttachments.length && (
@@ -19489,13 +21121,13 @@ function ChatWidget({
                               )}
                             </div>
                             <div>
-                              <strong>{attachment.display_name || "Attachment"}</strong>
+                              <strong>{attachment.display_name || chatText("مرفق", "Attachment")}</strong>
                               <span>
                                 {isFolder
-                                  ? `${attachment.file_count || 0} files • ${attachment.folder_count || 0} folders`
+                                  ? `${attachment.file_count || 0} ${chatText("ملفات", "files")} • ${attachment.folder_count || 0} ${chatText("مجلدات", "folders")}`
                                   : isMultiple
-                                    ? `${attachment.file_count || 0} files`
-                                    : attachment.mime_type || "File"}
+                                    ? `${attachment.file_count || 0} ${chatText("ملفات", "files")}`
+                                    : attachment.mime_type || chatText("ملف", "File")}
                                 {" · "}
                                 {formatBytes(attachment.total_size)}
                               </span>
@@ -19506,12 +21138,12 @@ function ChatWidget({
                                   type="button"
                                   onClick={() => openFolderBrowser(attachment)}
                                 >
-                                  Browse
+                                  {chatText("تصفح", "Browse")}
                                 </button>
                               )}
                               {downloadUrl && (
                                 <a href={downloadUrl} target="_blank" rel="noreferrer">
-                                  <Download size={15} /> Download
+                                  <Download size={15} /> {chatText("تنزيل", "Download")}
                                 </a>
                               )}
                             </div>
@@ -19521,24 +21153,24 @@ function ChatWidget({
                     </div>
                   )}
                   {!!row.reactions?.length && (
-                    <div className="chat-reactions" aria-label="Message reactions">
+                    <div className="chat-reactions" aria-label={chatText("تفاعلات الرسالة", "Message reactions")}>
                       {row.reactions.map((reaction) => {
                         const users = reaction.users || [];
-                        const shownUsers = users.slice(0, 2);
-                        const extraCount = Math.max(0, Number(reaction.count || users.length) - shownUsers.length);
+                        const reactionCount = Math.max(1, Number(reaction.count || users.length || 1));
+                        const reactionNames = users
+                          .map((user) => user.display_name || user.user_name || user.name || user.username)
+                          .filter(Boolean)
+                          .join("\n");
                         return (
                           <button
                             key={reaction.emoji}
                             type="button"
                             className={reaction.reacted_by_current ? "chat-reaction-pill active" : "chat-reaction-pill"}
-                            title={users.map((user) => user.display_name).join("\n")}
+                            title={reactionNames || chatText("تفاعل", "Reaction")}
                             onClick={() => toggleReaction(row, reaction.emoji)}
                           >
                             <span>{reaction.emoji}</span>
-                            {shownUsers.map((user) => (
-                              <b key={user.user_id}>{user.initials}</b>
-                            ))}
-                            {extraCount > 0 && <em>+{extraCount}</em>}
+                            {reactionCount > 1 && <b>{reactionCount}</b>}
                           </button>
                         );
                       })}
@@ -19549,7 +21181,7 @@ function ChatWidget({
                       type="button"
                       className="chat-reaction-button"
                       onClick={(event) => openReactionPicker(event, row)}
-                      title="React"
+                      title={chatText("تفاعل", "React")}
                     >
                       <Smile size={14} />
                     </button>
@@ -19557,7 +21189,7 @@ function ChatWidget({
                       type="button"
                       className="chat-reply-button"
                       onClick={() => setReplyTo(row)}
-                      title="Reply"
+                      title={chatText("رد", "Reply")}
                     >
                       <CornerUpLeft size={14} />
                     </button>
@@ -19566,7 +21198,7 @@ function ChatWidget({
                         type="button"
                         className="chat-seen-button"
                         onClick={() => setSeenMessage({ ...row, seenPeople })}
-                        title="Seen by"
+                        title={chatText("شوهد بواسطة", "Seen by")}
                       >
                         <Eye size={14} />
                       </button>
@@ -19576,31 +21208,24 @@ function ChatWidget({
                         type="button"
                         className="chat-delete-button"
                         onClick={() => setPendingDelete(row)}
-                        title="Delete for everyone"
+                        title={chatText("حذف للجميع", "Delete for everyone")}
                       >
                         <Trash2 size={14} />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="chat-more-button"
-                      title="More"
-                    >
-                      <MoreHorizontal size={14} />
-                    </button>
                   </div>
                 </article>
               );
               })}
-              {!rows.length && <div className="chat-empty">No messages yet</div>}
+              {!rows.length && <div className="chat-empty">{chatText("لا توجد رسائل بعد", "No messages yet")}</div>}
             </div>
             {showJumpToLatest && (
               <button
                 type="button"
                 className="chat-jump-latest"
                 onClick={() => scrollToLatest("smooth")}
-                title="الانتقال إلى آخر رسالة"
-                aria-label="الانتقال إلى آخر رسالة"
+                title={chatText("الانتقال إلى آخر رسالة", "Jump to latest message")}
+                aria-label={chatText("الانتقال إلى آخر رسالة", "Jump to latest message")}
               >
                 <ArrowDown size={19} />
               </button>
@@ -19610,21 +21235,21 @@ function ChatWidget({
             <div className="chat-compose-reply">
               <div>
                 <strong>
-                  Replying to{" "}
+                  {chatText("رد على", "Replying to")}{" "}
                   {replyTo.sender === currentUserName
-                    ? "You"
-                    : replyTo.sender || "User"}
+                    ? chatText("أنت", "You")
+                    : replyTo.sender || chatText("مستخدم", "User")}
                 </strong>
                 <span>
                   {replyTo.message ||
                     replyTo.attachment_name ||
-                    "Attachment"}
+                    chatText("مرفق", "Attachment")}
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => setReplyTo(null)}
-                title="Cancel reply"
+                title={chatText("إلغاء الرد", "Cancel reply")}
               >
                 <X size={14} />
               </button>
@@ -19642,7 +21267,7 @@ function ChatWidget({
               <button
                 type="button"
                 onClick={cancelRecording}
-                title="Cancel recording"
+                title={chatText("إلغاء التسجيل", "Cancel recording")}
               >
                 <X size={14} />
               </button>
@@ -19651,15 +21276,15 @@ function ChatWidget({
           {file && (
             <div className="chat-pending-file">
               {file.type?.startsWith("image/") && pendingFileUrl ? (
-                <img src={pendingFileUrl} alt="Selected attachment preview" />
+                <img src={pendingFileUrl} alt={chatText("معاينة المرفق المحدد", "Selected attachment preview")} />
               ) : (
                 <div className="chat-pending-file-icon"><Paperclip size={22} /></div>
               )}
               <div>
-                <strong>Ready to send</strong>
+                <strong>{chatText("جاهز للإرسال", "Ready to send")}</strong>
                 <span>{file.name}</span>
               </div>
-              <button type="button" onClick={() => setFile(null)} title="Remove attachment">
+              <button type="button" onClick={() => setFile(null)} title={chatText("إزالة المرفق", "Remove attachment")}>
                 <X size={16} />
               </button>
             </div>
@@ -19670,9 +21295,9 @@ function ChatWidget({
                 {pendingAttachmentType === "folder" ? <FolderOpen size={22} /> : <Files size={22} />}
               </div>
               <div>
-                <strong>Ready to send</strong>
+                <strong>{chatText("جاهز للإرسال", "Ready to send")}</strong>
                 <span>
-                  {pendingAttachmentSummary().displayName} · {pendingAttachmentSummary().count} item(s) · {formatBytes(pendingAttachmentSummary().totalSize)}
+                  {pendingAttachmentSummary().displayName} · {pendingAttachmentSummary().count} {chatText("عنصر", "item(s)")} · {formatBytes(pendingAttachmentSummary().totalSize)}
                 </span>
               </div>
               <button
@@ -19681,7 +21306,7 @@ function ChatWidget({
                   setPendingAttachments([]);
                   setPendingAttachmentType("file");
                 }}
-                title="Remove attachment"
+                title={chatText("إزالة المرفق", "Remove attachment")}
               >
                 <X size={16} />
               </button>
@@ -19689,9 +21314,9 @@ function ChatWidget({
           )}
           {uploadProgress && (
             <div className="chat-upload-progress" role="status">
-              <strong>Uploading {uploadProgress.name}</strong>
+              <strong>{chatText("جارٍ رفع", "Uploading")} {uploadProgress.name}</strong>
               <span>
-                {formatBytes(uploadProgress.uploaded)} of {formatBytes(uploadProgress.total)}
+                {formatBytes(uploadProgress.uploaded)} {chatText("من", "of")} {formatBytes(uploadProgress.total)}
               </span>
               <div>
                 <i style={{ width: `${uploadProgress.percent || 0}%` }} />
@@ -19699,9 +21324,9 @@ function ChatWidget({
             </div>
           )}
           {mentionQuery && (mentionLoading || mentionSuggestions.length > 0) && (
-            <div className="chat-mention-list" role="listbox" aria-label="اقتراحات الإشارة">
+            <div className="chat-mention-list" role="listbox" aria-label={chatText("اقتراحات الإشارة", "Mention suggestions")}>
               {mentionLoading && !mentionSuggestions.length ? (
-                <span className="chat-mention-loading">جارٍ البحث…</span>
+                <span className="chat-mention-loading">{chatText("جارٍ البحث…", "Searching…")}</span>
               ) : (
                 mentionSuggestions.map((suggestion, index) => (
                   <button
@@ -19728,7 +21353,7 @@ function ChatWidget({
             <div
               ref={emojiPickerRef}
               className="chat-emoji-picker"
-              aria-label="لوحة الإيموجي"
+              aria-label={chatText("لوحة الإيموجي", "Emoji picker")}
             >
               <div className="chat-emoji-tabs">
                 <button
@@ -19736,7 +21361,7 @@ function ChatWidget({
                   className={emojiCategory === "most_used" ? "active" : ""}
                   onClick={() => setEmojiCategory("most_used")}
                 >
-                  Most used
+                  {chatText("الأكثر استخداماً", "Most used")}
                 </button>
                 {CHAT_EMOJI_CATEGORIES.map((category) => (
                   <button
@@ -19772,7 +21397,7 @@ function ChatWidget({
             <div
               ref={reactionPickerRef}
               className="chat-emoji-picker chat-reaction-picker"
-              aria-label="لوحة تفاعل الرسالة"
+              aria-label={chatText("لوحة تفاعل الرسالة", "Message reaction picker")}
               style={{
                 left: `${reactionPicker.left}px`,
                 top: `${reactionPicker.top}px`,
@@ -19785,7 +21410,7 @@ function ChatWidget({
                   className={emojiCategory === "most_used" ? "active" : ""}
                   onClick={() => setEmojiCategory("most_used")}
                 >
-                  Most used
+                  {chatText("الأكثر استخداماً", "Most used")}
                 </button>
                 {CHAT_EMOJI_CATEGORIES.map((category) => (
                   <button
@@ -19803,7 +21428,7 @@ function ChatWidget({
                 <button
                   type="button"
                   onClick={() => setReactionPicker(null)}
-                  title="Close"
+                  title={chatText("إغلاق", "Close")}
                 >
                   <X size={14} />
                 </button>
@@ -19836,7 +21461,7 @@ function ChatWidget({
               onPointerDown={() => setEmojiOpen(false)}
               onPaste={handleComposerPaste}
               onKeyDown={handleComposerKeyDown}
-              placeholder="Write a message"
+              placeholder={chatText("اكتب رسالة", "Write a message")}
               rows={2}
               dir="auto"
             />
@@ -19847,15 +21472,15 @@ function ChatWidget({
               onClick={() => {
                 setEmojiOpen((value) => !value);
               }}
-              title="Emoji"
-              aria-label="Open emoji picker"
+              title={chatText("إيموجي", "Emoji")}
+              aria-label={chatText("فتح لوحة الإيموجي", "Open emoji picker")}
             >
               <Smile size={18} />
             </button>
             <button
               type="button"
               className="chat-attach"
-              title="إرسال ملفات"
+              title={chatText("إرسال ملفات", "Send files")}
               onClick={() => filesInputRef.current?.click()}
             >
               <Paperclip size={17} />
@@ -19863,7 +21488,7 @@ function ChatWidget({
             <button
               type="button"
               className="chat-attach"
-              title="إرسال مجلد"
+              title={chatText("إرسال مجلد", "Send folder")}
               onClick={() => folderInputRef.current?.click()}
             >
               <FolderOpen size={17} />
@@ -19895,11 +21520,11 @@ function ChatWidget({
               className={recording ? "chat-voice-button recording" : "chat-voice-button"}
               onClick={toggleRecording}
               disabled={voiceSending || (sending && !recording)}
-              title={recording ? "Stop recording" : "Record voice message"}
+              title={recording ? chatText("إيقاف التسجيل", "Stop recording") : chatText("تسجيل رسالة صوتية", "Record voice message")}
             >
               {recording ? <Square size={15} /> : <Mic size={17} />}
             </button>
-            <button type="submit" disabled={sending || voiceSending} title="Send">
+            <button type="submit" disabled={sending || voiceSending} title={chatText("إرسال", "Send")}>
               <Send size={17} />
             </button>
           </form>
@@ -19915,17 +21540,19 @@ function ChatWidget({
           }}
         >
           <div className="chat-dialog">
-            <strong>Delete message for everyone?</strong>
+            <strong>{chatText("حذف الرسالة للجميع؟", "Delete message for everyone?")}</strong>
             <p>
-              This message will be removed from chat for all users. This action
-              cannot be undone.
+              {chatText(
+                "ستتم إزالة هذه الرسالة من الدردشة لكل المستخدمين. لا يمكن التراجع عن هذا الإجراء.",
+                "This message will be removed from chat for all users. This action cannot be undone.",
+              )}
             </p>
             <div className="chat-dialog-actions">
               <button type="button" onClick={() => setPendingDelete(null)}>
-                Cancel
+                {chatText("إلغاء", "Cancel")}
               </button>
               <button type="button" className="danger" onClick={deleteMessage}>
-                Delete
+                {chatText("حذف", "Delete")}
               </button>
             </div>
           </div>
@@ -19942,11 +21569,11 @@ function ChatWidget({
         >
           <div className="chat-dialog">
             <div className="chat-dialog-head">
-              <strong>Seen by</strong>
+              <strong>{chatText("شوهد بواسطة", "Seen by")}</strong>
               <button
                 type="button"
                 onClick={() => setSeenMessage(null)}
-                title="Close"
+                title={chatText("إغلاق", "Close")}
               >
                 <X size={16} />
               </button>
@@ -19960,7 +21587,7 @@ function ChatWidget({
                   </div>
                 ))
               ) : (
-                <span>No other users have seen it yet</span>
+                <span>{chatText("لم يشاهدها مستخدمون آخرون بعد", "No other users have seen it yet")}</span>
               )}
             </div>
           </div>
@@ -19980,21 +21607,21 @@ function ChatWidget({
         >
           <div className="chat-dialog chat-folder-browser">
             <div className="chat-dialog-head">
-              <strong>{folderBrowser.attachment?.display_name || "Attachment folder"}</strong>
+              <strong>{folderBrowser.attachment?.display_name || chatText("مجلد المرفقات", "Attachment folder")}</strong>
               <button
                 type="button"
                 onClick={() => {
                   setFolderBrowser(null);
                   setFolderEntries([]);
                 }}
-                title="Close"
+                title={chatText("إغلاق", "Close")}
               >
                 <X size={16} />
               </button>
             </div>
             <div className="chat-folder-browser-meta">
-              <span>{folderBrowser.attachment?.file_count || 0} files</span>
-              <span>{folderBrowser.attachment?.folder_count || 0} folders</span>
+              <span>{folderBrowser.attachment?.file_count || 0} {chatText("ملفات", "files")}</span>
+              <span>{folderBrowser.attachment?.folder_count || 0} {chatText("مجلدات", "folders")}</span>
               <span>{formatBytes(folderBrowser.attachment?.total_size || 0)}</span>
             </div>
             {folderBrowser.parent && (
@@ -20003,12 +21630,12 @@ function ChatWidget({
                 className="chat-folder-up"
                 onClick={() => openFolderBrowser(folderBrowser.attachment)}
               >
-                رجوع إلى الجذر
+                {chatText("رجوع إلى الجذر", "Back to root")}
               </button>
             )}
             <div className="chat-folder-entry-list">
               {folderLoading ? (
-                <span>Loading...</span>
+                <span>{chatText("جارٍ التحميل...", "Loading...")}</span>
               ) : folderEntries.length ? (
                 folderEntries.map((entry) => (
                   <div key={entry.id} className="chat-folder-entry">
@@ -20027,16 +21654,16 @@ function ChatWidget({
                       )}
                       <span>{entry.display_name}</span>
                     </button>
-                    <small>{entry.entry_type === "file" ? formatBytes(entry.size_bytes) : "Folder"}</small>
+                    <small>{entry.entry_type === "file" ? formatBytes(entry.size_bytes) : chatText("مجلد", "Folder")}</small>
                     {entry.download_url && (
                       <a href={buildUrl(apiBase, entry.download_url)} target="_blank" rel="noreferrer">
-                        <Download size={14} /> Download
+                        <Download size={14} /> {chatText("تنزيل", "Download")}
                       </a>
                     )}
                   </div>
                 ))
               ) : (
-                <span>No files in this folder.</span>
+                <span>{chatText("لا توجد ملفات في هذا المجلد.", "No files in this folder.")}</span>
               )}
             </div>
           </div>

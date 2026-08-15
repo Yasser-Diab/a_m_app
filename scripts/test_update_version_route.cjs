@@ -34,15 +34,15 @@ function requestJson(port, route) {
           { tag_name: 'v1.5.0', draft: false, prerelease: true, assets: [] },
           { tag_name: 'v1.4.9', draft: true, prerelease: false, assets: [] },
           {
-            tag_name: 'v1.4.3',
+            tag_name: 'v2.0.0',
             draft: false,
             prerelease: false,
             published_at: '2026-07-15T00:00:00Z',
-            html_url: 'https://github.com/Yasser-Diab/a_m_app/releases/tag/v1.4.3',
+            html_url: 'https://github.com/Yasser-Diab/a_m_app/releases/tag/v2.0.0',
             assets: [
               {
-                name: 'AccountingManagement-Setup-1.4.3.exe',
-                browser_download_url: 'https://example.test/AccountingManagement-Setup-1.4.3.exe',
+                name: 'EasyCommercial-Setup-2.0.0.exe',
+                browser_download_url: 'https://example.test/EasyCommercial-Setup-2.0.0.exe',
               },
             ],
           },
@@ -60,7 +60,7 @@ function requestJson(port, route) {
     httpServer = await api.listen(0, '127.0.0.1');
     const port = httpServer.address().port;
     const health = await requestJson(port, '/api/health');
-    assert.equal(health.data.serverVersion, '1.4.3');
+    assert.equal(health.data.serverVersion, '2.0.2');
     assert.equal(health.data.databaseSchemaVersion, 12);
 
     const oldDevice = await requestJson(
@@ -69,12 +69,12 @@ function requestJson(port, route) {
     );
     const currentDevice = await requestJson(
       port,
-      '/api/update/latest?platform=win32&installed_version=1.4.3',
+      '/api/update/latest?platform=win32&installed_version=2.0.0',
     );
     assert.equal(oldDevice.data.installedVersion, '1.4.2');
-    assert.equal(oldDevice.data.latestVersion, '1.4.3');
+    assert.equal(oldDevice.data.latestVersion, '2.0.0');
     assert.equal(oldDevice.data.updateAvailable, true);
-    assert.equal(currentDevice.data.installedVersion, '1.4.3');
+    assert.equal(currentDevice.data.installedVersion, '2.0.0');
     assert.equal(currentDevice.data.updateAvailable, false);
   } finally {
     await new Promise((resolve) => httpServer?.close(resolve) || resolve());

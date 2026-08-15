@@ -1,17 +1,17 @@
 {
-  "version": "1.4.3",
+  "version": "2.0.2",
   "baseAppId": "com.sherifalihassan.priceoffer",
   "desktopOutput": "dist-installer",
   "androidOutput": "dist-android",
   "variants": {
     "main": {
-      "name": "Accounting Management",
-      "shortName": "A.M",
+      "name": "Easy Commercial",
+      "shortName": "E.C",
       "appIdSuffix": "",
       "entryTab": "dashboard",
       "icon": "build/variants/main.ico",
       "androidIcon": "build/variants/main.png",
-      "artifactPrefix": "AccountingManagement"
+      "artifactPrefix": "EasyCommercial"
     }
   }
 }

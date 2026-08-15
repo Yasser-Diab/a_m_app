@@ -6,9 +6,13 @@ function releaseVersion(release = {}) {
   return match ? match[1] : '';
 }
 
-function releaseUpdatePreflight({ installedVersion, release } = {}) {
+function releaseUpdatePreflight({ installedVersion, release, manifest, platform = 'windows' } = {}) {
   const installed = String(installedVersion || '0.0.0').replace(/^v/i, '');
-  const latestVersion = releaseVersion(release);
+  const normalizedPlatform = String(platform || '').toLowerCase();
+  const manifestVersion = normalizedPlatform.includes('android')
+    ? manifest?.android?.versionName
+    : manifest?.windows?.version || manifest?.version;
+  const latestVersion = String(manifestVersion || releaseVersion(release) || '').replace(/^v/i, '');
   const releaseUrl = String(release?.html_url || '');
   if (!release || release.draft || release.prerelease || !latestVersion) {
     return {
@@ -34,7 +38,10 @@ function releaseUpdatePreflight({ installedVersion, release } = {}) {
   const hasMetadata = assets.some(
     (asset) => String(asset?.name || '').toLowerCase() === 'latest.yml',
   );
-  if (!hasMetadata) {
+  const hasManifest = !!manifest || assets.some(
+    (asset) => /easy-commercial-update\.json$/i.test(String(asset?.name || '')),
+  );
+  if (!hasMetadata || !hasManifest) {
     return {
       status: 'error',
       installedVersion: installed,
@@ -43,7 +50,7 @@ function releaseUpdatePreflight({ installedVersion, release } = {}) {
       updateAvailable: true,
       canInstall: false,
       error:
-        'يتوفر إصدار أحدث، لكن ملفات التحديث التلقائي غير مكتملة. يرجى تنزيل الإصدار من صفحة الإصدارات أو المحاولة لاحقاً.',
+        'يتوفر إصدار أحدث، لكن ملفات التحديث التلقائي أو ملف بيان التحديث غير مكتملة. يرجى تنزيل الإصدار من صفحة الإصدارات أو المحاولة لاحقاً.',
     };
   }
   return {
