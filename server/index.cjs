@@ -1106,168 +1106,207 @@ function isPaymentEntryRow(row = {}) {
 }
 
 function repairContractorPaymentRows(database) {
-  const legacyRows = database.all(
-    `SELECT wi.id, wi.document_id, wi.party_category, wi.base_party_name,
-            wi.customer_name, wi.customer_display_name, wi.project, wi.building_unit,
-            wi.entry_date, contractor.id AS contractor_id,
-            contractor.category AS contractor_category,
-            contractor.base_name AS contractor_base_name,
-            contractor.display_name AS contractor_display_name,
-            contractor.search_name AS contractor_search_name
-     FROM work_items wi
-     JOIN documents d ON d.id = wi.document_id
-     LEFT JOIN parties current_party ON current_party.id = COALESCE(wi.party_id, d.party_id)
-     JOIN parties contractor
-       ON contractor.role = 'contractor'
-      AND contractor.search_name = COALESCE(
-        NULLIF(wi.search_party_name, ''),
-        NULLIF(d.search_party_name, ''),
-        NULLIF(current_party.search_name, '')
-      )
-     WHERE wi.deleted_at IS NULL
-       AND d.deleted_at IS NULL
-       AND d.document_type IN ('ledger', 'payment')
-       AND ABS(COALESCE(wi.collection_amount, 0)) > 0
-       AND COALESCE(wi.accounting_status, '') = ?
-       AND COALESCE(wi.party_id, d.party_id, 0) <> contractor.id`,
-    [PAYMENT_OUT_STATUS],
-  );
-  const candidateDocuments = new Map();
-  for (const row of legacyRows) {
-    const partyCategory = row.contractor_category || row.party_category || "corporate";
-    const baseName = row.contractor_base_name || row.base_party_name || row.customer_name;
-    const displayName =
-      row.contractor_display_name || row.customer_display_name || row.customer_name;
+  database.transaction(() => {
+    const legacyRows = database.all(
+      `SELECT wi.id, wi.document_id, wi.party_category, wi.base_party_name,
+              wi.customer_name, wi.customer_display_name, wi.project, wi.building_unit,
+              wi.entry_date, d.party_id AS document_party_id,
+              d.party_role AS document_party_role,
+              contractor.id AS contractor_id,
+              contractor.category AS contractor_category,
+              contractor.base_name AS contractor_base_name,
+              contractor.display_name AS contractor_display_name,
+              contractor.search_name AS contractor_search_name
+       FROM work_items wi
+       JOIN documents d ON d.id = wi.document_id
+       LEFT JOIN parties current_party ON current_party.id = COALESCE(wi.party_id, d.party_id)
+       JOIN parties contractor
+         ON contractor.role = 'contractor'
+        AND contractor.search_name = COALESCE(
+          NULLIF(wi.search_party_name, ''),
+          NULLIF(d.search_party_name, ''),
+          NULLIF(current_party.search_name, '')
+        )
+       WHERE wi.deleted_at IS NULL
+         AND d.deleted_at IS NULL
+         AND d.document_type IN ('ledger', 'payment')
+         AND ABS(COALESCE(wi.collection_amount, 0)) > 0
+         AND COALESCE(wi.accounting_status, '') = ?
+         AND (
+           COALESCE(wi.party_id, 0) <> contractor.id
+           OR COALESCE(d.party_id, 0) <> contractor.id
+           OR COALESCE(wi.party_role, '') <> 'contractor'
+           OR COALESCE(d.party_role, '') <> 'contractor'
+         )`,
+      [PAYMENT_OUT_STATUS],
+    );
+    const candidateDocuments = new Map();
+    for (const row of legacyRows) {
+      const partyCategory = row.contractor_category || row.party_category || "corporate";
+      const baseName = row.contractor_base_name || row.base_party_name || row.customer_name;
+      const displayName =
+        row.contractor_display_name || row.customer_display_name || row.customer_name;
+      database.run(
+        `UPDATE work_items
+         SET party_id = ?,
+             party_role = 'contractor',
+             party_category = ?,
+             base_party_name = ?,
+             search_party_name = ?,
+             customer_name = ?,
+             customer_display_name = ?,
+             accounting_status = ?,
+             document_status = 'approved',
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          row.contractor_id,
+          partyCategory,
+          baseName,
+          row.contractor_search_name,
+          displayName,
+          displayName,
+          PAYMENT_OUT_STATUS,
+          row.id,
+        ],
+      );
+      if (!candidateDocuments.has(row.document_id)) {
+        candidateDocuments.set(row.document_id, {
+          contractorId: row.contractor_id,
+          partyCategory,
+          displayName,
+          searchName: row.contractor_search_name,
+          project: row.project,
+          buildingUnit: row.building_unit,
+          entryDate: row.entry_date,
+        });
+      }
+    }
+    for (const [documentId, document] of candidateDocuments) {
+      const state = database.get(
+        `SELECT COUNT(*) AS row_count,
+                SUM(CASE
+                  WHEN ABS(COALESCE(collection_amount, 0)) > 0
+                   AND accounting_status = ?
+                   AND party_role = 'contractor'
+                   AND party_id = ?
+                  THEN 1 ELSE 0 END) AS contractor_payment_rows
+         FROM work_items
+         WHERE document_id = ? AND deleted_at IS NULL`,
+        [PAYMENT_OUT_STATUS, document.contractorId, documentId],
+      );
+      if (
+        Number(state?.row_count || 0) > 0 &&
+        Number(state?.row_count || 0) === Number(state?.contractor_payment_rows || 0)
+      ) {
+        const currentDocument = database.get(
+          "SELECT document_no, operation_no FROM documents WHERE id = ?",
+          [documentId],
+        );
+        let documentNo =
+          normalizeNumber(currentDocument?.document_no) ||
+          nextAvailableDocumentNo(database, 1, documentId);
+        let operationNo = currentDocument?.operation_no || formatOperationNo(documentNo);
+        const collision = database.get(
+          `SELECT id FROM documents
+           WHERE document_type = 'payment'
+             AND document_no = ?
+             AND id <> ?
+           LIMIT 1`,
+          [documentNo, documentId],
+        );
+        if (collision) {
+          documentNo = nextAvailableDocumentNo(database, documentNo, documentId);
+          operationNo = formatOperationNo(documentNo);
+        }
+        database.run(
+          `UPDATE documents
+           SET document_type = 'payment',
+               document_no = ?,
+               operation_no = ?,
+               status = 'approved',
+               party_id = ?,
+               party_role = 'contractor',
+               party_category = ?,
+               customer_name = ?,
+               search_party_name = ?,
+               project = COALESCE(NULLIF(project, ''), ?),
+               building_unit = COALESCE(NULLIF(building_unit, ''), ?),
+               entry_date = COALESCE(NULLIF(entry_date, ''), ?),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND deleted_at IS NULL`,
+          [
+            documentNo,
+            operationNo,
+            document.contractorId,
+            document.partyCategory,
+            document.displayName,
+            document.searchName,
+            document.project || "",
+            document.buildingUnit || "",
+            document.entryDate || "",
+            documentId,
+          ],
+        );
+        database.run(
+          `UPDATE work_items
+           SET serial = ?, operation_no = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE document_id = ? AND deleted_at IS NULL`,
+          [documentNo, operationNo, documentId],
+        );
+      }
+    }
+    database.run(
+      `UPDATE documents
+       SET party_role = 'contractor',
+           status = 'approved',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE document_type = 'payment'
+         AND deleted_at IS NULL
+         AND EXISTS (
+           SELECT 1
+           FROM work_items wi
+           LEFT JOIN parties p ON p.id = COALESCE(wi.party_id, documents.party_id)
+           WHERE wi.document_id = documents.id
+             AND wi.deleted_at IS NULL
+             AND ABS(COALESCE(wi.collection_amount, 0)) > 0
+             AND (
+               wi.party_role = 'contractor'
+               OR wi.accounting_status = ?
+               OR p.role = 'contractor'
+             )
+         )`,
+      [PAYMENT_OUT_STATUS],
+    );
     database.run(
       `UPDATE work_items
-       SET party_id = ?,
-           party_role = 'contractor',
-           party_category = ?,
-           base_party_name = ?,
-           search_party_name = ?,
-           customer_name = ?,
-           customer_display_name = ?,
+       SET party_role = 'contractor',
            accounting_status = ?,
            document_status = 'approved',
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [
-        row.contractor_id,
-        partyCategory,
-        baseName,
-        row.contractor_search_name,
-        displayName,
-        displayName,
-        PAYMENT_OUT_STATUS,
-        row.id,
-      ],
-    );
-    if (!candidateDocuments.has(row.document_id)) {
-      candidateDocuments.set(row.document_id, {
-        contractorId: row.contractor_id,
-        partyCategory,
-        displayName,
-        searchName: row.contractor_search_name,
-        project: row.project,
-        buildingUnit: row.building_unit,
-        entryDate: row.entry_date,
-      });
-    }
-  }
-  for (const [documentId, document] of candidateDocuments) {
-    const state = database.get(
-      `SELECT COUNT(*) AS row_count,
-              SUM(CASE
-                WHEN ABS(COALESCE(collection_amount, 0)) > 0
-                 AND accounting_status = ?
-                 AND party_role = 'contractor'
-                 AND party_id = ?
-                THEN 1 ELSE 0 END) AS contractor_payment_rows
-       FROM work_items
-       WHERE document_id = ? AND deleted_at IS NULL`,
-      [PAYMENT_OUT_STATUS, document.contractorId, documentId],
-    );
-    if (
-      Number(state?.row_count || 0) > 0 &&
-      Number(state?.row_count || 0) === Number(state?.contractor_payment_rows || 0)
-    ) {
-      database.run(
-        `UPDATE documents
-         SET document_type = 'payment',
-             status = 'approved',
-             party_id = ?,
-             party_role = 'contractor',
-             party_category = ?,
-             customer_name = ?,
-             search_party_name = ?,
-             project = COALESCE(NULLIF(project, ''), ?),
-             building_unit = COALESCE(NULLIF(building_unit, ''), ?),
-             entry_date = COALESCE(NULLIF(entry_date, ''), ?),
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND deleted_at IS NULL`,
-        [
-          document.contractorId,
-          document.partyCategory,
-          document.displayName,
-          document.searchName,
-          document.project || "",
-          document.buildingUnit || "",
-          document.entryDate || "",
-          documentId,
-        ],
-      );
-    }
-  }
-  database.run(
-    `UPDATE documents
-     SET party_role = 'contractor',
-         status = 'approved',
-         updated_at = CURRENT_TIMESTAMP
-     WHERE document_type = 'payment'
-       AND deleted_at IS NULL
-       AND EXISTS (
-         SELECT 1
-         FROM work_items wi
-         LEFT JOIN parties p ON p.id = COALESCE(wi.party_id, documents.party_id)
-         WHERE wi.document_id = documents.id
-           AND wi.deleted_at IS NULL
-           AND ABS(COALESCE(wi.collection_amount, 0)) > 0
-           AND (
-             wi.party_role = 'contractor'
-             OR wi.accounting_status = ?
-             OR p.role = 'contractor'
+       WHERE deleted_at IS NULL
+         AND ABS(COALESCE(collection_amount, 0)) > 0
+         AND (
+           party_role = 'contractor'
+           OR accounting_status = ?
+           OR EXISTS (
+             SELECT 1
+             FROM documents d
+             WHERE d.id = work_items.document_id
+               AND d.deleted_at IS NULL
+               AND d.document_type = 'payment'
+               AND d.party_role = 'contractor'
            )
-       )`,
-    [PAYMENT_OUT_STATUS],
-  );
-  database.run(
-    `UPDATE work_items
-     SET party_role = 'contractor',
-         accounting_status = ?,
-         document_status = 'approved',
-         updated_at = CURRENT_TIMESTAMP
-     WHERE deleted_at IS NULL
-       AND ABS(COALESCE(collection_amount, 0)) > 0
-       AND (
-         party_role = 'contractor'
-         OR accounting_status = ?
-         OR EXISTS (
-           SELECT 1
-           FROM documents d
-           WHERE d.id = work_items.document_id
-             AND d.deleted_at IS NULL
-             AND d.document_type = 'payment'
-             AND d.party_role = 'contractor'
-         )
-         OR EXISTS (
-           SELECT 1
-           FROM parties p
-           WHERE p.id = work_items.party_id
-             AND p.role = 'contractor'
-         )
-       )`,
-    [PAYMENT_OUT_STATUS, PAYMENT_OUT_STATUS],
-  );
+           OR EXISTS (
+             SELECT 1
+             FROM parties p
+             WHERE p.id = work_items.party_id
+               AND p.role = 'contractor'
+           )
+         )`,
+      [PAYMENT_OUT_STATUS, PAYMENT_OUT_STATUS],
+    );
+  });
 }
 
 function nextDocumentNo(database) {

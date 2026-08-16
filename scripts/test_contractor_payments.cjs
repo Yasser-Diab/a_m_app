@@ -183,14 +183,34 @@ async function main() {
     assert.equal(legacyShape.document_party_id, customerParty.id);
     assert.equal(legacyShape.document_party_role, "customer");
 
+    const legacyDocument = server.database.get(
+      "SELECT document_no FROM documents WHERE id = ?",
+      [payment.document_id],
+    );
+    server.database.run(
+      `INSERT INTO documents
+       (document_type, document_no, operation_no, status, party_id, party_role,
+        party_category, customer_name, search_party_name, project, entry_date)
+       VALUES ('payment', ?, ?, 'approved', ?, 'contractor', 'corporate', ?, ?, 'Tower A', ?)`,
+      [
+        legacyDocument.document_no,
+        `CONFLICT-${legacyDocument.document_no}`,
+        workRow.party_id,
+        contractorParty.display_name,
+        contractorParty.search_name,
+        "2026-08-17",
+      ],
+    );
+
     await new Promise((resolve) => httpServer.close(resolve));
     server.close();
     httpServer = null;
     server = await createServer({ dataDir, dbPath, port: 0 });
 
     const repaired = server.database.get(
-      `SELECT wi.party_id, wi.party_role, wi.accounting_status,
-              d.document_type, d.party_id AS document_party_id, d.party_role AS document_party_role
+      `SELECT wi.party_id, wi.party_role, wi.accounting_status, wi.serial, wi.operation_no,
+              d.document_type, d.document_no, d.operation_no AS document_operation_no,
+              d.party_id AS document_party_id, d.party_role AS document_party_role
        FROM work_items wi
        JOIN documents d ON d.id = wi.document_id
        WHERE wi.id = ?`,
@@ -202,6 +222,9 @@ async function main() {
     assert.equal(repaired.document_type, "payment");
     assert.equal(repaired.document_party_id, workRow.party_id);
     assert.equal(repaired.document_party_role, "contractor");
+    assert.notEqual(repaired.document_no, legacyDocument.document_no);
+    assert.equal(repaired.serial, repaired.document_no);
+    assert.equal(repaired.operation_no, repaired.document_operation_no);
 
     httpServer = await server.listen(0, "127.0.0.1");
     const repairedBaseUrl = `http://127.0.0.1:${httpServer.address().port}`;
