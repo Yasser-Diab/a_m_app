@@ -21,6 +21,13 @@ async function requestJson(baseUrl, route, options = {}) {
   return body;
 }
 
+async function requestText(baseUrl, route, options = {}) {
+  const response = await fetch(`${baseUrl}${route}`, options);
+  const body = await response.text();
+  assert.equal(response.ok, true, body);
+  return body;
+}
+
 async function main() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "am-contractor-payments-"));
   const dbPath = path.join(dataDir, "test.db");
@@ -96,6 +103,22 @@ async function main() {
     );
     assert.equal(report.paymentRows.length, 1);
     assert.equal(report.paymentRows[0].collection_note, "Contractor deduction payment");
+
+    const legacyHtml = await requestText(
+      baseUrl,
+      `/api/documents/contractor/html?party_id=${workRow.party_id}&project=${encodeURIComponent("Tower A")}`,
+    );
+    assert.match(legacyHtml, /class="report-table payment-table"/);
+    assert.doesNotMatch(legacyHtml, /contractor-modern-detail/);
+    const modernHtml = await requestText(
+      baseUrl,
+      `/api/documents/contractor/html?party_id=${workRow.party_id}&project=${encodeURIComponent("Tower A")}&modern_certificate=1`,
+    );
+    assert.match(modernHtml, /contractor-modern-detail/);
+    assert.doesNotMatch(modernHtml, /class="report-table payment-table"/);
+    assert.ok(
+      modernHtml.indexOf("Installation") < modernHtml.indexOf("Contractor deduction payment"),
+    );
 
     await requestJson(baseUrl, `/api/documents/${payment.document_id}`, {
       method: "PUT",

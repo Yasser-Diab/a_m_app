@@ -33,6 +33,7 @@ assert.equal(local.startLocalServer, true);
 assert.deepEqual(local.candidates, ['http://127.0.0.1:4181']);
 
 assert.equal(inferConnectionMode('http://127.0.0.1:4181'), 'local');
+assert.equal(inferConnectionMode('http://192.168.137.1:4181'), 'local');
 assert.equal(inferConnectionMode('https://offers.yasserdiab.site'), 'remote');
 assert.equal(
   inferConnectionMode('http://192.168.137.1:4181', '', ['http://192.168.137.1:4181']),

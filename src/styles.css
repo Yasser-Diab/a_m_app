@@ -891,6 +891,34 @@ textarea {
   font-weight: 700;
 }
 
+.tiny-check {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tiny-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.tiny-check.active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent);
+}
+
 .tiny-select {
   min-height: 34px;
   display: inline-flex;
@@ -911,6 +939,11 @@ textarea {
   min-height: 28px;
   padding: 3px 26px 3px 10px;
   font-size: 12px;
+}
+
+.action-row .tiny-check,
+.action-row .tiny-select {
+  flex: 0 1 auto;
 }
 
 .unlock {
@@ -1531,7 +1564,6 @@ input[type="number"] {
 }
 
 .report-total-unit {
-  direction: ltr;
   font-size: 0.78em;
   font-weight: 700;
   white-space: nowrap;
@@ -4487,7 +4519,9 @@ td {
   }
 
   .action-row button,
-  .form-actions button {
+  .form-actions button,
+  .action-row .tiny-check,
+  .action-row .tiny-select {
     flex: 1 1 132px;
   }
 
@@ -7936,6 +7970,8 @@ button:active:not(:disabled) {
 
   .top-actions button,
   .action-row button,
+  .action-row .tiny-check,
+  .action-row .tiny-select,
   .form-actions button,
   .section-title-actions button,
   .section-title-actions .ready-count {
@@ -7943,6 +7979,11 @@ button:active:not(:disabled) {
     min-height: 40px;
     padding: 7px 8px;
     justify-content: center;
+  }
+
+  .action-row .tiny-select select {
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .panel-head,

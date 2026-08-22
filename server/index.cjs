@@ -2215,12 +2215,12 @@ function hasReportDimensions(rows) {
   });
 }
 
-function dimensionText(row, unit = "cm") {
+function dimensionText(row, unit = "cm", locale = "ar") {
   const width = numberOrZero(row.width_cm);
   const height = numberOrZero(row.height_cm);
   const FSI = "\u2068";
   const PDI = "\u2069";
-  const unitText = unit === "m" ? "\u0645" : "\u0633\u0645";
+  const unitText = dimensionUnitLabel(unit, locale);
   if (!width && !height) return "";
   const w = width ? (unit === "m" ? money(width / 100) : money(width)) : "";
   const h = height ? (unit === "m" ? money(height / 100) : money(height)) : "";
@@ -4928,6 +4928,25 @@ function reportLocaleFrom(value) {
   return normalizeText(value) === "en" ? "en" : "ar";
 }
 
+function reportUnitLabel(unitCode, locale = "ar") {
+  const unit = normalizeUnitCode(unitCode);
+  if (reportLocaleFrom(locale) === "en") {
+    return (
+      {
+        sqm: "m²",
+        lm: "lm",
+        count: "count",
+      }[unit] || "m²"
+    );
+  }
+  return unitLabel(unit);
+}
+
+function dimensionUnitLabel(unit = "cm", locale = "ar") {
+  if (reportLocaleFrom(locale) === "en") return unit === "m" ? "m" : "cm";
+  return unit === "m" ? "\u0645" : "\u0633\u0645";
+}
+
 function termsForDocument(database, first, type, rows = [], locale = "ar") {
   if (!["offer", "price_offer"].includes(type)) return [];
   const reportLocale = reportLocaleFrom(locale || first?.report_language);
@@ -6169,6 +6188,112 @@ function contractorPaymentTableHtml(data) {
     </table>`;
 }
 
+function dateSortValue(value = "") {
+  return normalizeText(value) || "9999-12-31";
+}
+
+function contractorModernPaymentGroupIndex(payment, ranges) {
+  if (!ranges.length) return -1;
+  const paymentDate = dateSortValue(payment.entry_date);
+  const index = ranges.findIndex((range) => paymentDate <= range.maxDate);
+  return index >= 0 ? index : ranges.length - 1;
+}
+
+function contractorModernDetailTableHtml(data, showDimensions, dimensionUnit) {
+  if (data.type !== "contractor") return "";
+  const rows = data.rows || [];
+  if (!rows.length) return "";
+  const locale = reportLocaleFrom(data.report_language);
+  const showProjectColumn = Number(data.project_selection_count || 0) !== 1;
+  const columnCount = showProjectColumn ? 11 : 10;
+  const groups = contractorCertificateGroups(rows);
+  const ranges = groups.map((group, index) => {
+    const dates = (group.rows || []).map((row) => dateSortValue(row.entry_date));
+    return {
+      index,
+      minDate: dates.length ? dates.sort()[0] : dateSortValue(group.date),
+      maxDate: dates.length ? dates.sort().at(-1) : dateSortValue(group.date),
+    };
+  });
+  const paymentsByGroup = new Map(groups.map((_, index) => [index, []]));
+  for (const payment of data.paymentRows || []) {
+    const index = contractorModernPaymentGroupIndex(payment, ranges);
+    if (index < 0) continue;
+    paymentsByGroup.get(index)?.push(payment);
+  }
+  const body = [];
+  groups.forEach((group, groupIndex) => {
+    body.push(
+      `<tr class="group-row certificate-row modern-certificate-row"><td colspan="${columnCount}">${locale === "en" ? "Certificate No." : "مستخلص رقم"} ${escapeHtml(group.key)}</td></tr>`,
+    );
+    const events = [
+      ...(group.rows || []).map((row) => ({ type: "work", row })),
+      ...(paymentsByGroup.get(groupIndex) || []).map((row) => ({
+        type: "payment",
+        row,
+      })),
+    ].sort((left, right) => {
+      const leftDate = dateSortValue(left.row.entry_date);
+      const rightDate = dateSortValue(right.row.entry_date);
+      if (leftDate !== rightDate) return leftDate.localeCompare(rightDate);
+      if (left.type !== right.type) return left.type === "work" ? -1 : 1;
+      return Number(left.row.id || 0) - Number(right.row.id || 0);
+    });
+    for (const event of events) {
+      const row = event.row;
+      if (event.type === "payment") {
+        body.push(`
+          <tr class="payment-row contractor-payment-inline">
+            <td class="nowrap date-cell">${escapeHtml(reportDateCell(row.entry_date))}</td>
+            <td class="desc">${escapeHtml(row.work_type || row.description || reportText(locale, "collection"))}</td>
+            ${showProjectColumn ? `<td class="project-cell">${escapeHtml(normalizedProject(row.project))}</td>` : ""}
+            <td class="location-cell">${escapeHtml(row.collection_note || row.notes || reportText(locale, "paymentDetails"))}</td>
+            <td class="nowrap unit-cell"></td>
+            <td class="number-cell"></td>
+            <td class="number-cell"></td>
+            <td class="work-rate-cell"></td>
+            <td class="number-cell"></td>
+            <td class="number-cell"></td>
+            <td class="number-cell">${money(paymentAmount(row))}</td>
+          </tr>`);
+        continue;
+      }
+      body.push(`
+        <tr>
+          <td class="nowrap date-cell">${escapeHtml(reportDateCell(row.entry_date || group.date))}</td>
+          <td class="desc">${escapeHtml(row.work_type || reportDescriptionText(row) || "")}</td>
+          ${showProjectColumn ? `<td class="project-cell">${escapeHtml(normalizedProject(row.project))}</td>` : ""}
+          <td class="location-cell">${escapeHtml(contractorLocationText(row, false)).replace(/\n/g, "<br>")}</td>
+          <td class="nowrap unit-cell">${escapeHtml(reportUnitLabel(row.unit_code, locale))}</td>
+          <td class="number-cell">${displayNumber(row.item_count, true)}</td>
+          <td class="number-cell">${displayNumber(row.quantity, true)}</td>
+          <td class="work-rate-cell">${escapeHtml(formatCompletion(row) || "")}</td>
+          <td class="number-cell">${displayNumber(row.rate, true)}</td>
+          <td class="number-cell">${displayNumber(row.gross_total, true)}</td>
+          <td class="number-cell">${displayNumber(effectiveAmount(row, "gross_total"), true)}</td>
+        </tr>`);
+    }
+    if ((group.rows || []).length > 1) {
+      const subtotal = contractorGroupTotals(group.rows);
+      body.push(`
+        <tr class="subtotal">
+          <td colspan="${showProjectColumn ? 5 : 4}">${locale === "en" ? "Certificate Work Total No." : "إجمالي أعمال مستخلص رقم"} ${escapeHtml(group.key)}</td>
+          <td class="number-cell">${displayNumber(subtotal.item_count, true)}</td>
+          <td class="number-cell">${displayNumber(subtotal.quantity, true)}</td>
+          <td></td>
+          <td></td>
+          <td class="number-cell">${money(subtotal.gross_total)}</td>
+          <td class="number-cell">${money(subtotal.work_gross_total)}</td>
+        </tr>`);
+    }
+  });
+  return `
+    <table class="report-table contractor-detail contractor-modern-detail">
+      <thead><tr><th>${reportText(locale, "date")}</th><th>${reportText(locale, "description")}</th>${showProjectColumn ? `<th>${reportText(locale, "project")}</th>` : ""}<th>${reportText(locale, "location")}</th><th>${reportText(locale, "unit")}</th><th>${reportText(locale, "itemCount")}</th><th>${reportText(locale, "quantity")}</th><th>${reportText(locale, "workRate")}</th><th>${reportText(locale, "rate")}</th><th>${reportText(locale, "grossTotal")}</th><th>${reportText(locale, "afterWorkRate")}</th></tr></thead>
+      <tbody>${body.join("")}</tbody>
+    </table>`;
+}
+
 function lineItemColgroup(showDimensions) {
   const widths = showDimensions
     ? [38, 9, 15, 8, 9, 10, 11]
@@ -6369,7 +6494,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
             <td class="desc">${escapeHtml(row.work_type || reportDescriptionText(row) || "")}</td>
             ${showProjectColumn ? `<td class="project-cell">${escapeHtml(normalizedProject(row.project))}</td>` : ""}
             <td class="location-cell">${escapeHtml(contractorLocationText(row, false)).replace(/\n/g, "<br>")}</td>
-            <td class="nowrap unit-cell">${escapeHtml(unitLabel(row.unit_code))}</td>
+            <td class="nowrap unit-cell">${escapeHtml(reportUnitLabel(row.unit_code, locale))}</td>
             <td class="number-cell">${displayNumber(row.item_count, true)}</td>
             <td class="number-cell">${displayNumber(row.quantity, true)}</td>
             <td class="work-rate-cell">${escapeHtml(formatCompletion(row) || "")}</td>
@@ -6424,8 +6549,8 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
     body.push(`
       <tr>
         <td class="desc">${descriptionHtml}</td>
-        <td class="nowrap unit-cell">${escapeHtml(unitLabel(row.unit_code))}</td>
-        ${showDimensions ? `<td class="nowrap dimension-cell">${escapeHtml(dimensionText(row, dimensionUnit) || "")}</td>` : ""}
+        <td class="nowrap unit-cell">${escapeHtml(reportUnitLabel(row.unit_code, locale))}</td>
+        ${showDimensions ? `<td class="nowrap dimension-cell">${escapeHtml(dimensionText(row, dimensionUnit, locale) || "")}</td>` : ""}
         <td class="number-cell">${displayNumber(row.item_count, true)}</td>
         <td class="number-cell">${displayNumber(row.quantity, true)}</td>
         <td class="number-cell rate-cell">${reportRateHtml(row, data)}</td>
@@ -6470,10 +6595,11 @@ function termsHtml(data) {
 
 function reportTotalValueHtml(parts = [], locale = "ar") {
   const dir = reportLocaleFrom(locale) === "en" ? "ltr" : "rtl";
+  const unitDir = reportLocaleFrom(locale) === "en" ? "ltr" : "rtl";
   return (parts || [])
     .map(
       (part) =>
-        `<span class="total-value-part" dir="ltr">${part.prefix ? `<span class="report-total-prefix" dir="${dir}">${escapeHtml(part.prefix)}</span>` : ""}<bdi dir="ltr">${escapeHtml(part.value)}</bdi>${part.unit ? `<span class="report-total-unit" dir="ltr">${escapeHtml(part.unit)}</span>` : ""}</span>`,
+        `<span class="total-value-part" dir="ltr">${part.prefix ? `<span class="report-total-prefix" dir="${dir}">${escapeHtml(part.prefix)}</span>` : ""}<bdi dir="ltr">${escapeHtml(part.value)}</bdi>${part.unit ? `<span class="report-total-unit" dir="${unitDir}">${escapeHtml(part.unit)}</span>` : ""}</span>`,
     )
     .join('<span class="total-value-separator" aria-hidden="true">-</span>');
 }
@@ -6759,7 +6885,10 @@ function renderReportHtmlV2(data) {
         .join("")}</tbody>
     </table>`
     : "";
-  const detailHtml = detailReportTableHtml(data, showDimensions, dimensionUnit);
+  const detailHtml =
+    data.type === "contractor" && data.contractor_modern_certificate
+      ? contractorModernDetailTableHtml(data, showDimensions, dimensionUnit)
+      : detailReportTableHtml(data, showDimensions, dimensionUnit);
   const summaryKeys = Object.keys((data.summaryRows || [])[0] || {});
   const summaryHtml = summaryKeys.length
     ? `
@@ -6840,7 +6969,7 @@ function renderReportHtmlV2(data) {
     .total-value-part{direction:ltr;display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap;unicode-bidi:isolate}
     .total-value-part bdi{direction:ltr;unicode-bidi:isolate}
     .report-total-prefix{direction:${dir};font-size:.78em;font-weight:700;white-space:nowrap;unicode-bidi:isolate}
-    .report-total-unit{direction:ltr;font-size:.78em;font-weight:700;white-space:nowrap;unicode-bidi:isolate}
+    .report-total-unit{font-size:.78em;font-weight:700;white-space:nowrap;unicode-bidi:isolate}
     .total-value-separator{direction:ltr;font-size:.75em;opacity:.65;unicode-bidi:isolate}
     .box.emphasis{background:#efe3c6;border-color:var(--brand-name)}
     .sub-label{font-size:9.5px;font-weight:600;line-height:1.25;opacity:0.93;display:inline;white-space:nowrap}
@@ -6877,7 +7006,7 @@ function renderReportHtmlV2(data) {
     <section class="info-band">
       ${headerInfo.map(([label, value]) => `<div class="info-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
     </section>
-    ${summaryHtml}${statementHtml}${detailHtml}${contractorPaymentTableHtml(data)}
+    ${summaryHtml}${statementHtml}${detailHtml}${data.contractor_modern_certificate ? "" : contractorPaymentTableHtml(data)}
     ${totalsHtml(data)}
     ${termsHtml(data)}
     <footer class="footer">
@@ -7080,6 +7209,7 @@ async function writeCleanXlsx(data, outputPath) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = APP_NAME;
   workbook.created = new Date();
+  const locale = reportLocaleFrom(data.report_language);
   const branding = {
     ...reportBrandingFallback(),
     ...(data.branding || {}),
@@ -7093,46 +7223,46 @@ async function writeCleanXlsx(data, outputPath) {
     isContractor && Number(data.project_selection_count || 0) !== 1;
   const columns = isStatement
     ? [
-        { header: "التاريخ", key: "entry_date", width: 14 },
-        { header: "المستند", key: "description", width: 28 },
-        { header: "المشروع", key: "project_label", width: 38 },
-        { header: "التفاصيل", key: "details", width: 30 },
-        { header: "الكمية", key: "quantity", width: 12 },
-        { header: "نسبة العمل", key: "completion", width: 12 },
-        { header: "خصم", key: "discount", width: 14 },
-        { header: "قبل نسبة العمل", key: "real_debit", width: 17 },
-        { header: "الإجمالي", key: "total", width: 16 },
-        { header: "الرصيد", key: "balance", width: 16 },
+        { header: reportText(locale, "date"), key: "entry_date", width: 14 },
+        { header: data.title || documentTitle("statement", locale), key: "description", width: 28 },
+        { header: reportText(locale, "project"), key: "project_label", width: 38 },
+        { header: reportText(locale, "details"), key: "details", width: 30 },
+        { header: reportText(locale, "quantity"), key: "quantity", width: 12 },
+        { header: reportText(locale, "workRate"), key: "completion", width: 12 },
+        { header: reportText(locale, "discount"), key: "discount", width: 14 },
+        { header: reportText(locale, "beforeWorkRate"), key: "real_debit", width: 17 },
+        { header: reportText(locale, "grossTotal"), key: "total", width: 16 },
+        { header: reportText(locale, "balance"), key: "balance", width: 16 },
       ]
     : isContractor
       ? [
-          { header: "التاريخ", key: "entry_date", width: 14 },
-          { header: "البيان", key: "description", width: 36 },
+          { header: reportText(locale, "date"), key: "entry_date", width: 14 },
+          { header: reportText(locale, "description"), key: "description", width: 36 },
           ...(showContractorProject
-            ? [{ header: "المشروع", key: "project", width: 22 }]
+            ? [{ header: reportText(locale, "project"), key: "project", width: 22 }]
             : []),
-          { header: "الموقع", key: "location", width: 22 },
-          { header: "الوحدة", key: "unit", width: 10 },
-          { header: "العدد", key: "count", width: 10 },
-          { header: "الكمية", key: "quantity", width: 12 },
-          { header: "نسبة العمل", key: "completion", width: 12 },
-          { header: "الفئة", key: "rate", width: 13 },
-          { header: "الإجمالي", key: "gross", width: 16 },
-          { header: "بعد النسبة", key: "work_gross", width: 16 },
+          { header: reportText(locale, "location"), key: "location", width: 22 },
+          { header: reportText(locale, "unit"), key: "unit", width: 10 },
+          { header: reportText(locale, "itemCount"), key: "count", width: 10 },
+          { header: reportText(locale, "quantity"), key: "quantity", width: 12 },
+          { header: reportText(locale, "workRate"), key: "completion", width: 12 },
+          { header: reportText(locale, "rate"), key: "rate", width: 13 },
+          { header: reportText(locale, "grossTotal"), key: "gross", width: 16 },
+          { header: reportText(locale, "afterWorkRate"), key: "work_gross", width: 16 },
         ]
       : [
-          { header: "البيان", key: "description", width: 58 },
-          { header: "الوحدة", key: "unit", width: 10 },
+          { header: reportText(locale, "description"), key: "description", width: 58 },
+          { header: reportText(locale, "unit"), key: "unit", width: 10 },
           ...(showDimensions
-            ? [{ header: "المقاس", key: "dimension", width: 18 }]
+            ? [{ header: locale === "en" ? "Size" : "المقاس", key: "dimension", width: 18 }]
             : []),
-          { header: "العدد", key: "count", width: 10 },
-          { header: "الكمية", key: "quantity", width: 12 },
-          { header: "الفئة", key: "rate", width: 13 },
-          { header: "الإجمالي", key: "gross", width: 16 },
+          { header: reportText(locale, "itemCount"), key: "count", width: 10 },
+          { header: reportText(locale, "quantity"), key: "quantity", width: 12 },
+          { header: reportText(locale, "rate"), key: "rate", width: 13 },
+          { header: reportText(locale, "grossTotal"), key: "gross", width: 16 },
         ];
-  const sheet = workbook.addWorksheet("التقرير", {
-    views: [{ rightToLeft: true, state: "frozen", ySplit: 7 }],
+  const sheet = workbook.addWorksheet(locale === "en" ? "Report" : "التقرير", {
+    views: [{ rightToLeft: locale !== "en", state: "frozen", ySplit: 7 }],
     pageSetup: { orientation: "portrait", fitToPage: true, fitToWidth: 1 },
   });
   sheet.columns = columns.map((column) => ({
@@ -7163,21 +7293,27 @@ async function writeCleanXlsx(data, outputPath) {
   });
   mergeRow(
     3,
-    `${data.title}${data.operation_no ? ` رقم ${data.operation_no}` : ""}`,
+    data.operation_no
+      ? locale === "en"
+        ? `${data.title} ${reportText(locale, "number")} ${data.operation_no}`
+        : `${data.title} رقم ${data.operation_no}`
+      : data.title,
     { bold: true, size: 14 },
   );
   mergeRow(
     4,
     data.type !== "contractor" && data.overall_work_type
-      ? `أعمال ${data.overall_work_type}`
+      ? locale === "en"
+        ? `${reportText(locale, "works")}: ${data.overall_work_type}`
+        : `أعمال ${data.overall_work_type}`
       : "",
     { bold: true, size: 12 },
   );
   sheet.addRow([]);
   const info = sheet.addRow([
-    isContractor ? "المقاول" : "العميل",
+    isContractor ? reportText(locale, "contractor") : reportText(locale, "customer"),
     data.party || "",
-    "المشروع",
+    reportText(locale, "project"),
     projectLocationLabel(data),
     "By",
     data.prepared_by || "",
@@ -7238,7 +7374,11 @@ async function writeCleanXlsx(data, outputPath) {
     }
   } else if (isContractor) {
     for (const groupData of contractorCertificateGroups(rows)) {
-      const group = sheet.addRow([`مستخلص رقم ${groupData.key}`]);
+      const group = sheet.addRow([
+        locale === "en"
+          ? `Certificate No. ${groupData.key}`
+          : `مستخلص رقم ${groupData.key}`,
+      ]);
       sheet.mergeCells(group.number, 1, group.number, totalCols);
       group.font = { bold: true };
       group.fill = {
@@ -7252,7 +7392,7 @@ async function writeCleanXlsx(data, outputPath) {
           row.work_type || reportDescriptionText(row) || "",
           ...(showContractorProject ? [normalizedProject(row.project)] : []),
           contractorLocationText(row, false),
-          unitLabel(row.unit_code),
+          reportUnitLabel(row.unit_code, locale),
           numberOrZero(row.item_count) || "",
           numberOrZero(row.quantity) || "",
           formatCompletion(row) || "",
@@ -7264,7 +7404,9 @@ async function writeCleanXlsx(data, outputPath) {
       if ((groupData.rows || []).length > 1) {
         const totals = contractorGroupTotals(groupData.rows);
         const subtotal = sheet.addRow([
-          `إجمالي مستخلص رقم ${groupData.key}`,
+          locale === "en"
+            ? `Certificate Total No. ${groupData.key}`
+            : `إجمالي مستخلص رقم ${groupData.key}`,
           "",
           ...(showContractorProject ? [""] : []),
           "",
@@ -7321,9 +7463,9 @@ async function writeCleanXlsx(data, outputPath) {
       const row = block.row;
       const detailRow = sheet.addRow([
         reportDescriptionText(row),
-        unitLabel(row.unit_code),
+        reportUnitLabel(row.unit_code, locale),
         ...(showDimensions
-          ? [dimensionText(row, data.dimension_unit || "cm") || ""]
+          ? [dimensionText(row, data.dimension_unit || "cm", locale) || ""]
           : []),
         numberOrZero(row.item_count) || "",
         numberOrZero(row.quantity) || "",
@@ -7337,10 +7479,10 @@ async function writeCleanXlsx(data, outputPath) {
   if ((data.paymentRows || []).length) {
     sheet.addRow([]);
     const paymentHeader = sheet.addRow([
-      "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062f\u0641\u0639\u0629",
-      "\u0628\u064a\u0627\u0646 \u0627\u0644\u0623\u0639\u0645\u0627\u0644",
-      "\u0628\u064a\u0627\u0646 \u0627\u0644\u062f\u0641\u0639\u0629",
-      "\u0627\u0644\u0645\u0628\u0644\u063a",
+      reportText(locale, "date"),
+      reportText(locale, "paymentWork"),
+      reportText(locale, "paymentDetails"),
+      reportText(locale, "amount"),
     ]);
     paymentHeader.font = { bold: true, color: { argb: "FFD6A84F" } };
     paymentHeader.fill = {
@@ -7351,7 +7493,7 @@ async function writeCleanXlsx(data, outputPath) {
     for (const row of data.paymentRows) {
       const paymentRow = sheet.addRow([
         row.entry_date || "",
-        row.work_type || row.description || "\u062a\u062d\u0635\u064a\u0644",
+        row.work_type || row.description || reportText(locale, "collection"),
         row.collection_note || row.notes || "",
         Math.abs(numberOrZero(row.collection_amount)),
       ]);
@@ -7385,18 +7527,18 @@ async function writeCleanXlsx(data, outputPath) {
     data.totals?.gross_total || data.totals?.debit,
   );
   if (realTotal && roundMoney(realTotal) !== roundMoney(workTotal)) {
-    addTotal("قبل نسبة العمل", realTotal);
-    addTotal("بعد نسبة العمل", workTotal);
+    addTotal(reportText(locale, "beforeWorkRate"), realTotal);
+    addTotal(reportText(locale, "afterWorkRate"), workTotal);
   } else {
-    addTotal("الإجمالي", workTotal);
+    addTotal(reportText(locale, "grossTotal"), workTotal);
   }
   for (const tax of data.tax_breakdown || [])
     addTotal(tax.label, numberOrZero(tax.amount));
   if (data.discount_label)
     addTotal(data.discount_label, numberOrZero(data.totals?.discount_amount));
   if (data.totals?.credit)
-    addTotal("التحصيل", numberOrZero(data.totals.credit));
-  addTotal("الصافي", numberOrZero(data.totals?.net_total), true);
+    addTotal(reportText(locale, "collection"), numberOrZero(data.totals.credit));
+  addTotal(reportText(locale, "net"), numberOrZero(data.totals?.net_total), true);
   if (["invoice", "taxInvoice", "nonTaxInvoice"].includes(data.type)) {
     const wordsRow = sheet.addRow([arabicAmountWords(data.totals?.net_total)]);
     sheet.mergeCells(wordsRow.number, 1, wordsRow.number, totalCols);
@@ -7493,6 +7635,8 @@ function buildReportData(database, query, type) {
   const reportLanguage = reportLocaleFrom(
     query.report_language || document?.report_language || first.report_language,
   );
+  const contractorModernCertificate =
+    type === "contractor" && normalizeBool(query.modern_certificate);
   const contractorCertificateNo =
     type === "contractor"
       ? contractorCertificateNumber(rows, query.certificate_no)
@@ -7514,6 +7658,7 @@ function buildReportData(database, query, type) {
     type,
     report_language: reportLanguage,
     report_direction: reportLanguage === "en" ? "ltr" : "rtl",
+    contractor_modern_certificate: contractorModernCertificate,
     filters: query,
     selected_projects: selectedProjects,
     project_selection_count: selectedProjects.length,
@@ -7655,27 +7800,32 @@ function safeFilePart(value) {
 }
 
 function reportFileName(data, extension) {
+  const locale = reportLocaleFrom(data.report_language);
   if (data.type === "contractor") {
     const certificateNo =
       data.certificate_no || data.operation_no || data.serial || Date.now();
     const projects = uniqueRowValues(data.rows || [], "project");
     const projectPart = projects.length === 1 ? projects[0] : "";
     const parts = [
-      `مستخلص مقاول ${data.party || ""} رقم ${certificateNo}`,
+      locale === "en"
+        ? `Contractor Certificate ${data.party || ""} No. ${certificateNo}`
+        : `مستخلص مقاول ${data.party || ""} رقم ${certificateNo}`,
       projectPart,
     ]
       .map(safeOptionalFilePart)
       .filter(Boolean);
-    return `${(parts.length ? parts : ["مستخلص مقاول"]).join(" - ")}.${extension}`;
+    return `${(parts.length ? parts : [locale === "en" ? "Contractor Certificate" : "مستخلص مقاول"]).join(" - ")}.${extension}`;
   }
   const workPart = data.overall_work_type
-    ? `أعمال ${data.overall_work_type}`
+    ? locale === "en"
+      ? `${reportText(locale, "works")} ${data.overall_work_type}`
+      : `أعمال ${data.overall_work_type}`
     : "";
   const idPart = data.operation_no || data.serial || Date.now();
   const projectPart = data.project || "";
   const parts = [
     `${data.title} ${workPart}`.trim(),
-    `رقم ${idPart}`,
+    locale === "en" ? `No. ${idPart}` : `رقم ${idPart}`,
     data.party,
     projectPart,
   ]
@@ -11728,5 +11878,6 @@ module.exports = {
   getDataDir,
   getLanIps,
   formatMonetaryTotal,
+  reportFileName,
   renderReportHtmlV2,
 };

@@ -1,6 +1,6 @@
 {
   "name": "easy-commercial",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Easy Commercial — Quotes, invoices, accounts, and payments.",
   "author": "Yasser Diab",
   "main": "electron/main.cjs",

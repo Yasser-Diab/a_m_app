@@ -1057,13 +1057,32 @@ function reportHasDimensions(rows = []) {
   );
 }
 
-function rowDimension(row, unit = "cm") {
+function localizedClientUnitLabel(unitCode, locale = "ar") {
+  const normalized = normalizeClientUnitCode(unitCode);
+  if (locale === "en") {
+    return (
+      {
+        sqm: "m²",
+        lm: "lm",
+        count: "count",
+      }[normalized] || "m²"
+    );
+  }
+  return UNITS.find((item) => item.value === normalized)?.label || "م²";
+}
+
+function localizedDimensionUnitLabel(unit = "cm", locale = "ar") {
+  if (locale === "en") return unit === "m" ? "m" : "cm";
+  return unit === "m" ? "\u0645" : "\u0633\u0645";
+}
+
+function rowDimension(row, unit = "cm", locale = "ar") {
   const width = Number(row.width_cm || 0);
   const height = Number(row.height_cm || 0);
   const unitCode = normalizeClientUnitCode(row.unit_code || row.unit);
   const FSI = "\u2068";
   const PDI = "\u2069";
-  const unitLabel = unit === "m" ? "\u0645" : "\u0633\u0645";
+  const unitLabel = localizedDimensionUnitLabel(unit, locale);
   if (unitCode === "sqm") {
     if (!width || !height) return "";
     const w = unit === "m" ? money(width / 100) : money(width);
@@ -1652,7 +1671,7 @@ function connectionModeForApiBase(value, explicitMode = "") {
   if (clean && clean === desktopApi && ["local", "remote"].includes(desktopMode)) {
     return desktopMode;
   }
-  if (isLoopbackApiBase(clean)) return "local";
+  if (isLocalApiBase(clean)) return "local";
   return "remote";
 }
 
@@ -1704,6 +1723,11 @@ async function discoverApiBase(preferred = "") {
     if (found) return found;
   }
   return "";
+}
+
+function shouldRecoverLocalConnection(error, apiBase) {
+  if (!error?.isNetworkError) return false;
+  return connectionModeForApiBase(apiBase) !== "remote";
 }
 
 function fileNameFromDisposition(header, fallback) {
@@ -2243,6 +2267,7 @@ function App() {
   const [developerDataVisible, setDeveloperDataVisible] = useState(
     () => localStorage.getItem("priceOfferDeveloperDataVisible") === "1",
   );
+  const appServerConnected = Boolean(health?.ok || bootstrap);
 
   useEffect(() => {
     if (window.priceOfferDesktop?.startupWarning) {
@@ -2282,7 +2307,7 @@ function App() {
 
   useEffect(() => {
     const updateOnline = () => {
-      const online = navigator.onLine !== false;
+      const online = navigator.onLine !== false || appServerConnected;
       setNetworkOnline(online);
       setCurrentUser((user) =>
         user
@@ -2300,7 +2325,7 @@ function App() {
       window.removeEventListener("online", updateOnline);
       window.removeEventListener("offline", updateOnline);
     };
-  }, []);
+  }, [appServerConnected]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -2746,8 +2771,35 @@ function App() {
       setSubscriptionPlans(plansData?.plans || []);
       setRefreshKey((key) => key + 1);
     } catch (error) {
-      setHealth(null);
-      setMessage(`تعذر الاتصال بالسيرفر المحلي: ${error.message}`);
+      if (shouldRecoverLocalConnection(error, apiBase)) {
+        const discovered = await discoverApiBase(apiBase);
+        if (discovered && discovered !== apiBase) {
+          setApiBase(discovered, { connectionMode: "local" });
+          setMessage(
+            `تم العثور على السيرفر المحلي على ${discovered}. جاري تحديث الاتصال.`,
+            { type: "success" },
+          );
+          return;
+        }
+      }
+      let healthFallback = null;
+      try {
+        healthFallback = await api.request("/api/health");
+      } catch {
+        healthFallback = null;
+      }
+      if (healthFallback?.ok) {
+        setHealth({
+          ...healthFallback,
+          app: APP_NAME,
+          version: healthFallback.version || APP_VERSION,
+          backend: healthFallback.backend || "local-server",
+        });
+        setMessage(`تم الاتصال بالسيرفر المحلي، لكن تعذر تحميل بعض البيانات: ${error.message}`);
+      } else {
+        setHealth(null);
+        setMessage(`تعذر الاتصال بالسيرفر المحلي: ${error.message}`);
+      }
     } finally {
       if (showBusy) setBusy(false);
       restoreInputInteractivity();
@@ -2924,7 +2976,7 @@ function App() {
             username: currentUser.username,
             display_name: currentUser.display_name,
             role: currentUser.role,
-            is_online: event !== "offline" && networkOnline,
+            is_online: event !== "offline" && (networkOnline || appServerConnected),
             session_started_at: sessionStartedAt,
             online_for_seconds: onlineForSeconds,
             last_seen_at: now.toISOString(),
@@ -2934,14 +2986,18 @@ function App() {
           event,
           session_started_at: sessionStartedAt,
           online_for_seconds: onlineForSeconds,
-          network_online: networkOnline,
+          network_online: networkOnline || appServerConnected,
         },
       };
     };
     const ping = () => {
       api.request(`/api/users/${currentUser.id}/presence`, {
         method: "POST",
-        body: JSON.stringify(buildPresencePayload(networkOnline ? "presence" : "offline")),
+        body: JSON.stringify(
+          buildPresencePayload(
+            networkOnline || appServerConnected ? "presence" : "offline",
+          ),
+        ),
       })
         .then((data) => {
           if (data?.user) {
@@ -2978,6 +3034,7 @@ function App() {
     currentUser?.session_started_at,
     currentUser?.username,
     api,
+    appServerConnected,
     networkOnline,
     updatePlatform,
   ]);
@@ -4080,7 +4137,7 @@ function App() {
               <div className="top-actions">
                 <SessionStatusChip
                   user={currentUser}
-                  online={networkOnline && currentUser?.is_online !== false}
+                  online={appServerConnected}
                   now={sessionNow}
                 />
                 <button
@@ -4166,10 +4223,10 @@ function App() {
   )?.label;
   const localizedActiveNavLabel = uiText(activeNavLabel, uiLanguage);
   const activeServerAddress = cleanApiBase(
-    health?.serverUrl ||
-      health?.localUrl ||
+    apiBase ||
       window.priceOfferDesktop?.apiBase ||
-      apiBase ||
+      health?.localUrl ||
+      health?.serverUrl ||
       DEFAULT_API_BASE,
   );
 
@@ -4216,7 +4273,7 @@ function App() {
             <div className="top-actions">
               <SessionStatusChip
                 user={currentUser}
-                online={networkOnline && currentUser?.is_online !== false}
+                online={appServerConnected}
                 now={sessionNow}
               />
               <button
@@ -4313,8 +4370,8 @@ function App() {
               <button className="icon-button" title={uiText("خروج", uiLanguage)} onClick={logout}>
                 <LogOut size={18} />
               </button>
-              <span className={health?.ok ? "status ok" : "status bad"}>
-                {health?.ok ? uiText("متصل", uiLanguage) : uiText("غير متصل", uiLanguage)}
+              <span className={appServerConnected ? "status ok" : "status bad"}>
+                {appServerConnected ? uiText("متصل", uiLanguage) : uiText("غير متصل", uiLanguage)}
               </span>
             </div>
           </header>
@@ -7776,6 +7833,9 @@ function ReportWorkspace({
   const [certificateFilter, setCertificateFilter] = useState(
     context.certificateFilter || "",
   );
+  const [modernContractorCertificate, setModernContractorCertificate] = useState(
+    !!context.modernContractorCertificate,
+  );
   const [reportData, setReportData] = useState(context.reportData || null);
   const initialReportLanguage = normalizeReportLanguage(
     context.reportLanguage ||
@@ -7854,6 +7914,8 @@ function ReportWorkspace({
       setWorkTypeFilter(context.workTypeFilter || "");
     if (context.certificateFilter !== undefined)
       setCertificateFilter(context.certificateFilter || "");
+    if (context.modernContractorCertificate !== undefined)
+      setModernContractorCertificate(!!context.modernContractorCertificate);
     if (context.reportLanguage !== undefined) {
       const nextLanguage = normalizeReportLanguage(context.reportLanguage);
       setReportLanguage(nextLanguage);
@@ -8191,6 +8253,7 @@ function ReportWorkspace({
         query.set("projects", JSON.stringify(projectFilters));
       if (workTypeFilter) query.set("work_type", workTypeFilter);
       if (certificateFilter) query.set("certificate_no", certificateFilter);
+      if (modernContractorCertificate) query.set("modern_certificate", "1");
     }
     query.set("dimension_unit", dimensionUnit);
     query.set("subtotal_mode", subtotalMode);
@@ -8257,6 +8320,7 @@ function ReportWorkspace({
         projectFilters,
         workTypeFilter,
         certificateFilter,
+        modernContractorCertificate,
         documents: resolvedDocument
           ? [
               resolvedDocument,
@@ -8357,6 +8421,7 @@ function ReportWorkspace({
         projectFilters,
         workTypeFilter,
         certificateFilter,
+        modernContractorCertificate,
         documents: resolvedDocument
           ? [
               resolvedDocument,
@@ -8864,6 +8929,38 @@ function ReportWorkspace({
               <option value="en">English</option>
             </select>
           </label>
+          {currentWorkflow === "contractor" && (
+            <label
+              className={
+                modernContractorCertificate
+                  ? "tiny-check report-modern-certificate active"
+                  : "tiny-check report-modern-certificate"
+              }
+              title={t(
+                "عرض الدفعات داخل تسلسل المستخلصات حسب التاريخ",
+                "Show payments inside the certificate timeline by date",
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={modernContractorCertificate}
+                onChange={(event) => {
+                  const checked = event.target.checked;
+                  setModernContractorCertificate(checked);
+                  setReportData(null);
+                  setPreviewUrl("");
+                  setPreviewKey("");
+                  setContext({
+                    modernContractorCertificate: checked,
+                    reportData: null,
+                    previewUrl: "",
+                    previewKey: "",
+                  });
+                }}
+              />
+              <span>{t("مستخلص حديث", "Modern Certificate")}</span>
+            </label>
+          )}
           {(currentWorkflow === "offer" ||
             currentWorkflow === "invoice" ||
             currentWorkflow === "contractor") && (
@@ -16393,6 +16490,63 @@ function previewItemCount(rows = []) {
   }, 0);
 }
 
+function previewDateSortValue(value = "") {
+  return String(value || "").trim() || "9999-12-31";
+}
+
+function contractorPreviewCertificateGroups(rows = []) {
+  const dates = uniqueValues((rows || []).map((row) => row.entry_date)).sort();
+  const dateIndex = new Map(dates.map((date, index) => [date, String(index + 1)]));
+  const groups = new Map();
+  [...(rows || [])]
+    .sort((a, b) => {
+      const certA = String(a.certificate_no || dateIndex.get(a.entry_date) || "1");
+      const certB = String(b.certificate_no || dateIndex.get(b.entry_date) || "1");
+      return (
+        certA.localeCompare(certB, "en", { numeric: true }) ||
+        String(a.entry_date || "").localeCompare(String(b.entry_date || "")) ||
+        Number(a.id || 0) - Number(b.id || 0)
+      );
+    })
+    .forEach((row) => {
+      const key = String(row.certificate_no || dateIndex.get(row.entry_date) || "1");
+      if (!groups.has(key)) groups.set(key, { key, date: row.entry_date || "", rows: [] });
+      groups.get(key).rows.push(row);
+    });
+  return [...groups.values()];
+}
+
+function contractorModernPreviewBlocks(rows = [], paymentRows = []) {
+  const groups = contractorPreviewCertificateGroups(rows);
+  const ranges = groups.map((group, index) => {
+    const dates = (group.rows || []).map((row) => previewDateSortValue(row.entry_date)).sort();
+    return {
+      index,
+      maxDate: dates.at(-1) || previewDateSortValue(group.date),
+    };
+  });
+  const paymentsByGroup = new Map(groups.map((_, index) => [index, []]));
+  for (const payment of paymentRows || []) {
+    const paymentDate = previewDateSortValue(payment.entry_date);
+    const index = ranges.findIndex((range) => paymentDate <= range.maxDate);
+    const target = index >= 0 ? index : ranges.length - 1;
+    if (target >= 0) paymentsByGroup.get(target)?.push(payment);
+  }
+  return groups.flatMap((group, groupIndex) => [
+    { type: "heading", level: "certificate", label: group.key },
+    ...[
+      ...(group.rows || []).map((row) => ({ type: "row", row })),
+      ...(paymentsByGroup.get(groupIndex) || []).map((row) => ({ type: "payment", row })),
+    ].sort((left, right) => {
+      const leftDate = previewDateSortValue(left.row.entry_date);
+      const rightDate = previewDateSortValue(right.row.entry_date);
+      if (leftDate !== rightDate) return leftDate.localeCompare(rightDate);
+      if (left.type !== right.type) return left.type === "row" ? -1 : 1;
+      return Number(left.row.id || 0) - Number(right.row.id || 0);
+    }),
+  ]);
+}
+
 function ReportTotalCard({
   label,
   subLabel = "",
@@ -16443,7 +16597,7 @@ function ReportTotalCard({
               {part.unit && (
                 <span
                   className="report-total-unit"
-                  dir="ltr"
+                  dir={locale === "en" ? "ltr" : "rtl"}
                 >
                   {part.unit}
                 </span>
@@ -16490,6 +16644,7 @@ function DocumentPreview({
         discount: "Discount",
         gross: "Total",
         net: "Net",
+        paymentDetails: "Payment details",
         project: "Project",
         quantity: "Quantity",
         rate: "Rate",
@@ -16519,6 +16674,7 @@ function DocumentPreview({
         discount: "خصم",
         gross: "الإجمالي",
         net: "الصافي",
+        paymentDetails: "بيان الدفعة",
         project: "المشروع",
         quantity: "الكمية",
         rate: "الفئة",
@@ -16581,7 +16737,11 @@ function DocumentPreview({
     Number(value || 0) ? money(value) : "";
   const quantityParts = previewQuantityParts(rows, reportLanguage);
   const itemCountTotal = previewItemCount(rows);
-  const reportBlocks = buildReportRowBlocks(rows, data.subtotal_mode || "none");
+  const showModernContractorPayments =
+    data.type === "contractor" && !!data.contractor_modern_certificate;
+  const reportBlocks = showModernContractorPayments
+    ? contractorModernPreviewBlocks(rows, paymentRows)
+    : buildReportRowBlocks(rows, data.subtotal_mode || "none");
   const previewBranding = data.branding || {};
   const itemTableColumnCount =
     9 +
@@ -16795,7 +16955,7 @@ function DocumentPreview({
           </table>
         </div>
       )}
-      {paymentRows.length > 0 && (
+      {paymentRows.length > 0 && !showModernContractorPayments && (
         <div
           className={
             compact
@@ -16860,7 +17020,39 @@ function DocumentPreview({
                       key={`heading-${block.level}-${block.label}-${index}`}
                       className={`report-group-row ${block.level}-group-row`}
                     >
-                      <td colSpan={itemTableColumnCount}>{text(block.label)}</td>
+                      <td colSpan={itemTableColumnCount}>
+                        {block.level === "certificate"
+                          ? reportLanguage === "en"
+                            ? `Certificate No. ${block.label}`
+                            : `مستخلص رقم ${block.label}`
+                          : text(block.label)}
+                      </td>
+                    </tr>
+                  );
+                }
+                if (block.type === "payment") {
+                  const row = block.row;
+                  return (
+                    <tr
+                      key={`${row.id || index}-modern-payment`}
+                      className="payment-row contractor-payment-inline"
+                    >
+                      <td>{text(row.entry_date)}</td>
+                      <td>{text(row.work_type || row.description || reportLabels.collection)}</td>
+                      <td className="desc-cell">{text(row.collection_note || row.notes || reportLabels.paymentDetails)}</td>
+                      {showContractorProjectColumn && (
+                        <td>{text(cleanProjectName(row.project))}</td>
+                      )}
+                      {showDimensions && <td></td>}
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      {showCompletion && <td></td>}
+                      <td></td>
+                      <td></td>
+                      {showCompletion && <td>{money(paymentRowAmount(row))}</td>}
+                      <td>{money(paymentRowAmount(row))}</td>
+                      {!readOnly && <td></td>}
                     </tr>
                   );
                 }
@@ -16893,11 +17085,13 @@ function DocumentPreview({
                       <td>{text(cleanProjectName(row.project))}</td>
                     )}
                     {showDimensions && (
-                      <td className="nowrap dimension-cell">{rowDimension(row, dimensionUnit)}</td>
+                      <td className="nowrap dimension-cell">{rowDimension(row, dimensionUnit, reportLanguage)}</td>
                     )}
                     <td>
                       {text(
-                        row.unit_code ? rowUnitLabel(row.unit_code) : row.unit,
+                        row.unit_code
+                          ? localizedClientUnitLabel(row.unit_code, reportLanguage)
+                          : localizedClientUnitLabel(row.unit, reportLanguage),
                       )}
                     </td>
                     <td>

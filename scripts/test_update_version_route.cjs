@@ -3,6 +3,7 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+const { version } = require('../package.json');
 const { createServer } = require('../server/index.cjs');
 
 function requestJson(port, route) {
@@ -60,7 +61,7 @@ function requestJson(port, route) {
     httpServer = await api.listen(0, '127.0.0.1');
     const port = httpServer.address().port;
     const health = await requestJson(port, '/api/health');
-    assert.equal(health.data.serverVersion, '2.0.2');
+    assert.equal(health.data.serverVersion, version);
     assert.equal(health.data.databaseSchemaVersion, 12);
 
     const oldDevice = await requestJson(

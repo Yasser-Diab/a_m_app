@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {
   formatMonetaryTotal,
+  reportFileName,
   renderReportHtmlV2,
 } = require("../server/index.cjs");
 
@@ -111,7 +112,7 @@ assert.ok(html.includes("120"));
 assert.ok(html.includes("125"));
 assert.match(
   html,
-  /<span class="total-value-part" dir="ltr"><bdi dir="ltr">255<\/bdi><span class="report-total-unit" dir="ltr">م²<\/span><\/span>/,
+  /<span class="total-value-part" dir="ltr"><bdi dir="ltr">255<\/bdi><span class="report-total-unit" dir="rtl">م²<\/span><\/span>/,
 );
 assert.match(
   html,
@@ -160,6 +161,64 @@ assert.match(
 assert.doesNotMatch(
   unitOnlyHtml,
   /<span class="report-total-label">العدد<\/span>/,
+);
+
+const englishHtml = renderReportHtmlV2({
+  ...fixture,
+  type: "offer",
+  title: "Quotation",
+  report_language: "en",
+  operation_no: "002832",
+  party: "Palm Hills",
+  project: "Palm Hills",
+  overall_work_type: "Supply and install aluminum",
+  show_dimensions: true,
+  rows: [
+    {
+      description: "Aluminum item",
+      unit_code: "sqm",
+      unit: "م²",
+      width_cm: 330,
+      height_cm: 300,
+      quantity: 9.9,
+      item_count: 1,
+      rate: 100,
+      gross_total: 990,
+      net_total: 990,
+    },
+  ],
+  totals: {
+    quantity: 9.9,
+    item_count: 1,
+    gross_total: 990,
+    real_gross_total: 990,
+    vat_amount: 0,
+    discount_amount: 0,
+    credit: 0,
+    net_total: 990,
+  },
+  tax_breakdown: [],
+  terms: [],
+});
+assert.ok(englishHtml.includes("m²"));
+assert.ok(englishHtml.includes("330 × 300 cm"));
+assert.ok(!englishHtml.includes("م²"));
+assert.ok(!englishHtml.includes("سم"));
+assert.equal(
+  reportFileName(
+    {
+      type: "offer",
+      title: "Quotation",
+      report_language: "en",
+      overall_work_type: "Supply and install aluminum",
+      operation_no: "002832",
+      party: "Palm Hills",
+      project: "Palm Hills",
+      rows: [],
+    },
+    "pdf",
+  ),
+  "Quotation Works Supply and install aluminum _ No. 002832 _ Palm Hills _ Palm Hills.pdf",
 );
 
 const outputDir = path.resolve(__dirname, "..", "tmp", "pdfs");

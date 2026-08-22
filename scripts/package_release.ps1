@@ -194,6 +194,8 @@ $arabicReleaseNote = -join @(
   [char]0x0020,
   [char]0x0627, [char]0x0633, [char]0x062a, [char]0x0642, [char]0x0631, [char]0x0627, [char]0x0631
 )
+$releaseNoteAr = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("2KrYtdit2YrYrSDZiNit2K/Yp9iqINmI2KrZgtin2LHZitixINin2YTZhNi62Kkg2KfZhNil2YbYrNmE2YrYstmK2Kkv2KfZhNi52LHYqNmK2KnYjCDYpdi22KfZgdipINmF2LPYqtiu2YTYtSDZhdmC2KfZiNmEINit2K/ZitirINin2K7YqtmK2KfYsdmK2Iwg2YjYqtit2LPZitmGINin2KrYtdin2YQg2KfZhNiz2YrYsdmB2LEg2KfZhNmF2K3ZhNmKINi52YTZiSDYrNmH2KfYsiDYp9mE2YXYp9iz2KrYsS4="))
+$releaseNoteEn = "localized report units and filenames, optional modern contractor certificates, and more reliable master-PC local server connection."
 $manifest = [ordered]@{
   version = $version
   channel = "stable"
@@ -202,8 +204,8 @@ $manifest = [ordered]@{
   databaseSchemaVersion = 12
   serverApiVersion = 2
   releaseNotes = [ordered]@{
-    ar = "$arabicReleaseNote Easy Commercial $version."
-    en = "Easy Commercial $version stability update."
+    ar = "Easy Commercial ${version}: $releaseNoteAr"
+    en = "Easy Commercial ${version}: $releaseNoteEn"
   }
   windows = if ($windowsAsset) {
     [ordered]@{

@@ -1,6 +1,6 @@
 # Easy Commercial
 
-Version `v2.0.0` introduces the Easy Commercial identity while preserving the existing quote, invoice, accounts, payment, smart-table, and report systems.
+Version `v2.0.3` keeps the Easy Commercial quote, invoice, accounts, payment, smart-table, and report systems while improving localized report units/filenames, contractor certificate report options, and local-server startup reliability.
 
 ## Development
 

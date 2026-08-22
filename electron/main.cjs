@@ -407,21 +407,8 @@ function compatibleServerAt(apiBase) {
 
 async function findCompatibleServer(candidates) {
   if (!candidates.length) return null;
-  return new Promise((resolve) => {
-    let pending = candidates.length;
-    let settled = false;
-    for (const candidate of candidates) {
-      compatibleServerAt(candidate).then((result) => {
-        pending -= 1;
-        if (!settled && result) {
-          settled = true;
-          resolve(result);
-          return;
-        }
-        if (!settled && pending === 0) resolve(null);
-      });
-    }
-  });
+  const results = await Promise.all(candidates.map((candidate) => compatibleServerAt(candidate)));
+  return results.find(Boolean) || null;
 }
 
 function runPowerShellConnectionStatus(serverUrl) {
@@ -1232,7 +1219,13 @@ async function createWindow() {
     { ...desktopSettings, localServerUrls },
     serverCandidates(preferredPort, desktopSettings.serverUrl),
   );
-  const candidates = plan.candidates;
+  const candidates = plan.remotePinned
+    ? plan.candidates
+    : unique([
+        `http://127.0.0.1:${preferredPort}`,
+        `http://localhost:${preferredPort}`,
+        ...plan.candidates,
+      ]);
   const detectedServer = await findCompatibleServer(candidates);
   let apiBase = plan.remotePinned
     ? plan.serverUrl
@@ -1259,7 +1252,7 @@ async function createWindow() {
   } else if (!useExistingServer && plan.startLocalServer) {
     try {
       const result = await startLocalServer({ port });
-      apiBase = result.serverUrl || result.apiBase || defaultServerUrl(port);
+      apiBase = result.localUrl || result.apiBase || result.serverUrl || defaultServerUrl(port);
       clientOnly = false;
     } catch (error) {
       writeStartupError(error);
