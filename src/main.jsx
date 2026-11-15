@@ -651,7 +651,7 @@ class AppErrorBoundary extends React.Component {
 
 const NAV = [
   { id: "dashboard", label: "لوحة التحكم", icon: Activity },
-  { id: "progress-certificates", label: "المستخلصات والتحصيلات", icon: FileCheck },
+  { id: "progress-certificates", label: "المستخلصات والتحصيلات", sidebarLabelEn: "Certificates", icon: FileCheck },
   { id: "offer", label: "عروض الأسعار", icon: FileText },
   { id: "invoice", label: "الفواتير", icon: ReceiptText },
   { id: "statement", label: "كشف حساب", icon: WalletCards },
@@ -4300,7 +4300,7 @@ function App() {
             </div>
           </div>
           <nav className="main-nav" data-localized>
-            {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+            {NAV_ITEMS.map(({ id, label, sidebarLabelEn, icon: Icon }) => (
               <button
                 key={id}
                 data-nav-id={id}
@@ -4309,7 +4309,7 @@ function App() {
                 onClick={() => requestTabChange(id)}
               >
                 <Icon size={18} />
-                <span>{uiText(label, uiLanguage)}</span>
+                <span>{uiLanguage === "en" && sidebarLabelEn ? sidebarLabelEn : uiText(label, uiLanguage)}</span>
               </button>
             ))}
           </nav>
@@ -4473,13 +4473,15 @@ function App() {
           {activeTab === "progress-certificates" && !canViewCertificates && (
             <Suspense fallback={<LoadingOverlay />}>
               <CertificateAccessPanel
-                api={api}
                 session={certificateSession}
                 access={certificateAccess}
-                currentUser={currentUser}
                 uiLanguage={uiLanguage}
                 onRetry={refreshCertificateAccess}
                 onSignInAgain={logout}
+                onOpenUsers={() => {
+                  requestTabChange("settings");
+                  window.setTimeout(() => document.getElementById("settings-users")?.scrollIntoView({ block: "start" }), 0);
+                }}
               />
             </Suspense>
           )}
@@ -17394,7 +17396,9 @@ function SettingsView({
     terms.terms_corporate_en || { sections: [] },
   );
   const [users, setUsers] = useState([]);
-  const [certificateGrantsOpen, setCertificateGrantsOpen] = useState(false);
+  const [certificateUserSettings, setCertificateUserSettings] = useState(null);
+  const [certificateUsersRevision, setCertificateUsersRevision] = useState(0);
+  const [certificateFeatureBusy, setCertificateFeatureBusy] = useState(false);
   const [newUser, setNewUser] = useState({
     username: "",
     display_name: "",
@@ -17477,6 +17481,7 @@ function SettingsView({
   const managerPaypalCardSubmitRef = useRef(null);
   const managerCheckoutRenderIdRef = useRef(0);
   const isCompanyAdmin = ["admin", "manager"].includes(currentUser?.role);
+  const canManageCertificateUsers = isCompanyAdmin && Boolean(certificateAccess?.can_admin);
   const adminUnlocked = isCompanyAdmin;
   const canEditCompanySettings = canUser(currentUser, "can_edit_company_settings");
   const canEditTerms = canUser(currentUser, "can_edit_terms");
@@ -18315,6 +18320,24 @@ function SettingsView({
   }, [api, currentUser?.role, isCompanyAdmin]);
 
   useEffect(() => {
+    if (!canManageCertificateUsers) {
+      setCertificateUserSettings(null);
+      return;
+    }
+    const controller = new AbortController();
+    const options = { signal: controller.signal };
+    Promise.all([
+      api.request("/api/certificates/admin/users", options),
+      api.request("/api/certificates/admin/projects", options),
+    ]).then(([grants, projects]) => {
+      if (!controller.signal.aborted) setCertificateUserSettings({ grants, projects });
+    }).catch(error => {
+      if (!controller.signal.aborted) setCertificateUserSettings({ error });
+    });
+    return () => controller.abort();
+  }, [api, canManageCertificateUsers, certificateUsersRevision]);
+
+  useEffect(() => {
     if (bootstrap?.company) setCompanyProfileDraft(bootstrap.company);
   }, [bootstrap?.company]);
 
@@ -18402,11 +18425,13 @@ function SettingsView({
   }
 
   async function saveUser(userId) {
+    const { certificate_grant: grant, ...fields } = editingUser;
     try {
       const updated = await api.request(`/api/users/${userId}`, {
         method: "PUT",
         body: JSON.stringify({
-          ...editingUser,
+          ...fields,
+          ...(canManageCertificateUsers && fields.role !== "manager" && grant ? { certificate_grant: grant } : {}),
           requester_user_id: currentUser?.id,
         }),
       });
@@ -18417,9 +18442,26 @@ function SettingsView({
       );
       setEditingUserId(null);
       setEditingUser({});
+      setCertificateUsersRevision(value => value + 1);
+      if (userId === currentUser?.id) await onCertificateAccessChanged?.();
       setMessage("تم تعديل المستخدم.");
     } catch (error) {
       setMessage(`تعذر تعديل المستخدم: ${error.message}`);
+    }
+  }
+
+  async function setCertificateFeature(enabled) {
+    setCertificateFeatureBusy(true);
+    try {
+      await api.request("/api/certificates/admin/feature", {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      });
+      await onCertificateAccessChanged?.();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setCertificateFeatureBusy(false);
     }
   }
 
@@ -19396,7 +19438,7 @@ function SettingsView({
         </div>
       </section>
 
-      <section className="panel users-panel">
+      <section className="panel users-panel" id="settings-users">
         <div className="panel-head">
           <h2>
             <Users size={18} /> {t("المستخدمون")}
@@ -19435,19 +19477,6 @@ function SettingsView({
         </form>
         {isCompanyAdmin ? (
           <>
-            <details onToggle={(event) => setCertificateGrantsOpen(event.currentTarget.open)}>
-              <summary>{l("صلاحيات المستخلصات والتحصيلات", "Certificates & Collections permissions")}</summary>
-              {certificateGrantsOpen && <Suspense fallback={null}>
-                <CertificateGrants
-                  api={api}
-                  session={currentUser?.certificate_session}
-                  access={certificateAccess}
-                  users={users}
-                  uiLanguage={uiLanguage}
-                  onSaved={onCertificateAccessChanged}
-                />
-              </Suspense>}
-            </details>
             <form className="form-grid user-form" onSubmit={addUser}>
               <Field label={t("اسم الدخول")}>
                 <input
@@ -19513,6 +19542,19 @@ function SettingsView({
                 <UserPlus size={18} /> {t("إضافة مستخدم")}
               </button>
             </form>
+            {canManageCertificateUsers && <label className="user-certificate-feature" data-localized>
+              <input
+                type="checkbox"
+                checked={certificateAccess.enabled}
+                disabled={certificateFeatureBusy}
+                onChange={(event) => setCertificateFeature(event.target.checked)}
+              />
+              {l("تفعيل المستخلصات والتحصيلات للشركة", "Enable Certificates & Collections for the company")}
+            </label>}
+            {certificateUserSettings?.error && <p className="certificate-user-notice" role="status" data-localized>
+              {l("تعذر تحميل صلاحيات المستخلصات.", "Could not load certificate permissions.")}{" "}
+              <button type="button" onClick={() => setCertificateUsersRevision(value => value + 1)}>{l("إعادة المحاولة", "Try again")}</button>
+            </p>}
             <div className="table-scroll compact-table">
               <table>
                 <thead>
@@ -19527,15 +19569,26 @@ function SettingsView({
                     {USER_PERMISSION_FIELDS.map((permission) => (
                       <th key={permission.key}>{t(permission.shortLabel)}</th>
                     ))}
+                    <th className="user-certificate-column" data-localized>{l("المستخلصات", "Certificates")}</th>
                     <th>{t("كلمة مرور جديدة")}</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user) => (
-                    <tr key={user.id}>
+                  {users.map((user) => {
+                    const editing = editingUserId === user.id;
+                    const role = editing ? editingUser.role : user.role;
+                    const active = editing ? editingUser.is_active : user.is_active;
+                    const savedGrant = certificateUserSettings?.grants?.[user.id];
+                    const explicitGrant = savedGrant?.inherited_from_role ? savedGrant.explicit_grant : savedGrant;
+                    const draftGrant = editing ? editingUser.certificate_grant ?? explicitGrant : explicitGrant;
+                    const certificateStatus = active && role === "manager"
+                      ? l("صلاحية كاملة", "Full access")
+                      : active && draftGrant?.capabilities?.includes("view") ? t("نعم") : "-";
+                    return <React.Fragment key={user.id}>
+                    <tr>
                       <td>{user.id}</td>
-                      {editingUserId === user.id ? (
+                      {editing ? (
                         <>
                           <td>
                             <input
@@ -19619,6 +19672,7 @@ function SettingsView({
                               />
                             </td>
                           ))}
+                          <td className="user-certificate-column" data-localized>{certificateStatus}</td>
                           <td>
                             <input
                               type="password"
@@ -19681,6 +19735,7 @@ function SettingsView({
                               {user[permission.key] ? t("نعم") : "-"}
                             </td>
                           ))}
+                          <td className="user-certificate-column" data-localized>{certificateStatus}</td>
                           <td> </td>
                           <td className="row-actions">
                             <button
@@ -19706,7 +19761,22 @@ function SettingsView({
                         </>
                       )}
                     </tr>
-                  ))}
+                    {editing && role !== "manager" && canManageCertificateUsers && certificateUserSettings?.grants && (
+                      <tr className="user-certificate-edit-row">
+                        <td colSpan={10 + USER_PERMISSION_FIELDS.length}>
+                          <Suspense fallback={null}>
+                            <CertificateGrants
+                              grant={draftGrant}
+                              projects={certificateUserSettings.projects}
+                              uiLanguage={uiLanguage}
+                              onChange={(grant) => setEditingUser((current) => ({ ...current, certificate_grant: grant }))}
+                            />
+                          </Suspense>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>;
+                  })}
                 </tbody>
               </table>
             </div>

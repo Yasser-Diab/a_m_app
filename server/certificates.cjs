@@ -3,7 +3,7 @@ const path = require("node:path");
 const express = require("express");
 const {
   CAPABILITIES, accessFor, adminAccess, audit, authorize, date, encode, fail,
-  featureEnabled, getGrant, idOf, inScope, initializeSessionSecret, issueCertificateSession,
+  featureEnabled, getGrant, getUserGrant, hasManagerRole, idOf, inScope, initializeSessionSecret, issueCertificateSession,
   certificateSessionUser, revokeCertificateSession, lookup, parse, scopeSql, setGrant, setting, setSetting, str, today,
 } = require("./certificate-access.cjs");
 const {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, createLocation,
@@ -241,15 +241,23 @@ function registerCertificateRoutes(app, database, dataDir) {
     res.json(database.all(`SELECT cp.id,cp.name,p.display_name AS customer_name
       FROM cert_projects cp JOIN parties p ON p.id=cp.customer_id ORDER BY cp.name`));
   });
+  router.get("/admin/users",(req,res) => {
+    admin(req);
+    const users = database.all("SELECT id,role FROM users");
+    res.json(Object.fromEntries(users.map((user) => [user.id,getUserGrant(database,user)])));
+  });
   router.get("/admin/users/:userId",(req,res) => {
     admin(req);
-    const userId = idOf(req.params.userId);
-    if (!database.get("SELECT 1 FROM users WHERE id=?",[userId])) fail(404,"User not found");
-    res.json(getGrant(database,userId));
+    const user = database.get("SELECT id,role FROM users WHERE id=?",[idOf(req.params.userId)]);
+    if (!user) fail(404,"User not found");
+    res.json(getUserGrant(database,user));
   });
   router.put("/admin/users/:userId",(req,res) => {
     const access = admin(req);
-    res.json(setGrant(database,access.user,idOf(req.params.userId),req.body));
+    const user = database.get("SELECT id,role FROM users WHERE id=?",[idOf(req.params.userId)]);
+    if (!user) fail(404,"User not found");
+    if (hasManagerRole(user)) fail(409,"Managers receive certificate permissions through their role");
+    res.json({...setGrant(database,access.user,user.id,req.body),inherited_from_role:false});
   });
   router.get("/customers",(req,res) => {
     const access = checked(req,"view");

@@ -114,6 +114,27 @@ function getGrant(database, userId) {
   };
 }
 
+function hasManagerRole(user) {
+  return String(user?.role).toLowerCase() === "manager";
+}
+
+function effectiveGrant(user, explicitGrant) {
+  if (!hasManagerRole(user)) return {...explicitGrant, inherited_from_role: false};
+  return {
+    capabilities: [...CAPABILITIES],
+    all_projects: true,
+    allow_project_creation: true,
+    project_ids: [],
+    inherited_from_role: true,
+  };
+}
+
+function getUserGrant(database, user) {
+  const explicitGrant = getGrant(database, user.id);
+  const grant = effectiveGrant(user, explicitGrant);
+  return grant.inherited_from_role ? {...grant, explicit_grant: explicitGrant} : grant;
+}
+
 function audit(database, user, action, {projectId = null, revisionId = null, reason = "", details = null} = {}) {
   database.run(`
     INSERT INTO cert_audit (project_id,revision_id,actor_id,action,reason,details_json) VALUES (?,?,?,?,?,?)
@@ -122,6 +143,7 @@ function audit(database, user, action, {projectId = null, revisionId = null, rea
 
 function setGrant(database, requester, userId, input) {
   if (!database.get("SELECT id FROM users WHERE id = ?", [userId])) fail(404, "User not found");
+  if (!input || typeof input !== "object" || Array.isArray(input)) fail(400, "Invalid certificate permissions");
   const capabilities = Array.isArray(input.capabilities)
     ? [...new Set(input.capabilities.map((value) => str(value).replace(/^certificates\./, "")))] : [];
   if (capabilities.some((value) => !CAPABILITIES.includes(value))) fail(400, "Unknown certificate capability");
@@ -158,7 +180,8 @@ function accessFor(database, req) {
   const user = certificateSessionUser(database, req);
   if (!user) fail(401, "Sign in again to access certificates");
   const enabled = featureEnabled(database);
-  return {...getGrant(database, user.id), user, enabled, can_admin: isAdmin(user)};
+  const grant = effectiveGrant(user, hasManagerRole(user) ? null : getGrant(database, user.id));
+  return {...grant, user, enabled, can_admin: isAdmin(user)};
 }
 
 function authorize(database, req, capability, projectId = null) {
@@ -178,5 +201,5 @@ function adminAccess(database, req) {
 
 module.exports = {CAPABILITIES, parse, encode, now, today, idOf, isAdmin, str, lookup, fail, date,
   currency, setting, setSetting, initializeSessionSecret, featureEnabled, issueCertificateSession,
-  certificateSessionUser, revokeCertificateSession, getGrant, audit, setGrant, scopeSql, inScope,
+  certificateSessionUser, revokeCertificateSession, getGrant, getUserGrant, hasManagerRole, audit, setGrant, scopeSql, inScope,
   accessFor, authorize, adminAccess};

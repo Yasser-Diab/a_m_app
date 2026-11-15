@@ -30,6 +30,7 @@ async function main() {
         ["company_profile",JSON.stringify({free_access_until:"2099-01-01T00:00:00.000Z"})]);
       db.run("INSERT INTO users (username,display_name,role,pin_hash) VALUES (?,?,?,?)",["manager","Manager","manager",hash]);
       db.run("INSERT INTO users (username,display_name,role,pin_hash) VALUES (?,?,?,?)",["viewer","Viewer","user",hash]);
+      db.run("INSERT INTO users (username,display_name,role,pin_hash) VALUES (?,?,?,?)",["settings-admin","Settings Admin","admin",hash]);
     });
 
     const api = async (route,token = "",method = "GET",body,expected = 200) => {
@@ -43,15 +44,29 @@ async function main() {
     const login = async (name) => (await api("/auth/login","","POST",{username:name,password})).user;
     const manager = await login("manager");
     const viewer = await login("viewer");
+    const settingsAdmin = await login("settings-admin");
     const token = manager.certificate_session;
     const viewToken = viewer.certificate_session;
     const cert = "/certificates";
 
     assert.ok(token);
-    assert.equal((await api(cert + "/access",token)).can_admin,true);
+    const managerAccess = await api(cert + "/access",token);
+    assert.equal(managerAccess.can_admin,true);
+    assert.equal(managerAccess.inherited_from_role,true);
+    assert.equal(managerAccess.all_projects,true);
+    assert.equal(managerAccess.allow_project_creation,true);
+    assert.deepEqual(managerAccess.capabilities,CAPABILITIES);
+    const settingsAccess = await api(cert + "/access",settingsAdmin.certificate_session);
+    assert.equal(settingsAccess.can_admin,true);
+    assert.deepEqual(settingsAccess.capabilities,[]);
     await api(cert + "?requester_user_id=" + manager.id,"","GET",undefined,401);
     await api(cert,viewToken,"GET",undefined,403);
-    await api(cert + "/admin/users/" + manager.id,token,"PUT",{capabilities:CAPABILITIES,all_projects:true});
+    await api(cert + "/admin/users",viewToken,"GET",undefined,403);
+    await api(cert + "/admin/users/" + manager.id,token,"PUT",{capabilities:CAPABILITIES,all_projects:true},409);
+    assert.equal(db.get("SELECT user_id FROM cert_access WHERE user_id=?",[manager.id]),null);
+    const grants = await api(cert + "/admin/users",token);
+    assert.deepEqual(grants[manager.id].explicit_grant.capabilities,[]);
+    assert.equal(grants[manager.id].inherited_from_role,true);
 
     const customer = await api(cert + "/customers",token,"POST",{name:"مقاولات تجريبية",category:"corporate"},201);
     assert.equal((await api(cert + "/customers",token,"POST",{name:"مقاولات تجريبية"})).id,customer.id);
@@ -61,7 +76,34 @@ async function main() {
     const scope = cert + "/projects/" + project.id;
     const location = await api(scope + "/locations",token,"POST",{name:"Building 2"},201);
     const foreign = await api(cert + "/projects/" + other.id + "/locations",token,"POST",{name:"Building 10"},201);
-    await api(cert + "/admin/users/" + viewer.id,token,"PUT",{capabilities:["view"],project_ids:[project.id]});
+    const viewerGrant = {capabilities:["view"],project_ids:[project.id]};
+    const userRoute = "/users/" + viewer.id;
+    await api(userRoute,"","PUT",{requester_user_id:manager.id,certificate_grant:viewerGrant},403);
+    await api(userRoute,viewToken,"PUT",{requester_user_id:manager.id,certificate_grant:viewerGrant},403);
+    await api(userRoute,token,"PUT",{requester_user_id:settingsAdmin.id,certificate_grant:viewerGrant},403);
+    const updatedViewer = await api(userRoute,token,"PUT",{
+      requester_user_id:manager.id,display_name:"Updated Viewer",certificate_grant:viewerGrant,
+    });
+    assert.equal(updatedViewer.display_name,"Updated Viewer");
+    assert.deepEqual(updatedViewer.certificate_grant.project_ids,[project.id]);
+    await api(userRoute,token,"PUT",{requester_user_id:manager.id,display_name:"Invalid Update",
+      certificate_grant:{capabilities:["view"],project_ids:[-1]}},400);
+    assert.equal(db.get("SELECT display_name FROM users WHERE id=?",[viewer.id]).display_name,"Updated Viewer");
+    assert.deepEqual((await api(cert+"/admin/users/"+viewer.id,token)).project_ids,[project.id]);
+
+    const promoted = await api(userRoute,token,"PUT",{requester_user_id:manager.id,role:"manager",
+      certificate_grant:{capabilities:CAPABILITIES,all_projects:true}});
+    assert.equal(promoted.certificate_grant.inherited_from_role,true);
+    assert.deepEqual(promoted.certificate_grant.explicit_grant.project_ids,[project.id]);
+    assert.equal((await api(cert + "/projects",viewToken)).length,2);
+    await api(userRoute,viewToken,"PUT",{requester_user_id:viewer.id,is_active:false});
+    await api(cert + "/access",viewToken,"GET",undefined,401);
+    assert.equal(db.get("SELECT actor_id FROM cert_audit WHERE action='manager_role_access_changed' ORDER BY id DESC LIMIT 1").actor_id,viewer.id);
+    await api(userRoute,token,"PUT",{requester_user_id:manager.id,role:"user",is_active:true});
+    const demotedAccess = await api(cert + "/access",viewToken);
+    assert.equal(demotedAccess.inherited_from_role,false);
+    assert.equal(demotedAccess.can_admin,false);
+    assert.deepEqual(demotedAccess.capabilities,["view"]);
     assert.equal((await api(cert + "/projects",viewToken)).length,1);
     await api(cert + "/projects/" + other.id,viewToken,"GET",undefined,404);
     await api(scope + "/collections",viewToken,"GET",undefined,403);

@@ -1,10 +1,8 @@
 import { useState } from "react";
-import CertificateGrants from "./CertificateGrants.jsx";
 import "./certificates.css";
 
-export default function CertificateAccessPanel({ api, session, access, currentUser, uiLanguage, onRetry, onSignInAgain }) {
+export default function CertificateAccessPanel({ session, access, uiLanguage, onRetry, onSignInAgain, onOpenUsers }) {
   const t = (ar, en) => uiLanguage === "en" ? en : ar;
-  const [editing, setEditing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const canAdmin = Boolean(session && access?.can_admin);
   let heading;
@@ -39,11 +37,11 @@ export default function CertificateAccessPanel({ api, session, access, currentUs
       ? t("يلزم إذن لعرض المستخلصات", "Certificate viewing access required")
       : t("قسم المستخلصات غير مفعّل", "Certificates are disabled");
     message = canAdmin
-      ? t("راجع صلاحيات حسابك والمشروعات التي يمكنك الوصول إليها، ثم احفظ الإعدادات.", "Review the permissions and projects for your account, then save your choices.")
+      ? t("تُدار صلاحيات المستخلصات من جدول المستخدمين في الإعدادات.", "Manage certificate access in the Users table in Settings.")
       : t("اطلب من مسؤول الشركة تفعيل القسم ومنح حسابك صلاحية الوصول إلى المشروعات المطلوبة.", "Ask your company administrator to enable Certificates and grant access to the projects you need.");
-    if (canAdmin && !editing) {
-      action = <button className="primary" type="button" onClick={() => setEditing(true)}>
-        {t("إعداد صلاحيات حسابي", "Set up certificate access for my account")}
+    if (canAdmin) {
+      action = <button className="primary" type="button" onClick={onOpenUsers}>
+        {t("فتح إعدادات المستخدمين", "Open Users settings")}
       </button>;
     } else if (!canAdmin) {
       action = <button type="button" onClick={retry} disabled={retrying}>{t("التحقق من الصلاحيات مجددًا", "Check permissions again")}</button>;
@@ -55,14 +53,6 @@ export default function CertificateAccessPanel({ api, session, access, currentUs
       <h2 id="certificate-access-title">{heading}</h2>
       <p role="status">{message}</p>
       {action && <div className="pc-toolbar">{action}</div>}
-      {canAdmin && editing && <CertificateGrants
-        api={api}
-        session={session}
-        access={access}
-        fixedUser={currentUser}
-        uiLanguage={uiLanguage}
-        onSaved={onRetry}
-      />}
     </section>
   </div>;
 }

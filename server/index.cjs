@@ -15,6 +15,10 @@ const {
   revokeCertificateSession, canChangeUsers, resumeCertificateRenders,
 } = require("./certificates.cjs");
 const {
+  audit: auditCertificateAccess, certificateSessionUser, getUserGrant, hasManagerRole,
+  isAdmin: canAdministerCertificateGrants, setGrant: setCertificateGrant,
+} = require("./certificate-access.cjs");
+const {
   fetchManagerSubscriptionStatus,
   registerManagerGatewayRoutes,
   syncAccountToManager,
@@ -9269,12 +9273,22 @@ async function createServer(options = {}) {
   });
 
   app.put("/api/users/:id", (req, res) => {
-    if (!companyAdminAuthorized(database, req.body))
+    const changesCertificateGrant = Object.hasOwn(req.body ?? {}, "certificate_grant");
+    const signedActor = certificateSessionUser(database, req);
+    if (changesCertificateGrant) {
+      const hasMismatchedActor = [req.body.requester_user_id, req.body.user_id].some(
+        (actorId) => actorId !== undefined && Number(actorId) !== signedActor?.id,
+      );
+      if (!canAdministerCertificateGrants(signedActor) || hasMismatchedActor) {
+        return res.status(403).json({ error: "Sign in as a manager or administrator to edit certificate permissions" });
+      }
+    } else if (!companyAdminAuthorized(database, req.body)) {
       return res.status(403).json({ error: "Manager access is required" });
+    }
     const id = Number(req.params.id);
     const existing = database.get("SELECT * FROM users WHERE id = ?", [id]);
     if (!existing) return res.status(404).json({ error: "User not found" });
-    if (!canChangeUsers(database, req, { target: existing, role: req.body.role }))
+    if (!changesCertificateGrant && !canChangeUsers(database, req, { target: existing, role: req.body.role }))
       return res.status(403).json({ error: "Sign in as a manager to modify privileged users" });
     const allowed = [
       "username",
@@ -9316,13 +9330,30 @@ async function createServer(options = {}) {
       sets.push("pin_hash = ?");
       params.push(hashPassword(req.body.password));
     }
-    if (!sets.length) return res.status(400).json({ error: "No changes" });
-    params.push(id);
-    database.run(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, params);
+    if (!sets.length && !changesCertificateGrant) return res.status(400).json({ error: "No changes" });
+    let saved;
+    try {
+      saved = database.transaction(() => {
+        if (sets.length) database.run(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, [...params, id]);
+        const user = database.get("SELECT * FROM users WHERE id = ?", [id]);
+        if (changesCertificateGrant && !hasManagerRole(user)) {
+          setCertificateGrant(database, signedActor, id, req.body.certificate_grant);
+        }
+        const inheritedBefore = Boolean(existing.is_active && hasManagerRole(existing));
+        const inheritedAfter = Boolean(user.is_active && hasManagerRole(user));
+        if (inheritedBefore !== inheritedAfter) {
+          auditCertificateAccess(database, signedActor, "manager_role_access_changed", {
+            details: { user_id: id, before: inheritedBefore, after: inheritedAfter },
+          });
+        }
+        return user;
+      });
+    } catch (error) {
+      if (!error.status) throw error;
+      return res.status(error.status).json({ error: error.message });
+    }
     scheduleManagerSync("user updated");
-    res.json(
-      publicUser(database.get("SELECT * FROM users WHERE id = ?", [id])),
-    );
+    res.json(changesCertificateGrant ? {...publicUser(saved), certificate_grant: getUserGrant(database, saved)} : publicUser(saved));
   });
 
   app.put("/api/users/:id/password", (req, res) => {
