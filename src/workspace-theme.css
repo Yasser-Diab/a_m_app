@@ -3,14 +3,22 @@
   --workspace-radius: 14px;
   --workspace-focus: color-mix(in srgb, var(--accent) 78%, var(--text));
   --workspace-shadow: 0 1px 2px rgb(0 0 0 / 5%), 0 8px 24px rgb(0 0 0 / 5%);
+  --workspace-nav-bg: #11252d;
+  --workspace-nav-fg: #eaf3f4;
+  --workspace-nav-muted: #adcad0;
+  --workspace-nav-active: #254951;
+  --workspace-nav-accent: #8be0cc;
 }
 
-.shell > .sidebar {
-  gap: 14px;
+:root[data-theme] .shell > .sidebar {
+  gap: 18px;
   padding: var(--workspace-gap) 12px;
   border-inline-start: 0;
-  border-inline-end: 1px solid var(--line);
+  border-inline-end: 1px solid color-mix(in srgb, var(--workspace-nav-fg) 16%, var(--workspace-nav-bg));
+  background: var(--workspace-nav-bg);
+  color: var(--workspace-nav-fg);
   box-shadow: none;
+  scrollbar-color: var(--workspace-nav-active) var(--workspace-nav-bg);
 }
 
 .shell > .workspace {
@@ -18,8 +26,20 @@
   scrollbar-gutter: stable;
 }
 
+.shell .brand {
+  border-color: rgb(234 243 244 / 14%);
+  background: #0c1d24;
+  box-shadow: none;
+}
+
 .shell .brand > div:not(.am-brand-mark) strong {
   color: #f3d28a;
+  font-family: inherit;
+  line-height: 1.25;
+}
+
+.shell .brand > div:not(.am-brand-mark) span {
+  color: var(--workspace-nav-muted);
 }
 
 .shell .brand::before {
@@ -31,21 +51,38 @@
 }
 
 .shell .main-nav button {
-  min-height: 42px;
+  min-height: 44px;
   gap: 10px;
   border-radius: 9px;
   text-align: start;
   font-weight: 600;
   line-height: 1.25;
+  background: transparent;
+  color: var(--workspace-nav-fg);
+}
+
+.shell .main-nav button:hover {
+  background: color-mix(in srgb, var(--workspace-nav-fg) 8%, var(--workspace-nav-bg));
 }
 
 .shell .main-nav button > svg {
   flex: 0 0 auto;
+  color: var(--workspace-nav-muted);
+}
+
+.shell .main-nav [data-nav-id='progress-certificates'] {
+  border-color: color-mix(in srgb, var(--workspace-nav-accent) 33%, transparent);
+}
+
+.shell .main-nav [data-nav-id='progress-certificates'] > svg,
+.shell .main-nav button.active > svg {
+  color: var(--workspace-nav-accent);
 }
 
 .shell .main-nav button.active {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
-  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  border-color: color-mix(in srgb, var(--workspace-nav-accent) 42%, var(--workspace-nav-active));
+  background: var(--workspace-nav-active);
+  color: #fff;
   box-shadow: none;
 }
 
@@ -54,7 +91,7 @@
   inset-inline: 0 auto;
   width: 3px;
   border-radius: 3px;
-  background: var(--accent);
+  background: var(--workspace-nav-accent);
   opacity: 1;
 }
 
@@ -66,7 +103,7 @@
 
 .workspace > .topbar {
   min-height: 64px;
-  border-color: var(--line);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
   padding: 10px 14px;
   gap: 12px;
   margin-block-end: var(--workspace-gap);
@@ -79,13 +116,50 @@
 
 .workspace .title-stack h1 {
   font-size: clamp(1.13rem, 1.8vw, 1.5rem);
+  font-family: inherit;
+  font-weight: 720;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
 .workspace .panel-head h2,
 .workspace .form-section h3 {
+  font-family: inherit;
   line-height: 1.35;
+}
+
+.workspace .certificate-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-block-end: var(--workspace-gap);
+  padding: 16px 20px;
+  border-inline-start: 4px solid var(--accent);
+  background: color-mix(in srgb, var(--surface) 95%, var(--accent));
+}
+
+.certificate-entry-copy h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.certificate-entry-copy h2 svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.certificate-entry-copy p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: .875rem;
 }
 
 .workspace .top-actions,
@@ -99,6 +173,11 @@
 .shell summary:focus-visible {
   outline: 2px solid var(--workspace-focus);
   outline-offset: 2px;
+}
+
+.shell .main-nav button:focus-visible {
+  outline-color: var(--workspace-nav-accent);
+  outline-offset: -3px;
 }
 
 :root[data-theme='gold'] body {
@@ -132,9 +211,10 @@
     gap: 6px;
   }
 
-  .shell > .sidebar {
+  :root[data-theme] .shell > .sidebar {
     border-inline-end: 0;
-    border-block-end: 1px solid var(--line);
+    border-block-end: 1px solid color-mix(in srgb, var(--workspace-nav-fg) 16%, var(--workspace-nav-bg));
+    padding: 8px;
   }
 
   .shell > .workspace {

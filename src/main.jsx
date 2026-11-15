@@ -22,6 +22,7 @@ import {
   Copy,
   CornerUpLeft,
   Database,
+  FileCheck,
   FileDown,
   FileSpreadsheet,
   FileText,
@@ -650,12 +651,12 @@ class AppErrorBoundary extends React.Component {
 
 const NAV = [
   { id: "dashboard", label: "لوحة التحكم", icon: Activity },
+  { id: "progress-certificates", label: "المستخلصات والتحصيلات", icon: FileCheck },
   { id: "offer", label: "عروض الأسعار", icon: FileText },
   { id: "invoice", label: "الفواتير", icon: ReceiptText },
   { id: "statement", label: "كشف حساب", icon: WalletCards },
   { id: "payments", label: "الدفعات", icon: WalletCards },
   { id: "contractor", label: "المقاولين", icon: ClipboardList },
-  { id: "progress-certificates", label: "المستخلصات والتحصيلات", icon: ClipboardList },
   { id: "quantities", label: "الكميات المنتجة", icon: FileSpreadsheet },
   { id: "entry", label: "إدخال / تعديل", icon: Plus },
   { id: "settings", label: "الإعدادات", icon: Settings },
@@ -734,6 +735,7 @@ const INITIAL_ACTIVE_TAB = ROUTE_INITIAL_TABS[currentRouteKey()] || APP_VARIANT.
 const NAV_ITEMS = NAV;
 const ProgressCertificates = lazy(() => import("./certificates/Certificates.jsx"));
 const CertificateGrants = lazy(() => import("./certificates/CertificateGrants.jsx"));
+const CertificateAccessPanel = lazy(() => import("./certificates/CertificateAccessPanel.jsx"));
 
 const WORKFLOWS = {
   offer: {
@@ -2625,26 +2627,27 @@ function App() {
     [apiBase, certificateSession],
   );
 
-  const [certificateAccess, setCertificateAccess] = useState(null);
+  const certificateUserId = currentUser?.id;
+  const [certificateAccessResult, setCertificateAccessResult] = useState(null);
+  const certificateAccessRequest = useRef(0);
+  const certificateAccess = certificateAccessResult?.api === api &&
+    certificateAccessResult?.userId === certificateUserId ? certificateAccessResult.access : null;
   const refreshCertificateAccess = useCallback(async (signal) => {
-    if (!certificateSession) {
-      setCertificateAccess(null);
-      return;
-    }
+    if (!certificateUserId) return;
+    const request = ++certificateAccessRequest.current;
+    let access;
     try {
-      const access = await api.request("/api/certificates/access", {
-        headers: { Authorization: `Bearer ${certificateSession}` },
-        signal,
-      });
-      if (!signal?.aborted) setCertificateAccess(access);
+      access = await api.request("/api/certificates/access", { signal });
     } catch (error) {
-      if (!signal?.aborted) setCertificateAccess({ error: error.status });
+      access = { error: error.status || "unavailable" };
     }
-  }, [api, certificateSession]);
+    if (!signal?.aborted && request === certificateAccessRequest.current) {
+      setCertificateAccessResult({ api, userId: certificateUserId, access });
+    }
+  }, [api, certificateUserId]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setCertificateAccess(null);
     refreshCertificateAccess(controller.signal);
     const timer = window.setInterval(() => refreshCertificateAccess(controller.signal), 45000);
     return () => {
@@ -2653,7 +2656,7 @@ function App() {
     };
   }, [refreshCertificateAccess]);
 
-  const canViewCertificates = certificateAccess?.enabled &&
+  const canViewCertificates = certificateSession && certificateAccess?.enabled &&
     certificateAccess.capabilities?.includes("view");
   const [visitedCertificates, setVisitedCertificates] = useState(false);
   useEffect(() => {
@@ -4297,10 +4300,11 @@ function App() {
             </div>
           </div>
           <nav className="main-nav" data-localized>
-            {NAV_ITEMS.filter(({ id }) => id !== "progress-certificates" || canViewCertificates)
-              .map(({ id, label, icon: Icon }) => (
+            {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
+                data-nav-id={id}
+                aria-current={activeTab === id ? "page" : undefined}
                 className={activeTab === id ? "active" : ""}
                 onClick={() => requestTabChange(id)}
               >
@@ -4467,17 +4471,32 @@ function App() {
             </div>
           )}
           {activeTab === "progress-certificates" && !canViewCertificates && (
-            <section className="panel empty-state" role="status">
-              {uiLanguage === "en"
-                ? certificateSession && !certificateAccess
-                  ? "Checking certificate access…"
-                  : "Certificate access requires an active session and a grant from your administrator."
-                : certificateSession && !certificateAccess
-                  ? "جارٍ التحقق من صلاحية المستخلصات…"
-                  : "يتطلب فتح المستخلصات تسجيل دخول نشطًا وصلاحية من مدير النظام."}
-            </section>
+            <Suspense fallback={<LoadingOverlay />}>
+              <CertificateAccessPanel
+                api={api}
+                session={certificateSession}
+                access={certificateAccess}
+                currentUser={currentUser}
+                uiLanguage={uiLanguage}
+                onRetry={refreshCertificateAccess}
+                onSignInAgain={logout}
+              />
+            </Suspense>
           )}
 
+          {activeTab === "dashboard" && (
+            <section className="panel certificate-entry" data-localized>
+              <div className="certificate-entry-copy">
+                <h2><FileCheck size={20} aria-hidden="true" />{uiText("المستخلصات والتحصيلات", uiLanguage)}</h2>
+                <p>{uiLanguage === "en"
+                  ? "Open historical certificates, prepare new ones and track collections."
+                  : "افتح المستخلصات السابقة، وأعدّ مستخلصات جديدة، وتابع التحصيلات."}</p>
+              </div>
+              <button type="button" className="primary" onClick={() => requestTabChange("progress-certificates")}>
+                {uiLanguage === "en" ? "Open Certificates" : "فتح المستخلصات"}
+              </button>
+            </section>
+          )}
           {activeTab === "dashboard" && (
             <Dashboard
               api={api}

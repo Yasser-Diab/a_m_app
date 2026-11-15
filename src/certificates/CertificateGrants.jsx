@@ -19,10 +19,11 @@ const capabilityLabels = {
   view_audit: ["عرض سجل التدقيق", "View audit history"],
 };
 
-export default function CertificateGrants({ api, session, access, users, uiLanguage, onSaved }) {
+export default function CertificateGrants({ api, session, access, users = [], fixedUser, uiLanguage, onSaved }) {
   const t = (ar, en) => uiLanguage === "en" ? en : ar;
   const request = useCertificateApi(api, session);
-  const [userId, setUserId] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const userId = fixedUser?.id || selectedUserId;
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
@@ -50,25 +51,28 @@ export default function CertificateGrants({ api, session, access, users, uiLangu
   return <section className="pc-grants">
     <Problem error={error || feature.error || projects.error || grant.error} t={t} />
     <label className="pc-check"><input type="checkbox" checked={Boolean(enabled)} onChange={setFeature} disabled={busy || feature.pending} />{t("تمكين قسم المستخلصات للمستخدمين المصرح لهم", "Enable certificates for users with grants")}</label>
-    <Field label={t("المستخدم", "User")}><select value={userId} onChange={(event) => setUserId(event.target.value)}>
+    {fixedUser ? <p>{t("الحساب", "Account")} <strong>{fixedUser.display_name || fixedUser.username}</strong></p> : <Field label={t("المستخدم", "User")}><select value={userId} onChange={(event) => setSelectedUserId(event.target.value)}>
       <option value="">{t("اختر مستخدمًا", "Select a user")}</option>
       {users.filter((user) => user.is_active).map((user) => <option key={user.id} value={user.id}>{user.display_name} ({user.username})</option>)}
-    </select></Field>
+    </select></Field>}
     {grant.pending && <p role="status">{t("جارٍ التحميل…", "Loading…")}</p>}
-    {grant.data && <GrantForm key={`${userId}-${reload}`} grant={grant.data} projects={projects.data || []} t={t} onSave={async (draft) => {
+    {grant.data && <GrantForm key={`${userId}-${reload}`} grant={grant.data} suggestInitialView={Boolean(fixedUser)} projects={projects.data || []} t={t} onSave={async (draft) => {
       await request(`/admin/users/${userId}`, { method: "PUT", body: draft });
       await onSaved?.();
     }} />}
   </section>;
 }
 
-function GrantForm({ grant, projects, t, onSave }) {
-  const [draft, setDraft] = useState(() => ({
-    capabilities: grant.capabilities || [],
-    all_projects: Boolean(grant.all_projects),
-    project_ids: (grant.project_ids || []).map(String),
-    allow_project_creation: Boolean(grant.allow_project_creation),
-  }));
+function GrantForm({ grant, projects, suggestInitialView, t, onSave }) {
+  const [draft, setDraft] = useState(() => {
+    const firstGrant = suggestInitialView && !grant.capabilities?.length && !grant.all_projects && !grant.project_ids?.length;
+    return {
+      capabilities: firstGrant ? ["view", "view_collections"] : grant.capabilities || [],
+      all_projects: firstGrant || Boolean(grant.all_projects),
+      project_ids: (grant.project_ids || []).map(String),
+      allow_project_creation: Boolean(grant.allow_project_creation),
+    };
+  });
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   function patch(key, value) { setDraft((current) => ({ ...current, [key]: value })); setStatus(null); }
