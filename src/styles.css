@@ -551,6 +551,11 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.brand>div:not(.am-brand-mark) strong {
+  font-size: 0.83rem;
+  white-space: nowrap;
+}
+
 .brand>div:not(.am-brand-mark) strong,
 .login-brand strong,
 .title-stack h1,

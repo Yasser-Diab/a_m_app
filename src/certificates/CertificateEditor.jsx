@@ -181,8 +181,14 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       {record && <><Status value={record.status} t={t} />{record.revision > 1 && <span className="pc-chip">{t("المراجعة", "Revision")} <bdi>&nbsp;{record.revision}</bdi></span>}</>}
       {record?.pdf_status && <Status value={record.pdf_status} t={t} />}
       {onBackToSearch && <button type="button" onClick={onBackToSearch}>{t("العودة إلى البحث", "Back to search")}</button>}
+      {showDocument && <button type="button" onClick={openDocument} disabled={busy || !project || !record && !canWrite}><Eye size={17} />{t("معاينة وتصدير", "Preview and export")}</button>}
       {dirty && <span className="pc-caption" role="status">{t("تعديلات غير محفوظة", "Unsaved changes")}</span>}
     </div>
+    {availableActions.length > 0 && <div className="pc-toolbar">
+      {availableActions.filter((operation) => can(permissionFor(operation))).map((operation) => <button type="button" key={operation}
+        className={operation === "issue" || operation === "approve" || operation === "submit" ? "primary" : undefined} disabled={busy} onClick={() => showAction(operation)}>{t(...actionLabels[operation])}</button>)}
+      {!availableActions.some((operation) => can(permissionFor(operation))) && <span className="pc-caption">{t("يتطلب الانتقال التالي صلاحية سير عمل إضافية.", "The next action requires an additional workflow permission.")}</span>}
+    </div>}
     <Problem error={error || customers.error || projects.error || context.error} t={t} />
     {statusText && <p className="pc-caption" role="status">{statusText}</p>}
     <div className="pc-form">
@@ -225,7 +231,6 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       {canWrite && <button type="button" className="primary" onClick={() => run(() => save())} disabled={busy || !project || record && !dirty}><Save size={17} />{t("حفظ المسودة", "Save draft")}</button>}
       {canWrite && can("edit_draft") && can("import") && <button type="button" onClick={openImport} disabled={!project || busy}><ClipboardList size={17} />{t("استخراج / استيراد", "Extract / import")}</button>}
       {record && <button type="button" onClick={() => setShowReview((current) => !current)} aria-expanded={showReview}>{t("مراجعة الحساب", "Calculation review")}</button>}
-      {showDocument && <button type="button" onClick={openDocument} disabled={busy || !project || !record && !canWrite}><Eye size={17} />{t("معاينة وتصدير", "Preview and export")}</button>}
       {record?.pdf_status === "failed" && can("issue") && <button type="button" onClick={() => run(async () => {
         await request(`/${record.id}/render`, { method: "POST", body: {} });
         setRecord(normalizeSaved(await request(`/${record.id}`)));
@@ -250,11 +255,6 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
         </fieldset>
       </div>
     </details>}
-    {availableActions.length > 0 && <div className="pc-toolbar">
-      {availableActions.filter((operation) => can(permissionFor(operation))).map((operation) => <button type="button" key={operation}
-        className={operation === "issue" || operation === "submit" ? "primary" : undefined} disabled={busy} onClick={() => showAction(operation)}>{t(...actionLabels[operation])}</button>)}
-      {!availableActions.some((operation) => can(permissionFor(operation))) && <span className="pc-caption">{t("يتطلب الانتقال التالي صلاحية سير عمل إضافية.", "The next action requires an additional workflow permission.")}</span>}
-    </div>}
     {record?.history?.length > 0 && <details><summary>{t("سجل التدقيق", "Audit history")}</summary><div className="pc-table-scroll"><table className="pc-table"><thead><tr><th>{t("التاريخ", "Date")}</th><th>{t("المستخدم", "Actor")}</th><th>{t("الإجراء", "Action")}</th><th>{t("السبب", "Reason")}</th></tr></thead><tbody>{record.history.map((event) => <tr key={event.id}><td><bdi>{event.created_at}</bdi></td><td>{event.actor || event.actor_id || "—"}</td><td>{actionLabels[event.action] ? t(...actionLabels[event.action]) : event.action}</td><td>{event.reason}</td></tr>)}</tbody></table></div></details>}
     {master && <MasterEditor key={master.type} master={master} project={project} customer={customer} locations={locations} t={t} request={request} onClose={() => setMaster(null)} onSaved={(saved, continueToProject) => {
       refreshContext();

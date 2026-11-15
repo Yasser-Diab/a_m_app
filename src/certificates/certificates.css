@@ -24,6 +24,7 @@
 .pc-spread { justify-content: space-between; }
 .pc-toolbar h2, .pc-toolbar h3 { margin-inline-end: auto; }
 .pc-toolbar > .pc-field { flex: 1 1 155px; }
+.pc-grid-toolbar > select { inline-size: min(100%, 210px); }
 .pc-form, .pc-choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 12px; align-items: start; }
 .pc-field, .pc-combo { display: grid; gap: 5px; min-inline-size: 0; }
 .pc-field > :is(label, span), .pc-combo > label { color: var(--text); font-size: .87rem; font-weight: 600; }
