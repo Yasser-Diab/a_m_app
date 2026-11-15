@@ -74,6 +74,11 @@
   border-color: color-mix(in srgb, var(--workspace-nav-accent) 33%, transparent);
 }
 
+.shell .main-nav [data-nav-id='progress-certificates'] > span {
+  min-inline-size: 0;
+  white-space: normal;
+}
+
 .shell .main-nav [data-nav-id='progress-certificates'] > svg,
 .shell .main-nav button.active > svg {
   color: var(--workspace-nav-accent);
