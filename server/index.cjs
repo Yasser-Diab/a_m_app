@@ -10,6 +10,7 @@ const electronRuntime = require("electron");
 const ExcelJS = require("exceljs");
 const QRCodeSvg = require("qrcode-svg");
 const { AppDatabase } = require("./db.cjs");
+const {rowBuildingName, rowUnitName} = require("./document-locations.cjs");
 const {
   initializeCertificates, registerCertificateRoutes, issueCertificateSession,
   revokeCertificateSession, canChangeUsers, resumeCertificateRenders,
@@ -6071,31 +6072,6 @@ function naturalLocationCompare(left, right) {
     numeric: true,
     sensitivity: "base",
   });
-}
-
-function splitLocationParts(value) {
-  return String(value || "")
-    .split("/")
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-function rowBuildingName(row = {}) {
-  return splitLocationParts(row.building_unit)[0] || "";
-}
-
-function rowUnitName(row = {}) {
-  const explicitParts = splitLocationParts(row.floor_apartment);
-  if (explicitParts.length > 1) return explicitParts[explicitParts.length - 1];
-  if (explicitParts.length === 1) {
-    const building = rowBuildingName(row);
-    return normalizeLowerText(explicitParts[0]) ===
-      normalizeLowerText(building)
-      ? ""
-      : explicitParts[0];
-  }
-  const combinedParts = splitLocationParts(row.building_unit);
-  return combinedParts.length > 1 ? combinedParts[combinedParts.length - 1] : "";
 }
 
 function distinctLocationValues(values = []) {

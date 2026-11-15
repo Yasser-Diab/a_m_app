@@ -129,7 +129,7 @@ function detailRows(model) {
 
 function buildCertificateHtml(model) {
   const { labels, locale, direction, columns, coverRows, moneyKeys, workTotals, receiptColumns, landscape, paper } = model;
-  const coverColumns = [{ key: 'name', label: labels.work_type, weight: 34, kind: 'text' },
+  const coverColumns = [{ key: 'name', label: model.groupLabel || labels.work_type, weight: 34, kind: 'text' },
     ...moneyKeys.map((key) => ({ key, label: labels[key], weight: 18, kind: 'money' }))];
   const size = paper === 'Letter' ? [215.9, 279.4] : [210, 297];
   const [width, height] = landscape ? size.toReversed() : size;

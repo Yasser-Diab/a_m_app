@@ -111,6 +111,29 @@ async function main() {
   const amountIndex = measurements.getRow(1).values.indexOf(arabicModel.labels.current);
   assert.equal(measurements.getRow(2).getCell(amountIndex).value, 100);
 
+  const buildingRows = [1,2,3].map((id) => ({...lump,id,building_unit:id === 2 ? 'Tower B' : 'Tower A',
+    floor_apartment:'Apartment 1',current:id*100}));
+  const byUnit = fixture('en',buildingRows,{});
+  byUnit.header.group_by = 'unit';
+  byUnit.header.show_group_subtotals = true;
+  const unitModel = buildCertificateDocument(byUnit);
+  assert.deepEqual(unitModel.detailGroups.map(({name,totals}) => [name,totals.current]),
+    [['Tower A / Apartment 1',400],['Tower B / Apartment 1',200]]);
+  assert.equal(unitModel.workTotals.current,600);
+  const unitWorkbook = new ExcelJS.Workbook();
+  await unitWorkbook.xlsx.load(await writeCertificateXlsx(unitModel));
+  const works = unitWorkbook.getWorksheet(unitModel.labels.detail);
+  const columnIndex = works.getRow(1).values.indexOf(unitModel.labels.current);
+  assert.equal(works.getRow(4).getCell(columnIndex).value,400);
+  byUnit.header.group_by = 'building';
+  assert.deepEqual(buildCertificateDocument(byUnit).coverRows.map(({name}) => name),['Tower A','Tower B']);
+  byUnit.header.group_by = 'work_type';
+  byUnit.header.show_group_subtotals = false;
+  const noGroupsSubtotal = buildCertificateDocument(byUnit);
+  assert.equal(noGroupsSubtotal.detailGroups[0].name,'Building works');
+  assert.equal(noGroupsSubtotal.showGroupSubtotals,false);
+  assert.equal(noGroupsSubtotal.coverRows.length,0);
+
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'certificate-document-test-'));
   const schema = path.join(directory, 'schema.sql');
   await fs.writeFile(schema, 'CREATE TABLE IF NOT EXISTS cert_revisions(id INTEGER PRIMARY KEY, pdf_status TEXT);');

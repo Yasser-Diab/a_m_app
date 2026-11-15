@@ -52,12 +52,14 @@ async function main() {
     assert.ok(token);
     const managerAccess = await api(cert + "/access",token);
     assert.equal(managerAccess.can_admin,true);
+    assert.equal(managerAccess.can_delete_documents,true);
     assert.equal(managerAccess.inherited_from_role,true);
     assert.equal(managerAccess.all_projects,true);
     assert.equal(managerAccess.allow_project_creation,true);
     assert.deepEqual(managerAccess.capabilities,CAPABILITIES);
     const settingsAccess = await api(cert + "/access",settingsAdmin.certificate_session);
     assert.equal(settingsAccess.can_admin,true);
+    assert.equal(settingsAccess.can_delete_documents,false);
     assert.deepEqual(settingsAccess.capabilities,[]);
     await api(cert + "?requester_user_id=" + manager.id,"","GET",undefined,401);
     await api(cert,viewToken,"GET",undefined,403);
@@ -253,6 +255,43 @@ async function main() {
     assert.equal(correction.totals.current,0);
     assert.equal(correction.totals.previous,120);
     assert.equal(correction.lines[0].description,"Edited legacy work");
+    const stillPosted = await api("/documents/statement?customer=Legacy+Test+Customer&report_language=en",token);
+    assert.equal(stillPosted.totals.debit,200);
+    await api(cert + "/admin/users/" + settingsAdmin.id,token,"PUT",{capabilities:CAPABILITIES,all_projects:true});
+    await api(legacyRoute,settingsAdmin.certificate_session,"DELETE",{version:approved.version},403);
+    const removed = await api(legacyRoute,token,"DELETE",{version:approved.version});
+    assert.equal(removed.revisions,2);
+    await api(legacyRoute,token,"GET",undefined,404);
+    await api(cert + "/" + correction.id,token,"GET",undefined,404);
+    assert.equal(db.get("SELECT COUNT(*) AS n FROM cert_legacy_records WHERE revision_id=?",[legacy.id]).n,0);
+    assert.equal((await api("/documents/statement?customer=Legacy+Test+Customer&report_language=en",token)).totals.credit,75);
+
+    const secondProject = cert + "/projects/" + other.id;
+    const rule = await api(secondProject + "/settings",token,"PUT",{expected_version:0,effective_at:"2026-01-01",
+      settings:{group_by:"unit",show_group_subtotals:true},rules:[{category:"advance_recovery",rate:25}]});
+    assert.equal(rule.settings.group_by,"unit");
+    const recoverable = await api(secondProject + "/collections",token,"POST",{kind:"advance",amount:100,received_at:date},201);
+    const multiPlace = await api(cert,token,"POST",{header,project_id:other.id,lines:[
+      {description:"Work A",mode:"direct",quantity:1,unit:"m",rate:120,building_unit:"Tower 1",floor_apartment:"Apartment 3"},
+      {description:"Work B",mode:"direct",quantity:1,unit:"m",rate:160,building_unit:"Tower 1",floor_apartment:"Apartment 4"},
+      {description:"Work C",mode:"direct",quantity:1,unit:"m",rate:120,building_unit:"Tower 2",floor_apartment:"Apartment 3"},
+    ]},201);
+    assert.equal(multiPlace.totals.advance_recovery,100);
+    assert.equal(multiPlace.totals.advance_remaining,0);
+    assert.equal(multiPlace.header.group_by,"unit");
+    assert.deepEqual(multiPlace.lines.map((line) => [line.building_unit,line.floor_apartment]),[
+      ["Tower 1","Apartment 3"],["Tower 1","Apartment 4"],["Tower 2","Apartment 3"],
+    ]);
+    const toApprove = cert + "/" + multiPlace.id + "/action";
+    const approvedMulti = await api(toApprove,token,"POST",{action:"approve",version:multiPlace.version});
+    assert.equal(db.get("SELECT amount_minor FROM cert_advance_recoveries WHERE advance_id=?",[recoverable.id]).amount_minor,10000);
+    const clearedDraft = await api(cert,token,"POST",{header,project_id:other.id,lines:[
+      {description:"Follow-up work",mode:"direct",quantity:10,unit:"m",rate:100},
+    ]},201);
+    assert.equal(clearedDraft.totals.advance_recovery,0);
+    await api(cert + "/" + multiPlace.id,token,"DELETE",{version:approvedMulti.version});
+    assert.equal(db.get("SELECT 1 FROM cert_receipts WHERE id=?",[recoverable.id]) != null,true);
+    assert.equal((await api(cert + "/" + clearedDraft.id,token)).totals.advance_recovery,100);
     await api("/auth/logout",viewToken,"POST",{user_id:viewer.id});
     await api(cert + "/access",viewToken,"GET",undefined,401);
     assert.equal(db.get("PRAGMA foreign_key_check"),null);
@@ -270,6 +309,10 @@ async function main() {
       assert.equal(archived.subarray(0,5).toString(),"%PDF-");
       db.run("UPDATE parties SET display_name=? WHERE id=?",["Renamed customer",customer.id]);
       assert.deepEqual(await bytes(),archived);
+      const version = (await api(record,token)).version;
+      await api(record + "/documents",settingsAdmin.certificate_session,"DELETE",{version},403);
+      assert.ok((await api(record + "/documents",token,"DELETE",{version})).files > 0);
+      assert.equal((await api(record,token)).pdf_status,null);
     }
     await api(cert + "/admin/feature",token,"PUT",{enabled:false});
     await api(cert,token,"GET",undefined,403);

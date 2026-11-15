@@ -65,6 +65,18 @@ export default function ProgressCertificates({ api, apiBase, session, access, ui
       {(!editor.id || certificate.data) && <CertificateEditor key={editor.generation} initial={certificate.data} request={request} apiBase={apiBase} session={session}
         access={access} t={t} locale={uiLanguage} defaultReportLanguage={defaultReportLanguage} dirtyRef={dirtyRef}
         onChange={() => setListVersion((version) => version + 1)} onAccessChanged={onAccessChanged} saveNativeReport={saveNativeReport} shareNativeReport={shareNativeReport}
+        onDeleted={() => {
+          dirtyRef.current = false;
+          setEditor((current) => ({id:null,generation:current.generation+1,mounted:false}));
+          setListVersion((version) => version+1);
+          setTab("open");
+          if (new URLSearchParams(location.search).has("id")) {
+            const url = new URL(location.href);
+            url.searchParams.delete("id");
+            history.replaceState(history.state,"",url);
+          }
+          searchRef.current?.focus();
+        }}
         onBackToSearch={editor.id ? () => searchRef.current?.focus() : undefined} />}
     </div>}
     {tab === "collections" && can("view_collections") && <Collections request={request} canEdit={can("manage_collections")} locale={uiLanguage} t={t} onAccessChanged={onAccessChanged} />}

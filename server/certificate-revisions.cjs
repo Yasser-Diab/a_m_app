@@ -1,9 +1,10 @@
 const crypto = require("node:crypto");
-const {audit, date, encode, fail, idOf, lookup, now, parse, setting, str, today} = require("./certificate-access.cjs");
+const {audit, date, encode, fail, idOf, lookup, nextCertificateId, now, parse, setting, str, today} = require("./certificate-access.cjs");
 const {getProject, getCustomer, getProfile, projectLocations, cleanRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, DATE_FLOOR} = require("./certificate-ledger.cjs");
 const {calculateValuation, MODES, decimal, money, toMinor} = require("./certificate-valuation.cjs");
 const {legacySnapshot, legacyLines, legacyCertificateInput} = require("./certificate-history.cjs");
+const {certificateLocationFields} = require("./document-locations.cjs");
 
 function normalizeHeader(input = {}, project, profile, originalType) {
   const type = originalType && !["progress", "final"].includes(originalType) ? originalType :
@@ -22,6 +23,8 @@ function normalizeHeader(input = {}, project, profile, originalType) {
     show_group_subtotals: input.show_group_subtotals ?? profile.settings.show_group_subtotals ?? false,
     optional_fields: {},
   };
+  if (["none","building","unit","work_type"].includes(input.group_by ?? profile.settings.group_by))
+    header.group_by = input.group_by ?? profile.settings.group_by;
   if (input.optional_fields && typeof input.optional_fields === "object") {
     for (const key of ["customer_code","customer_address","tax_no","customer_tax_no","customer_contact","project_code",
       "project_address","contract_ref","contract_date","location","currency","notes"]) {
@@ -50,10 +53,32 @@ function normalizeLines(database, project, header, candidates) {
     if (ids.has(lineId) || identities.has(identity)) fail(400, "Work row IDs and measurement identities must be unique");
     ids.add(lineId);
     identities.add(identity);
-    const locationId = idOf(row.location_id) || header.location_id;
-    if ((locationId && !locations.has(locationId)) || (header.location_id && locationId !== header.location_id))
+    const suppliedLocation = idOf(row.location_id);
+    if (suppliedLocation && !locations.has(suppliedLocation)) fail(400, "Work row location is outside the certificate scope");
+    const usesRowFields = Object.hasOwn(row,"building_unit") || Object.hasOwn(row,"floor_apartment");
+    const fields = usesRowFields ? certificateLocationFields({building_unit:str(row.building_unit),floor_apartment:str(row.floor_apartment)}) : {};
+    let locationId = suppliedLocation || header.location_id;
+    if (usesRowFields) {
+      const name = [fields.building_unit,fields.floor_apartment].filter(Boolean).join(" › ");
+      const direct = [...locations.values()].filter((location) => name && lookup(location.label) === lookup(name));
+      const buildings = [...locations.values()].filter((location) => fields.building_unit &&
+        location.kind === "building" && lookup(location.name) === lookup(fields.building_unit));
+      if (direct.length === 1) locationId = direct[0].id;
+      else if (buildings.length === 1) locationId = buildings[0].id;
+      else locationId = header.location_id;
+      if (header.location_id && name && locationId === header.location_id && direct.length !== 1 && buildings.length !== 1) {
+        const expected = certificateLocationFields({location:locations.get(header.location_id)?.label});
+        if (lookup(fields.building_unit) !== lookup(expected.building_unit) ||
+            (expected.floor_apartment && lookup(fields.floor_apartment) !== lookup(expected.floor_apartment)))
+          fail(400,"Work row building or unit is outside the certificate scope");
+      }
+    }
+    let ancestor = locationId;
+    while (ancestor && ancestor !== header.location_id) ancestor = locations.get(ancestor)?.parent_id;
+    if ((locationId && !locations.has(locationId)) || (header.location_id && ancestor !== header.location_id))
       fail(400, "Work row location is outside the certificate scope");
-    const line = {id: lineId, identity, location_id: locationId, location: locations.get(locationId)?.label || "",
+    const line = {id: lineId, identity, location_id: locationId,
+      location: (usesRowFields && [fields.building_unit,fields.floor_apartment].filter(Boolean).join(" › ")) || locations.get(locationId)?.label || "", ...fields,
       work_type: str(row.work_type), work_item: str(row.work_item), description: str(row.description, 3000),
       mode: MODES.has(row.mode) ? row.mode : "direct", dimension_unit: str(row.dimension_unit, 20),
       unit: str(row.unit, 60), recognition: row.recognition === "cumulative" ? "cumulative" : "incremental",
@@ -172,13 +197,13 @@ function createDraft(database, project, body, user, revision = {}) {
   if (series?.final_revision_id && !revision.revisesId) fail(409, "The series was finalized. Issue an authorized reopening before starting new work");
   checkedLocation(database, project.id, header.location_id);
   const rows = normalizeLines(database, project, header, body.lines || []);
-  const result = database.run(`
+  const id = nextCertificateId(database);
+  database.run(`
     INSERT INTO cert_revisions
-      (project_id,series_key,root_id,revises_id,revision,type,locale,location_id,work_to,collection_cutoff,header_json,rules_version,created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-  [project.id, seriesKey, revision.rootId || null, revision.revisesId || null, revision.number || 1,
+      (id,project_id,series_key,root_id,revises_id,revision,type,locale,location_id,work_to,collection_cutoff,header_json,rules_version,created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  [id, project.id, seriesKey, revision.rootId || null, revision.revisesId || null, revision.number || 1,
     header.type, header.locale, header.location_id, header.work_to, header.collection_cutoff, encode(header), profile.version, user.id]);
-  const id = result.lastInsertRowid;
   if (!revision.rootId) database.run("UPDATE cert_revisions SET root_id=id WHERE id=?", [id]);
   replaceLines(database, id, rows);
   audit(database, user, "draft_created", {projectId: project.id, revisionId: id, reason: revision.reason});
@@ -256,7 +281,8 @@ function saveLegacyDraft(database,row,body,user) {
 
 function approvalKey(input) {
   const {status, version, issued_at, official_number, pdf_status, updated_at, ...content} = input;
-  return crypto.createHash("sha256").update(encode(content)).digest("hex");
+  const {advance_remaining,...totals} = content.totals;
+  return crypto.createHash("sha256").update(encode({...content,totals})).digest("hex");
 }
 
 function validateReview(input) {

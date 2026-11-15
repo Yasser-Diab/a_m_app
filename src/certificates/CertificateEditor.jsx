@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ClipboardList, Eye, Plus, RefreshCw, Save, Settings2 } from "lucide-react";
-import CertificateGrid, { emptyLine, hydrateLines, stripGridFields } from "./CertificateGrid.jsx";
+import { ClipboardList, Eye, Plus, RefreshCw, Save, Settings2, Trash2 } from "lucide-react";
+import CertificateGrid, { hydrateLines, stripGridFields } from "./CertificateGrid.jsx";
 import CertificateImport from "./CertificateImport.jsx";
 import { ProjectSettings } from "./CertificateOperations.jsx";
 import CertificatePreview from "./CertificatePreview.jsx";
@@ -20,13 +20,13 @@ const approvalRequired = new Set(["approve", "issue", "return", "revise", "void"
 const needsReason = new Set(["return", "revise", "void", "reopen"]);
 const normalizeSaved = (item) => item?.certificate || item;
 
-export default function CertificateEditor({ initial, request, apiBase, session, access, t, locale, defaultReportLanguage, onChange, onAccessChanged, saveNativeReport, shareNativeReport, dirtyRef, onBackToSearch }) {
+export default function CertificateEditor({ initial, request, apiBase, session, access, t, locale, defaultReportLanguage, onChange, onAccessChanged, saveNativeReport, shareNativeReport, dirtyRef, onBackToSearch, onDeleted }) {
   const [record, setRecord] = useState(initial || null);
   const [editing, setEditing] = useState(!initial || initial.status === "draft");
   const [customer, setCustomer] = useState(initial?.customer || (initial?.project?.customer_id ? { id: initial.project.customer_id, display_name: initial.project.customer_name } : null));
   const [project, setProject] = useState(initial?.project || null);
   const [header, setHeader] = useState(initial?.header || { type: "progress", work_to: localDate(), collection_cutoff: localDate(), locale: defaultReportLanguage === "en" ? "en" : "ar", output_mode: "" });
-  const [rows, setRows] = useState(() => initial ? hydrateLines(initial.lines) : [emptyLine()]);
+  const [rows, setRows] = useState(() => initial ? hydrateLines(initial.lines) : []);
   const [gridGeneration, setGridGeneration] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState(null);
@@ -39,8 +39,10 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const [preview, setPreview] = useState(null);
   const [importDraft, setImportDraft] = useState(null);
   const [action, setAction] = useState(null);
+  const [deleteDialog, setDeleteDialog] = useState(false);
   const [actionReason, setActionReason] = useState("");
   const commands = useRef(new Map());
+  const refreshRules = useRef(false);
   const [projectRevision, setProjectRevision] = useState(0);
   const [customerSearch, setCustomerSearch] = useState("");
   const [projectSearch, setProjectSearch] = useState("");
@@ -55,6 +57,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const customers = useResource(request, canWrite && !record ? `/customers${queryString({ q: customerQuery })}` : null, projectRevision);
   const projects = useResource(request, canWrite && !record && customer?.id ? `/projects${queryString({ customer_id: customer.id, q: projectQuery })}` : null, projectRevision);
   const context = useResource(request, project?.id ? `/projects/${project.id}${queryString({ work_to: header.work_to })}` : null, projectRevision);
+  const suggested = useResource(request, canWrite && project?.id ? `/projects/${project.id}/entry-suggestions` : null, projectRevision);
   const locations = useMemo(() => locationOptions(context.data?.locations), [context.data?.locations]);
   const validation = error?.payload?.validation || record?.validation || [];
   const activeLocation = locations.find((entry) => String(entry.id) === String(header.location_id));
@@ -113,11 +116,12 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
     setCustomer(result.customer || customer); setProject(result.project || project);
     setDirty(false); setError(null); onChange?.(result);
     if (!keepGrid) setGridGeneration((current) => current + 1);
+    refreshRules.current = false;
     return result;
   }
 
   function payloadLines() {
-    return stripGridFields(rows.filter((line) => !line.carried_forward && [line.location_id, line.location_name, line.work_type, line.work_item, line.description, line.note, ...numericLineFields.map((field) => line[field])].some((value) => value !== "" && value !== null && value !== undefined))).map((line) => ({
+    return stripGridFields(rows.filter((line) => !line.carried_forward && [line.location_id,line.building_unit,line.floor_apartment,line.work_type,line.work_item,line.description,line.note,...numericLineFields.map((field) => line[field])].some((value) => value !== "" && value !== null && value !== undefined))).map((line) => ({
       ...line, height: line.mode === "linear" ? null : line.height,
       ...Object.fromEntries(numericLineFields.filter((key) => !(key === "height" && line.mode === "linear")).map((field) => [field, numberText(line[field])])),
     }));
@@ -126,12 +130,10 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   async function save({ announce = true } = {}) {
     if (record && !dirty) return record;
     if (!project?.id) throw new Error(t("اختر العميل والمشروع أولًا.", "Select a customer and project first."));
-    const unresolved = rows.filter((row) => row.location_name && !row.location_id);
-    if (unresolved.length) throw new Error(t("اربط المواقع الملصقة بمواقع المشروع أو حددها على مستوى المشروع.", "Resolve pasted location names or mark their rows project-wide."));
     setError(null);
     const body = { header, lines: can("edit_draft") ? payloadLines() : [] };
     const result = await request(record ? `/${record.id}` : "/", record
-      ? { method: "PUT", body: { ...body, version: record.version } }
+      ? { method: "PUT", body: { ...body, version:record.version, ...(refreshRules.current ? {refresh_rules:true} : {}) } }
       : { method: "POST", body: { ...body, project_id: project.id } });
     const saved = applySaved(result);
     if (announce) setStatusText(t("تم حفظ المسودة وحساب القيم.", "Draft saved and amounts calculated."));
@@ -160,6 +162,17 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
     else workflow(nextAction);
   }
 
+  async function remove(filesOnly) {
+    await run(async () => {
+      await request(`/${record.id}${filesOnly ? "/documents" : ""}`,{method:"DELETE",body:{version:record.version}});
+      setDeleteDialog(false);
+      if (filesOnly) {
+        applySaved(await request(`/${record.id}`),false);
+        setStatusText(t("تم حذف ملفات PDF المؤرشفة.", "Archived PDF files deleted."));
+      } else onDeleted?.();
+    });
+  }
+
   const availableActions = record?.status === "draft" ? ["approve", "submit"]
     : record?.status === "unapproved" ? ["approve"]
     : ["in_review", "submitted", "review"].includes(record?.status) ? ["approve", "return"]
@@ -186,6 +199,8 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       {record?.pdf_status && <Status value={record.pdf_status} t={t} />}
       {onBackToSearch && <button type="button" onClick={onBackToSearch}>{t("العودة إلى البحث", "Back to search")}</button>}
       {record && canEdit && !editing && <button type="button" onClick={() => setEditing(true)}>{t("تعديل المستخلص", "Edit certificate")}</button>}
+      {record && access?.can_delete_documents && <button type="button" className="danger" disabled={busy}
+        onClick={() => { setError(null); setDeleteDialog(true); }}><Trash2 size={16}/>{t("حذف", "Delete")}</button>}
       {showDocument && <button type="button" onClick={openDocument} disabled={busy || !project || !record && !canWrite}><Eye size={17} />{t("معاينة وتصدير", "Preview and export")}</button>}
       {dirty && <span className="pc-caption" role="status">{t("تعديلات غير محفوظة", "Unsaved changes")}</span>}
     </div>
@@ -216,9 +231,10 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       <Field label={t("بداية فترة الأعمال", "Work period start")}><input type="date" dir="ltr" readOnly={!canWrite} value={header.work_from || ""} onChange={(event) => changeHeader("work_from", event.target.value)} /></Field>
       <Field label={t("تاريخ قطع الأعمال", "Work cutoff")}><input type="date" dir="ltr" readOnly={!canWrite} value={header.work_to || ""} onChange={(event) => changeHeader("work_to", event.target.value)} /></Field>
       <Field label={t("تاريخ قطع التحصيلات", "Collections cutoff")}><input type="date" dir="ltr" readOnly={!canWrite} value={header.collection_cutoff || ""} onChange={(event) => changeHeader("collection_cutoff", event.target.value)} /></Field>
-      {canWrite ? <Combobox label={t("نطاق الموقع", "Location scope")} options={locations} selected={activeLocation} disabled={!project}
-        onSelect={updateScopeLocations} onClear={() => updateScopeLocations(null)} onAdd={canMaster && project ? (name) => setMaster({ type: "location", name, after: updateScopeLocations }) : undefined} t={t} />
-        : <Field label={t("نطاق الموقع", "Location scope")}><input readOnly dir="auto" value={header.location || optionLabel(activeLocation) || t("المشروع بالكامل", "Project-wide")} /></Field>}
+      {header.location_id && (canWrite ?
+        <Combobox label={t("نطاق الموقع", "Location scope")} options={locations} selected={activeLocation} disabled={!project || Boolean(record?.revises_id)}
+          onSelect={updateScopeLocations} onClear={() => updateScopeLocations(null)} t={t} />
+        : <Field label={t("نطاق الموقع", "Location scope")}><input readOnly dir="auto" value={header.location || optionLabel(activeLocation)} /></Field>)}
       <Field label={t("عنوان مختصر", "Short description")}><input dir="auto" readOnly={!canWrite} value={header.title || ""} onChange={(event) => changeHeader("title", event.target.value)} /></Field>
       <Field label={t("ملاحظات المستخلص", "Certificate notes")}><input dir="auto" readOnly={!canWrite} value={header.notes || ""} onChange={(event) => changeHeader("notes", event.target.value)} /></Field>
     </div>
@@ -228,9 +244,8 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       {project && <span className="pc-caption">{t("إصدار القواعد", "Rules version")} <bdi>{record?.rule_version ?? context.data?.settings?.version ?? "—"}</bdi></span>}
     </div>
     <CertificateGrid key={`${record?.id || "new"}-${gridGeneration}`} rows={rows} onChange={changeRows} readOnly={!canWrite || !can("edit_draft") || busy} t={t} locale={locale}
-      locations={header.location_id ? locations.filter((location) => String(location.id) === String(header.location_id)) : locations}
-      workItems={context.data?.work_items || []} workTypes={context.data?.work_types || []} canAddLocation={Boolean(project && canMaster && !header.location_id)}
-      onAddLocation={(name, after) => setMaster({ type: "location", name, after })}
+      locations={locations} suggestions={suggested.data || []}
+      workItems={context.data?.work_items || []} workTypes={context.data?.work_types || []}
       validation={validation} totals={record?.totals} currency={currency} settled={Boolean(record) && !dirty} />
     <div className="pc-toolbar">
       {canWrite && <button type="button" className="primary" onClick={() => run(() => save())} disabled={busy || !project || record && !dirty}><Save size={17} />{t("حفظ المسودة", "Save draft")}</button>}
@@ -274,7 +289,19 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
         <button type="button" className="primary" onClick={() => applyScope(pendingScope.customer, pendingScope.project)}>{t("تأكيد تغيير النطاق", "Confirm scope change")}</button></div>
     </Dialog>}
     {settingsOpen && <Dialog title={t("إعدادات المستخلص للمشروع", "Project certificate settings")} onClose={() => setSettingsOpen(false)} t={t} wide>
-      <ProjectSettings request={request} project={project} canManage={can("manage_settings")} t={t} onSaved={() => { refreshContext(); if (canWrite) setDirty(true); }} />
+      <ProjectSettings request={request} project={project} canManage={can("manage_settings")} t={t} onSaved={() => {
+        refreshContext();
+        if (canWrite && !historical) { refreshRules.current = true; setDirty(true); }
+      }} />
+    </Dialog>}
+    {deleteDialog && <Dialog title={t("حذف المستخلص أو ملفاته", "Delete certificate or its files")} onClose={() => { if (!busy) setDeleteDialog(false); }} t={t}>
+      <p>{t("حذف المستخلص نهائيًا يحذف كل مراجعاته وملفات PDF المؤرشفة. تبقى الدفعات المسجلة في حساب العميل.",
+        "Permanently deleting this certificate removes its revisions and archived PDFs. Recorded payments stay in the customer account.")}</p>
+      <Problem error={error} t={t} />
+      <div className="pc-toolbar">
+        {record.pdf_status && <button type="button" className="danger" disabled={busy} onClick={() => remove(true)}>{t("حذف ملفات PDF فقط", "Delete archived PDFs only")}</button>}
+        <button type="button" className="danger" disabled={busy} onClick={() => remove(false)}>{t("حذف المستخلص نهائيًا", "Permanently delete certificate")}</button>
+      </div>
     </Dialog>}
     {action && <Dialog title={t(...actionLabels[action])} onClose={() => { if (!busy) setAction(null); }} t={t}>
       <form className="pc-stack" onSubmit={(event) => { event.preventDefault(); workflow(action, actionReason); }}>

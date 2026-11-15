@@ -7,13 +7,15 @@ const {
   certificateSessionUser, revokeCertificateSession, lookup, parse, scopeSql, setGrant, setting, setSetting, str, today,
 } = require("./certificate-access.cjs");
 const {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, createLocation,
-  projectLocations, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
+  projectLocations, projectEntrySuggestions, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, addReceipt, updateReceipt, collectionResponse} = require("./certificate-ledger.cjs");
 const {getRevision, certificateDocumentInput, createDraft, saveDraft, runAction, forAccess, recognizedReceipts} = require("./certificate-revisions.cjs");
 const {importLegacyCertificates} = require("./certificate-legacy.cjs");
 const {stageImport, commitImport} = require("./certificate-imports.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
 const {legacySnapshot} = require("./certificate-history.cjs");
+const {deleteArchivedFiles,deleteCertificate} = require("./certificate-deletion.cjs");
+const {certificateLocationFields} = require("./document-locations.cjs");
 const {
   initializeCertificateArtifacts, enqueueCertificateRender, processCertificateRender,
   resumeCertificateRenders, registerCertificateDocumentRoutes,
@@ -118,8 +120,8 @@ function sourceList(database, project) {
   `, [project.id]).map(({snapshot_json,...row}) => ({
     ...row,label:`#${row.official_number || row.legacy_number || row.id}${row.revision > 1 ? ` · R${row.revision}` : ""}`,
     lines:parse(snapshot_json).lines.map(({identity,location_id,location,work_type,work_item,description,mode,
-      width,height,dimension_unit,count,quantity,unit,rate,agreed_amount}) =>
-      ({identity,location_id,location,work_type,work_item,description,mode,width,height,dimension_unit,count,quantity,
+      width,height,dimension_unit,count,quantity,unit,rate,agreed_amount,...fields}) =>
+      ({identity,location_id,...certificateLocationFields({...fields,location}),work_type,work_item,description,mode,width,height,dimension_unit,count,quantity,
         unit,rate,agreed_amount,prior_certified:true})),
   }));
   const projectKeys = new Set([project.name, project.alternate_name, project.code].map(lookup).filter(Boolean));
@@ -128,10 +130,10 @@ function sourceList(database, project) {
   [project.customer_id]).filter((document) => projectKeys.has(lookup(document.project)));
   const sourceDocuments = (type) => documents.filter((record) => record.document_type === type).slice(0,25).map((quote) => ({
     id:quote.id, label:quote.title || quote.operation_no, reference:quote.operation_no, date:quote.entry_date,
-    lines:database.all(`SELECT id,work_type,description,statement_text,unit,unit_code,rate
+    lines:database.all(`SELECT id,work_type,description,statement_text,unit,unit_code,rate,building_unit,floor_apartment
       FROM work_items WHERE document_id=? AND deleted_at IS NULL AND COALESCE(collection_amount,0)=0 ORDER BY id LIMIT 2500`,
     [quote.id]).map((row) => ({
-      identity:"quotation:" + quote.id + ":" + row.id,work_type:row.work_type, description:row.description || row.statement_text,
+      identity:"quotation:" + quote.id + ":" + row.id,...certificateLocationFields(row),work_type:row.work_type, description:row.description || row.statement_text,
       unit:row.unit,rate:row.rate,mode:row.unit_code === "count" ? "count" : "direct",source:quote.operation_no,
     })),
   }));
@@ -246,6 +248,9 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     if (["auto", "cover", "detail"].includes(options.layout)) header.output_mode = options.layout;
     if (["A4", "Letter"].includes(options.paper)) header.paper_size = options.paper;
     header.group_work_types = options.group == null ? (header.group_work_types ?? settings.group_work_types) : options.group === "1";
+    if (["none","building","unit","work_type"].includes(options.group_by)) header.group_by = options.group_by;
+    else if (options.group != null) header.group_by = options.group === "1" ? "work_type" : "none";
+    else header.group_by = header.group_by ?? settings.group_by;
     header.show_group_subtotals = options.subtotals == null ? (header.show_group_subtotals ?? settings.show_group_subtotals) : options.subtotals === "1";
     const cutoff = options.receipts !== "0" && options.collections_through ? date(options.collections_through) : null;
     const paymentDetails = cutoff ? allocationLedger(database, model.project_id, getProfile(database, model.project_id, cutoff), cutoff, {
@@ -393,6 +398,10 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
       work_types:profile.settings.work_types,work_items:profile.settings.work_items,
       settings:{...profile, latest_version:latestVersion(database,row.id)},baseline});
   });
+  router.get("/projects/:projectId/entry-suggestions",(req,res) => {
+    const {project:row} = project(req,"view");
+    res.json(projectEntrySuggestions(database,row));
+  });
   router.post("/projects/:projectId/locations",(req,res) => {
     const {project:row,access} = project(req,"create_master");
     const location = database.transaction(() => {
@@ -450,6 +459,13 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     const {row,access} = revision(req,"view");
     res.json(detail(row,access));
   });
+  for (const [path,remove] of [[ "/:id",deleteCertificate ],[ "/:id/documents",deleteArchivedFiles ]]) {
+    router.delete(path,(req,res) => {
+      const {row,access} = revision(req,"view");
+      if (!access.can_delete_documents) fail(403,"Only managers may permanently delete certificates or their archived documents");
+      res.json(database.transaction(() => remove(database,row,access.user,req.body?.version)));
+    });
+  }
   router.put("/:id",(req,res) => {
     const {row,access} = revision(req,"edit_draft");
     res.json(detail(database.transaction(() => saveDraft(database,row,req.body,access.user,access)),access));

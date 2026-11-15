@@ -52,6 +52,20 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
 
   const update = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
   const updateRule = (key, field, value) => setRuleDraft((rules) => rules.map((rule) => rule.key === key ? { ...rule, [field]: value } : rule));
+  const advanceRule = ruleDraft.find((rule) => rule.category === "advance_recovery");
+  const taxRules = ruleDraft.filter((rule) => rule.category !== "advance_recovery" ||
+    rule.basis === "running" || rule.amount != null || rule.cap != null);
+  const grouping = draft.group_by ?? (draft.group_work_types ? "work_type" : "none");
+
+  function updateAdvanceRate(rate) {
+    setRuleDraft((rules) => {
+      const index = rules.findIndex((rule) => rule.category === "advance_recovery");
+      const replacement = {category:"advance_recovery",basis:"work",sign:"deduction",rate,enabled:rate !== "",
+        key:rules[index]?.key || newKey()};
+      if (index < 0) return [...rules,replacement];
+      return rules.map((rule,position) => position === index ? replacement : rule);
+    });
+  }
   async function save(event) {
     event.preventDefault();
     setBusy(true); setError(null);
@@ -83,8 +97,11 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
         <Field label={t("الإخراج الافتراضي", "Default output")}><select value={draft.output_mode ?? ""} onChange={(event) => update("output_mode", event.target.value)}><option value="">{t("موروث", "Inherit")}</option><option value="auto">{t("تلقائي", "Automatic")}</option><option value="cover">{t("ملخص وتفاصيل", "Summary and details")}</option><option value="detail">{t("التفاصيل فقط", "Details only")}</option></select></Field>
         <Field label={t("أنواع الأعمال بالترتيب، نوع في كل سطر", "Work types in order, one per line")} className="pc-span"><textarea rows={3} value={types} onChange={(event) => setTypes(event.target.value)} /></Field>
         <div className="pc-choice-grid pc-span">
-          <label className="pc-check"><input type="checkbox" checked={Boolean(draft.group_work_types)} onChange={(event) => update("group_work_types", event.target.checked)} />{t("تجميع الأعمال حسب النوع", "Group works by type")}</label>
-          <label className="pc-check"><input type="checkbox" disabled={!draft.group_work_types} checked={Boolean(draft.show_group_subtotals)} onChange={(event) => update("show_group_subtotals", event.target.checked)} />{t("عرض إجمالي كل نوع", "Show subtotals by type")}</label>
+          <Field label={t("تجميع التقرير", "Report grouping")}><select value={grouping} onChange={(event) => update("group_by",event.target.value)}>
+            <option value="none">{t("دون تجميع","No grouping")}</option><option value="unit">{t("حسب الوحدة","By unit")}</option>
+            <option value="building">{t("حسب المبنى","By building")}</option><option value="work_type">{t("حسب نوع الأعمال","By work type")}</option>
+          </select></Field>
+          <label className="pc-check"><input type="checkbox" disabled={grouping === "none"} checked={Boolean(draft.show_group_subtotals)} onChange={(event) => update("show_group_subtotals", event.target.checked)} />{t("عرض الإجماليات الفرعية", "Show group subtotals")}</label>
         </div>
       </div>
     </fieldset>
@@ -99,14 +116,23 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
     </fieldset>
     <fieldset disabled={!canManage || busy}>
       <legend>{t("الضرائب والاستقطاعات", "Taxes and deductions")}</legend>
-      {ruleDraft.map((rule, index) => <div className="pc-rule pc-stack" key={rule.key}>
+      <div className="pc-advance-settings">
+        <Field label={t("نسبة استرداد الدفعة المقدمة تلقائيًا (%)","Automatic advance recovery (%)")}>
+          <input dir="ltr" inputMode="decimal" placeholder="0" value={advanceRule?.enabled === false ? "" : advanceRule?.rate ?? ""}
+            onChange={(event) => updateAdvanceRate(event.target.value)} />
+        </Field>
+        <p className="pc-caption">{t("تُخصم النسبة من قيمة أعمال كل مستخلص حتى استرداد رصيد الدفعة بالكامل.",
+          "Deduct this percentage of each certificate’s current work value until the advance is recovered.")}</p>
+      </div>
+      {taxRules.map((rule, index) => <div className="pc-rule pc-stack" key={rule.key}>
         <div className="pc-toolbar"><strong>{t("قاعدة", "Rule")} <bdi>{index + 1}</bdi></strong>
           <label className="pc-check"><input type="checkbox" checked={rule.enabled !== false && rule.enabled !== 0} onChange={(event) => updateRule(rule.key, "enabled", event.target.checked)} />{t("مفعّلة", "Enabled")}</label>
           {canManage && <button type="button" aria-label={t("حذف قاعدة", "Delete rule")} onClick={() => setRuleDraft((rows) => rows.filter((item) => item.key !== rule.key))}><Trash2 size={16} /></button>}
         </div>
         <div className="pc-form">
           <Field label={t("الفئة", "Category")}><select value={rule.category} onChange={(event) => updateRule(rule.key, "category", event.target.value)}>
-            {Object.entries(categoryLabels).map(([value, labels]) => <option key={value} value={value}>{t(...labels)}</option>)}
+            {Object.entries(categoryLabels).filter(([value]) => value !== "advance_recovery" || rule.category === value || !advanceRule)
+              .map(([value, labels]) => <option key={value} value={value}>{t(...labels)}</option>)}
           </select></Field>
           <Field label={t("اسم القاعدة", "Rule label")}><input dir="auto" value={rule.label || ""} onChange={(event) => updateRule(rule.key, "label", event.target.value)} /></Field>
           <Field label={t("النسبة %", "Rate %")}><input dir="ltr" inputMode="decimal" value={rule.rate ?? ""} onChange={(event) => updateRule(rule.key, "rate", event.target.value)} /></Field>
@@ -116,7 +142,7 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
           <Field label={t("الأثر", "Effect")}><select value={rule.sign || "deduction"} onChange={(event) => updateRule(rule.key, "sign", event.target.value)}><option value="addition">{t("إضافة", "Addition")}</option><option value="deduction">{t("خصم", "Deduction")}</option></select></Field>
         </div>
       </div>)}
-      {!ruleDraft.length && <p className="pc-caption">{t("لم تضاف قواعد مالية لهذا الملف.", "No financial rules are listed in this profile.")}</p>}
+      {!taxRules.length && <p className="pc-caption">{t("لم تضاف ضرائب أو استقطاعات إضافية.", "No additional taxes or deductions are listed.")}</p>}
       {canManage && <div><button type="button" onClick={() => setRuleDraft((rows) => [...rows, { key: newKey(), category: "vat", enabled: true, basis: "work", sign: "addition" }])}><Plus size={17} />{t("إضافة قاعدة", "Add rule")}</button></div>}
     </fieldset>
     {canManage && <div><button className="primary" type="button" onClick={() => { setError(null); setConfirm(true); }}><Save size={16} />{t("مراجعة إصدار الإعدادات", "Review settings version")}</button></div>}

@@ -64,6 +64,35 @@
 .pc-grid thead th { position: sticky; inset-block-start: 0; z-index: 3; padding: 8px 6px; background: var(--surface-2); }
 .pc-grid .pc-grid-index { position: sticky; inset-inline-start: 0; z-index: 2; min-inline-size: 47px; text-align: center; }
 .pc-grid thead .pc-grid-index { z-index: 4; }
+.pc-grid-row-buttons { display:flex; align-items:center; justify-content:center; gap:2px; }
+.pc-grid-row-buttons button { min-inline-size:23px; min-block-size:28px; padding:2px 4px; }
+.pc-grid thead th:not(.pc-grid-index) { padding-inline-end:13px; }
+.pc-grid th .pc-grid-resizer {
+  position:absolute; inset-block:0; inset-inline-end:0; inline-size:9px; min-inline-size:0;
+  min-block-size:0; padding:0; border:0; border-radius:0; background:transparent;
+  cursor:col-resize; touch-action:none;
+}
+.pc-grid th .pc-grid-resizer:hover, .pc-grid th .pc-grid-resizer:focus-visible { background:var(--accent); }
+.pc-grid tbody tr.pc-grid-addition > :is(td,th) { background:color-mix(in srgb,var(--accent) 13%,var(--surface-2)); }
+.pc-grid tbody tr.pc-grid-addition > .pc-grid-selected { background:color-mix(in srgb,var(--accent) 23%,var(--surface-2)); }
+.pc-grid-fullscreen {
+  position:fixed; inset:0; z-index:1200; display:flex; flex-direction:column;
+  gap:8px; padding:clamp(8px,2vw,18px); background:var(--surface);
+}
+body:has(.pc-grid-fullscreen) .chat-widget { display:none; }
+.pc-grid-fullscreen .pc-grid-scroll { flex:1; min-block-size:0; max-block-size:none; overscroll-behavior:contain; }
+.pc-grid-fullscreen .pc-grid tbody tr:not(.pc-grid-spacer) { height:52px; }
+.pc-grid-fullscreen .pc-grid tbody td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-grid .pc-grid-spacer td { padding:0; border:0; }
+.pc-grid-suggestions {
+  position:fixed; z-index:1210; max-block-size:205px; overflow:auto;
+  background:var(--surface); border:1px solid var(--line-strong); border-radius:8px; box-shadow:var(--shadow);
+}
+.pc-grid-suggestions [role="option"] { padding:7px 10px; cursor:pointer; overflow-wrap:anywhere; }
+.pc-grid-suggestions [role="option"]:hover, .pc-grid-suggestions [aria-selected="true"] { background:var(--pc-tint); }
+.pc-advance-settings { display:flex; flex-wrap:wrap; align-items:end; gap:10px; }
+.pc-advance-settings .pc-field { flex:0 1 330px; }
+.pc-advance-settings p { padding-block-end:7px; }
 .pc-grid-index button { display: inline-grid; place-content: center; min-inline-size: 33px; padding: 2px; }
 .pc-grid input, .pc-grid select, .pc-grid .pc-grid-location { min-block-size: 32px; min-inline-size: 0; inline-size: 100%; padding: 4px 5px; border: 1px solid transparent; border-radius: 5px; background: transparent; text-align: start; }
 .pc-grid-location { justify-content: flex-start; white-space: normal; }

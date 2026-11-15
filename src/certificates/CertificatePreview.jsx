@@ -123,11 +123,15 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
         setError(null);
         setOptions({ ...options, watermark: event.target.value });
       }}><option value="1">{t("إظهار", "Show")}</option><option value="0">{t("إخفاء", "Hide")}</option></select></Field>
-      <Field label={t("تجميع الأعمال", "Work grouping")}><select value={options.group == null ? "" : options.group === "0" ? "none" : options.subtotals === "1" ? "subtotals" : "groups"} onChange={(event) => {
-        const value = event.target.value;
-        setError(null); setOptions({ ...options, group: value ? (value === "none" ? "0" : "1") : null, subtotals: value ? (value === "subtotals" ? "1" : "0") : null });
+      <Field label={t("تجميع الأعمال", "Work grouping")}><select value={options.group_by ?? ""} onChange={(event) => {
+        setError(null); setOptions({ ...options, group_by:event.target.value });
       }}><option value="">{t("الافتراضي", "Default")}</option><option value="none">{t("دون تجميع", "No grouping")}</option>
-        <option value="groups">{t("حسب النوع", "By work type")}</option><option value="subtotals">{t("حسب النوع مع الإجماليات", "By type with subtotals")}</option>
+        <option value="unit">{t("حسب الوحدة", "By unit")}</option><option value="building">{t("حسب المبنى", "By building")}</option>
+        <option value="work_type">{t("حسب نوع الأعمال", "By work type")}</option>
+      </select></Field>
+      <Field label={t("الإجماليات الفرعية", "Group subtotals")}><select disabled={options.group_by === "none"} value={options.subtotals ?? ""}
+        onChange={(event) => { setError(null); setOptions({ ...options, subtotals:event.target.value }); }}>
+        <option value="">{t("الافتراضي", "Default")}</option><option value="1">{t("إظهار", "Show")}</option><option value="0">{t("إخفاء", "Hide")}</option>
       </select></Field>
       {canInternal && <Field label={t("تفاصيل الدفعات", "Payment details")}><select value={options.receipts ?? ""} onChange={(event) => {
         setError(null);

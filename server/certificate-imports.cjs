@@ -4,7 +4,7 @@ const {projectLocations} = require("./certificate-projects.cjs");
 const {getLines, saveDraft} = require("./certificate-revisions.cjs");
 const {MODES, decimal} = require("./certificate-valuation.cjs");
 
-const IMPORT_FIELDS = ["location", "work_type", "work_item", "description", "mode", "width", "height",
+const IMPORT_FIELDS = ["location", "building_unit", "floor_apartment", "work_type", "work_item", "description", "mode", "width", "height",
   "dimension_unit", "count", "quantity", "unit", "rate", "agreed_amount", "progress", "amount", "note", "identity"];
 const NUMERIC_FIELDS = new Set(["width","height","count","quantity","rate","agreed_amount","progress","amount"]);
 const hash = (input) => crypto.createHash("sha256").update(encode(input)).digest("hex");

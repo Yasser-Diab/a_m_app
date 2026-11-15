@@ -3,6 +3,7 @@ const {allocationLedger} = require("./certificate-ledger.cjs");
 const {customerReceipts} = require("./commercial-ledger.cjs");
 const {getProfile, getProject, projectLocations} = require("./certificate-projects.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
+const {certificateLocationFields} = require("./document-locations.cjs");
 
 function legacySnapshot(database, row, useEdits = false) {
   const source = parse(row.snapshot_json);
@@ -26,7 +27,7 @@ function legacyLines(snapshot, locations) {
 }
 
 const workKey = (line) => JSON.stringify([
-  line.location_id ?? lookup(line.location), lookup(line.work_type), lookup(line.work_item), lookup(line.description),
+  ...Object.values(certificateLocationFields(line)).map(lookup), lookup(line.work_type), lookup(line.work_item), lookup(line.description),
   lookup(line.unit), Number(line.rate ?? line.agreed_amount ?? 0), Number(line.billed_quantity ?? line.quantity ?? 0),
 ]);
 

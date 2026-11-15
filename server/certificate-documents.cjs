@@ -89,7 +89,11 @@ async function writeCertificateXlsx(model) {
   if (model.issuer.website) identity.addRow([model.issuer.website, model.issuer.shortName]);
   if (model.appVersion) identity.addRow([`EasyCommercial ${model.appVersion}`]);
   const type = { key: 'work_type', label: model.labels.work_type, weight: 18, kind: 'text' };
-  addWorksheet(workbook, model, model.labels.detail, [type, ...model.columns], model.lines);
+  const detail = model.detailGroups?.flatMap((group) => [
+    ...group.lines,
+    ...(model.showGroupSubtotals && group.name ? [{description:`${model.labels.subtotal} · ${group.name}`,...group.totals}] : []),
+  ]) ?? model.lines;
+  addWorksheet(workbook, model, model.labels.detail, [type, ...model.columns], detail);
   if (model.financeRows.length) addWorksheet(workbook, model, model.labels.finance, [
     { key: 'label', label: model.labels.finance, weight: 38, kind: 'text' },
     { key: 'basis', label: model.labels.basis, weight: 19, kind: 'text' },
@@ -142,6 +146,8 @@ function processCertificateRender(database, certificateId) {
     const jobs = database.all(`SELECT variant, document_json FROM cert_pdf_artifacts
       WHERE certificate_id = ? AND status = 'pending' ORDER BY variant`, [certificateId]);
     for (const job of jobs) {
+      if (!database.db) return;
+      if (!database.get("SELECT 1 FROM cert_pdf_artifacts WHERE certificate_id=? AND variant=? AND status='pending'",[certificateId,job.variant])) continue;
       let buffer = null;
       let pagination = null;
       let failure = null;
@@ -155,11 +161,12 @@ function processCertificateRender(database, certificateId) {
       }
       const checksum = buffer && createHash('sha256').update(buffer).digest('hex');
       const status = buffer ? 'ready' : 'failed';
+      if (!database.db) return;
       database.transaction(() => {
-        database.run(`UPDATE cert_pdf_artifacts SET status = ?, pdf = ?, checksum = ?, pagination_json = ?, failure = ?,
+        const changed = database.run(`UPDATE cert_pdf_artifacts SET status = ?, pdf = ?, checksum = ?, pagination_json = ?, failure = ?,
           updated_at = CURRENT_TIMESTAMP WHERE certificate_id = ? AND variant = ? AND status = 'pending'`,
         [status, buffer, checksum, pagination, failure, certificateId, job.variant]);
-        if (job.variant === 'customer') database.run('UPDATE cert_revisions SET pdf_status = ? WHERE id = ?', [status, certificateId]);
+        if (job.variant === 'customer' && changed.modified) database.run('UPDATE cert_revisions SET pdf_status = ? WHERE id = ?', [status, certificateId]);
       });
     }
   })().catch((error) => {
@@ -252,6 +259,7 @@ function registerCertificateDocumentRoutes(router, { database, authorize, docume
       const { row, variant } = input(req);
       if (row.status === 'issued' && req.query.fresh !== '1') {
         const artifact = getArtifact(database, row.id, variant, true);
+        if (!artifact) throw documentError(404, 'No archived PDF for this certificate.');
         if (!artifact || artifact.status !== 'ready' || !artifact.pdf) {
           const failed = artifact?.status === 'failed';
           throw documentError(failed ? 409 : 425, failed ? 'Certificate PDF failed. An issuer can retry rendering.' : 'Certificate PDF is still processing.');

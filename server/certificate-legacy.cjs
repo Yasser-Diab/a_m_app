@@ -1,5 +1,5 @@
 const crypto = require("node:crypto");
-const {audit, date, encode, fail, idOf, lookup, parse, str} = require("./certificate-access.cjs");
+const {audit, date, encode, fail, idOf, lookup, nextCertificateId, parse, str} = require("./certificate-access.cjs");
 const {createCustomer, saveCustomerProfile, createProject, createLocation, getProject, getCustomer} = require("./certificate-projects.cjs");
 const {money, toMinor, MODES} = require("./certificate-valuation.cjs");
 
@@ -84,11 +84,11 @@ function importLegacyCertificates(database, batch) {
         source_name:filename,source_type:str(record.source_type),legacy_number:str(record.source_number),
         historical:true,notes:""};
       const key = sourceKey(record, str(record.project_source_id) + ":" + header.legacy_number + ":" + header.source_type);
-      const inserted = database.run(`INSERT INTO cert_revisions
-        (project_id,series_key,official_number,legacy_number,status,pdf_status,type,work_to,header_json)
-        VALUES (?,?,NULL,?,'historical',NULL,'progress',?,?)`,
-      [projectId,lookup(project.contract_ref),header.legacy_number,header.work_to,encode(header)]);
-      const revisionId = inserted.lastInsertRowid;
+      const revisionId = nextCertificateId(database);
+      database.run(`INSERT INTO cert_revisions
+        (id,project_id,series_key,official_number,legacy_number,status,pdf_status,type,work_to,header_json)
+        VALUES (?,?,?,NULL,?,'historical',NULL,'progress',?,?)`,
+      [revisionId,projectId,lookup(project.contract_ref),header.legacy_number,header.work_to,encode(header)]);
       let sum = 0;
       const totalsByType = new Map();
       const lines = records.map((line,index) => {

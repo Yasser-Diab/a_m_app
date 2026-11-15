@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const {displayPartyName, stripPartyPrefix} = require("./domain.cjs");
 const {decimal} = require("./certificate-valuation.cjs");
+const {certificateLocationFields} = require("./document-locations.cjs");
 const {audit, currency, date, encode, fail, idOf, lookup, parse, setting, str, today} = require("./certificate-access.cjs");
 const RULE_CATEGORIES = ["vat", "retention", "contractor_withholding", "engineering_stamp",
   "social_insurance", "works_insurance", "other", "advance_recovery"];
@@ -91,6 +92,19 @@ function projectLocations(database, projectId) {
     .sort((a,b) => a.label.localeCompare(b.label, "ar", {numeric:true}));
 }
 
+function projectEntrySuggestions(database, project) {
+  const names = new Set([project.name,project.alternate_name,project.code].map(lookup).filter(Boolean));
+  const rows = database.all(`SELECT DISTINCT COALESCE(NULLIF(wi.project,''),d.project) AS project,
+    wi.building_unit,wi.floor_apartment,wi.work_type,wi.description,wi.unit
+    FROM documents d JOIN work_items wi ON wi.document_id=d.id
+    WHERE d.party_id=? AND d.deleted_at IS NULL AND wi.deleted_at IS NULL
+      AND d.document_type IN ('price_offer','invoice')
+    ORDER BY wi.id DESC`,[project.customer_id]);
+  return rows.filter((row) => names.has(lookup(row.project))).slice(0,500).map((row) => ({
+    ...certificateLocationFields(row), work_type:row.work_type, description:row.description, unit:row.unit,
+  }));
+}
+
 function createLocation(database, projectId, input) {
   const name = str(input.name);
   const keyed = lookup(name);
@@ -173,6 +187,7 @@ function cleanSettings(input = {}, base = {}) {
   for (const key of ["group_work_types", "show_group_subtotals"]) {
     if (Object.hasOwn(input, key)) settings[key] = input[key] === true;
   }
+  if (["none","building","unit","work_type"].includes(input.group_by)) settings.group_by = input.group_by;
   if (Array.isArray(input.work_items)) settings.work_items = input.work_items.slice(0, 1000).map((item) => ({
     id: str(item.id, 100) || crypto.randomUUID(), work_type: str(item.work_type), description: str(item.description, 2000),
     work_item: str(item.work_item), unit: str(item.unit), rate: str(item.rate, 40),
@@ -206,5 +221,5 @@ function checkedLocation(database, projectId, locationId) {
   return locationId;
 }
 
-module.exports = {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, projectLocations,
+module.exports = {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, projectLocations, projectEntrySuggestions,
   createLocation, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation};

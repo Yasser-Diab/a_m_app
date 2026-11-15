@@ -1,7 +1,8 @@
 const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
+const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 3;
+const MODEL_VERSION = 4;
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
 
 const labels = {
@@ -123,14 +124,16 @@ function column(key, weight, kind = 'text') {
   return { key, weight, kind };
 }
 
-function detailColumns(lines, moneyKeys, sharedLocation, translations) {
+function detailColumns(lines, moneyKeys, sharedLocation, translations, separatedLocation) {
   const area = lines.some((line) => line.mode === 'area');
   const linear = lines.some((line) => line.mode === 'linear');
   const measured = area || linear;
   const pricedQuantity = lines.some((line) => ['area', 'linear', 'count', 'direct'].includes(line.mode));
   const populated = (key) => lines.some((line) => text(line[key]) !== '');
   const columns = [
-    !sharedLocation && populated('location') && column('location', 14),
+    !separatedLocation && !sharedLocation && populated('location') && column('location', 14),
+    separatedLocation && populated('building_unit') && column('building_unit', 12),
+    separatedLocation && populated('floor_apartment') && column('floor_apartment', 12),
     populated('work_item') && column('work_item', 12),
     column('description', 27),
     measured && { ...column('width', 8, 'number'), label: translations[area ? 'width' : 'length'] },
@@ -185,6 +188,10 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     current_progress: locale === 'ar' ? 'الإنجاز الحالي' : 'Current progress',
     total_quantity: locale === 'ar' ? 'إجمالي الكمية' : 'Total quantity',
     recorded_basis: locale === 'ar' ? 'الأعمال والدفعات المسجلة' : 'Recorded work and payments',
+    building_unit: locale === 'ar' ? 'المبنى' : 'Building',
+    floor_apartment: locale === 'ar' ? 'الوحدة / الشقة' : 'Unit / apartment',
+    subtotal: locale === 'ar' ? 'الإجمالي الفرعي' : 'Subtotal',
+    advance_remaining: locale === 'ar' ? 'متبقي الدفعة المقدمة' : 'Advance remaining',
   };
   const project = input.project || {};
   const customer = input.customer || {};
@@ -208,7 +215,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     const measured = line.mode === 'area' || line.mode === 'linear';
     return {
       id: text(line.id), mode: text(line.mode), work_type: text(line.work_type),
-      work_item: text(line.work_item), location: text(line.location), description: text(line.description),
+      work_item: text(line.work_item), location: text(line.location), description: text(line.description), ...certificateLocationFields(line),
       width: measured ? number(line.width) : null,
       height: line.mode === 'area' ? number(line.height) : null,
       dimension_unit: measured ? text(line.dimension_unit) : '',
@@ -224,20 +231,20 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     };
   });
   const moneyKeys = comparable ? ['last_current', 'previous', 'current', 'cumulative'] : ['previous', 'current', 'cumulative'];
-  const columns = detailColumns(lines, moneyKeys, locations.size < 2 && sharedLocation && [...locations].every((name) => !name || name === sharedLocation), t);
+  const separatedLocation = (input.lines || []).some((line) => Object.hasOwn(line,'building_unit') || Object.hasOwn(line,'floor_apartment'));
+  const columns = detailColumns(lines, moneyKeys, locations.size < 2 && sharedLocation && [...locations].every((name) => !name || name === sharedLocation), t, separatedLocation);
+  const groupBy = header.group_by ?? (header.group_work_types ? 'work_type' : 'none');
+  const showGroupSubtotals = groupBy !== 'none' && Boolean(header.show_group_subtotals);
   const groups = new Map();
-  const detailGroups = [];
   for (const line of lines) {
-    if (!groups.has(line.work_type)) groups.set(line.work_type, []);
-    groups.get(line.work_type).push(line);
-    const name = header.group_work_types ? line.work_type : '';
-    let group = detailGroups.at(-1);
-    if (group?.name !== name) {
-      group = { name, lines: [] };
-      detailGroups.push(group);
-    }
-    group.lines.push(line);
+    const name = groupBy === 'unit' && line.floor_apartment ? [line.building_unit,line.floor_apartment].filter(Boolean).join(' / ') :
+      groupBy === 'building' ? line.building_unit : groupBy === 'work_type' ? line.work_type : '';
+    const key = name.toLowerCase();
+    if (!groups.has(key)) groups.set(key,{name,lines:[]});
+    groups.get(key).lines.push(line);
   }
+  const detailGroups = [...groups.values()].map(({name,lines:groupLines}) =>
+    ({name,lines:groupLines,totals:financialRollup(groupLines,moneyKeys)}));
   const components = totals.components || [];
   const recordedCollections = [
     ...(totals.advance_receipts ? [{key:'advance_receipts',
@@ -268,6 +275,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       cumulative: totals.cumulative_advance_recovery == null ? null : -money(totals.cumulative_advance_recovery),
       basis: text(t[components.find((entry) => (entry.category || entry.kind) === 'advance_recovery')?.basis]),
     }]),
+    ...(totals.advance_remaining == null ? [] : [{key:'advance_remaining',cumulative:money(totals.advance_remaining)}]),
     ...(totals.reversed_advance_recovery || totals.current_reversed_advance_recovery ? [{
       key: 'reversed_advance_recovery',
       current: number(totals.current_reversed_advance_recovery),
@@ -352,14 +360,13 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     qr: certificateQr({issuer:issuerName,shortName,issuedOn:issueDate,quantity,due:totals.cumulative_payable,currency,
       customer:customerName,project:projectName}),
     signatures: (input.rule_settings?.signatures || []).map((person) => ({ name: text(person.name), title: text(person.title) })).filter((person) => person.name),
-    showGroupSubtotals: Boolean(header.group_work_types && header.show_group_subtotals),
+    showGroupSubtotals,
+    groupLabel: t[groupBy === 'building' ? 'building_unit' : groupBy === 'unit' ? 'floor_apartment' : 'work_type'],
     identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
-    detailGroups: detailGroups.map(({ name, lines: groupLines }) => ({
-      name, lines: groupLines, totals: financialRollup(groupLines, moneyKeys),
-    })),
-    coverRows: header.group_work_types ? [...groups].filter(([name]) => name)
-      .map(([name, groupLines]) => ({ name, ...financialRollup(groupLines, moneyKeys) })) : [],
+    detailGroups,
+    coverRows: showGroupSubtotals || (header.group_by == null && header.group_work_types)
+      ? detailGroups.filter(({name}) => name).map(({name,totals}) => ({name,...totals})) : [],
     workTotals: financialRollup(lines, moneyKeys), financeRows,
   };
 }

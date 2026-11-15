@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { GRID_COLUMNS } from "./CertificateGrid.jsx";
 import { Dialog, Field, Money, optionLabel, Problem, queryString, useResource } from "./shared.jsx";
 
-const importableKeys = new Set(["work_type", "work_item", "description", "mode", "width", "height", "dimension_unit", "count", "quantity", "unit", "rate", "agreed_amount", "progress", "note"]);
+const importableKeys = new Set(["building_unit","floor_apartment","work_type","work_item","description","mode","width","height","dimension_unit","count","quantity","unit","rate","agreed_amount","progress","note"]);
 const mappings = GRID_COLUMNS.filter((item) => importableKeys.has(item.key));
 const amountField = { key: "amount", label: ["القيمة المسجلة", "Recorded amount"] };
 const locationField = { key: "location", label: ["اسم الموقع", "Location name"] };

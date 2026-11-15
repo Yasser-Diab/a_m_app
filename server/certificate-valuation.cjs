@@ -1,3 +1,4 @@
+const {certificateLocationFields} = require("./document-locations.cjs");
 const SCALE = 1_000_000_000_000n;
 const MAX = 90_000_000_000;
 const UNIT_FACTORS = {mm: 1_000_000_000n, cm: 10_000_000_000n, m: SCALE};
@@ -54,6 +55,11 @@ function progressAtAmount(line, value) {
   return Number.isFinite(base) && base > 0 ? Math.round(value / base * 10000) / 100 : null;
 }
 
+function workLocation(line) {
+  const {building_unit,floor_apartment} = certificateLocationFields(line);
+  return building_unit || floor_apartment ? [building_unit,floor_apartment].map((value) => value.toLowerCase()).join("\u0000") : line.location_id ?? null;
+}
+
 function calculateLine(line, before, settings) {
   const errors = [];
   const complain = (field, message) => errors.push({field, message, line_id: line.id});
@@ -82,7 +88,7 @@ function calculateLine(line, before, settings) {
   if (mode !== "adjustment" && present(line.progress) && (!positive(progress) || progress > 100n * SCALE))
     complain("progress", "Progress must be from 0 to 100");
 
-  if (before && (before.location_id !== line.location_id || before.work_type !== line.work_type))
+  if (before && (workLocation(before) !== workLocation(line) || before.work_type !== line.work_type))
     complain("identity", "Certified work identity must keep its location and work type");
   if (!line.description && !line.work_item) complain("description", "Work description is required");
   if (line.carried_forward) {
@@ -265,6 +271,8 @@ function calculateValuation(lines, baseline, profile, ledger) {
       previous_collections: money(rawCollected-currentCollected),
       ...(ledger.advance_principal_minor ? {advance_receipts:money(ledger.advance_principal_minor)} : {}),
       advance_recovery: money(advanceRecovery), cumulative_advance_recovery: money(previousRecovery + advanceRecovery),
+      ...(ledger.advances.length ? {advance_remaining:money(ledger.advances.reduce((sum,advance) =>
+        sum + Math.min(advance.outstanding_minor,advance.available_minor),0))} : {}),
       reversed_advance_recovery: money(releasedRecovery), current_reversed_advance_recovery: money(periodReleased), components,
       groups: rankedGroups.map((group) => ({
         work_type: group.work_type, previous: money(group.previous), current: money(group.current),

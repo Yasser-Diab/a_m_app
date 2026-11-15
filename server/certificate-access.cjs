@@ -51,6 +51,17 @@ function setSetting(database, key, value) {
   database.run("INSERT OR REPLACE INTO app_settings (key,value) VALUES (?,?)", [key, value]);
 }
 
+function certificateIdWatermark(database) {
+  const reserved = Number(setting(database,"certificates_last_revision_id","0")) || 0;
+  return Math.max(reserved,database.get("SELECT MAX(id) AS id FROM cert_revisions").id || 0);
+}
+
+function nextCertificateId(database) {
+  const id = certificateIdWatermark(database) + 1;
+  setSetting(database,"certificates_last_revision_id",String(id));
+  return id;
+}
+
 function initializeSessionSecret(database) {
   if (!setting(database, "certificates_session_secret"))
     setSetting(database, "certificates_session_secret", crypto.randomBytes(48).toString("hex"));
@@ -181,7 +192,7 @@ function accessFor(database, req) {
   if (!user) fail(401, "Sign in again to access certificates");
   const enabled = featureEnabled(database);
   const grant = effectiveGrant(user, hasManagerRole(user) ? null : getGrant(database, user.id));
-  return {...grant, user, enabled, can_admin: isAdmin(user)};
+  return {...grant, user, enabled, can_admin: isAdmin(user), can_delete_documents:hasManagerRole(user)};
 }
 
 function authorize(database, req, capability, projectId = null) {
@@ -200,6 +211,6 @@ function adminAccess(database, req) {
 }
 
 module.exports = {CAPABILITIES, parse, encode, now, today, idOf, isAdmin, str, lookup, fail, date,
-  currency, setting, setSetting, initializeSessionSecret, featureEnabled, issueCertificateSession,
+  currency, setting, setSetting, certificateIdWatermark, nextCertificateId, initializeSessionSecret, featureEnabled, issueCertificateSession,
   certificateSessionUser, revokeCertificateSession, getGrant, getUserGrant, hasManagerRole, audit, setGrant, scopeSql, inScope,
   accessFor, authorize, adminAccess};
