@@ -185,8 +185,8 @@ function buildCertificateHtml(model) {
     footer > div:first-child { text-align: left; }
     .footer-company { text-align: center; }
     .footer-user { text-align: right; }
-    .signoff { direction: ltr; display: grid; grid-template-columns: 34mm 1fr; gap: 7mm; align-items: end; margin-block-start: 3mm; color: #3c5266; }
-    .stamp { min-height: 16mm; border: 0.6pt solid #adc2c9; padding: 2mm; font-size: 8pt; text-align: center; }
+    .signoff { direction: ltr; display: grid; grid-template-columns: 34mm 1fr; gap: 7mm; align-items: end; margin-block-start: 2mm; color: #3c5266; }
+    .stamp { min-height: 15mm; border: 0.6pt solid #adc2c9; padding: 2mm; font-size: 8pt; text-align: center; }
     .signatories { display: flex; flex-wrap: wrap; justify-content: end; gap: 2mm 5mm; }
     .signatory { min-width: 23mm; padding-block-start: 4mm; border-block-start: 0.6pt solid #adc2c9; text-align: center; font-size: 8pt; }
     .signatory small { display: block; }
@@ -270,9 +270,8 @@ async function paginateCertificate({ issued, measured, outputMode, hasReceipts }
   const longMeasured = measured && detail.length > 1;
   const hasCover = outputMode === 'summary_details' || (longMeasured && outputMode !== 'detail_only');
   const cover = hasCover ? pagesFor('cover') : [];
-  const settlementTemplate = document.getElementById('settlement-block').content.firstElementChild;
-  if (settlementTemplate) {
-    const settlement = settlementTemplate.cloneNode(true);
+  const settlement = document.getElementById('settlement-block').content.firstElementChild?.cloneNode(true);
+  if (settlement) {
     const settlementPages = cover.length ? cover : detail;
     let page = settlementPages.at(-1);
     page.querySelector('main').append(settlement);
@@ -288,9 +287,16 @@ async function paginateCertificate({ issued, measured, outputMode, hasReceipts }
   let lastDetail = detail.at(-1);
   lastDetail.querySelector('footer').before(signoff);
   if (!fits(lastDetail)) {
+    const finalPageHasSettlement = settlement && lastDetail.querySelector('main').contains(settlement);
     lastDetail = makePage('settlement', true);
+    if (finalPageHasSettlement) lastDetail.querySelector('main').append(settlement);
     lastDetail.querySelector('footer').before(signoff);
     detail.push(lastDetail);
+    if (!fits(lastDetail)) {
+      const signoffPage = makePage('settlement', true);
+      signoffPage.querySelector('footer').before(signoff);
+      detail.push(signoffPage);
+    }
   }
 
   const pages = [...cover, ...detail, ...(hasReceipts ? pagesFor('receipts') : [])];

@@ -2,6 +2,7 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 
 const MODEL_VERSION = 3;
+const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
 
 const labels = {
   en: {
@@ -160,9 +161,7 @@ function quantitySummary(lines) {
 }
 
 function certificateQr({issuer, shortName, issuedOn, quantity, due, currency, customer, project}) {
-  const payable = due == null ? 'Pending' : `${currency} ${new Intl.NumberFormat('en-US',{
-    minimumFractionDigits:2, maximumFractionDigits:2,
-  }).format(due)}`;
+  const payable = due == null ? 'Pending' : `${currency} ${printMoney.format(due)}`;
   const payload = [
     `Company: ${issuer.slice(0,180)}${shortName ? ` #${shortName.slice(0,30)}#` : ''}`,
     `Date of issuance: ${issuedOn || 'Pending issuance'}`,
@@ -325,6 +324,9 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       metadata('payment_details_through', receipts.length ? input.payment_details_through : '', {isolated:true}),
       metadata('currency', currency, { isolated: true }),
       metadata('total_quantity', quantity, { isolated: true }),
+      metadata(totals.cumulative_payable < 0 ? 'cumulative_credit' : 'cumulative_payable',
+        totals.cumulative_payable == null ? '' : `${currency} ${printMoney.format(Math.abs(totals.cumulative_payable))}`,
+        {isolated:true,wide:true,required:true}),
       metadata('title', header.title),
       metadata('notes', choices?.notes === true || choices?.includes?.('notes') ? header.notes : '', { wide: true })],
   ].map((group) => visibleMetadata(group, choices, t)).filter((group) => group.length);
