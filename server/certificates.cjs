@@ -13,6 +13,7 @@ const {getRevision, certificateDocumentInput, createDraft, saveDraft, runAction,
 const {importLegacyCertificates} = require("./certificate-legacy.cjs");
 const {stageImport, commitImport} = require("./certificate-imports.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
+const {legacySnapshot} = require("./certificate-history.cjs");
 const {
   initializeCertificateArtifacts, enqueueCertificateRender, processCertificateRender,
   resumeCertificateRenders, registerCertificateDocumentRoutes,
@@ -84,17 +85,18 @@ function certificateList(database, req, access) {
   const val = normalizeListStatus(status);
   const match = lookup(req.query.q);
   const like = `%${match}%`;
+  const displayStatus = "CASE WHEN r.status='historical' THEN CASE WHEN lw.approved_at IS NULL THEN 'unapproved' ELSE 'approved' END ELSE r.status END";
   const where = `${scope.clause} AND (? IS NULL OR r.project_id=?)
-    AND (? = '' OR r.status=? OR (? = 'issued' AND r.status='historical'))
+    AND (? = '' OR ${displayStatus}=? OR (? = 'historical' AND r.status='historical'))
     AND (? = '' OR cp.search_name LIKE ? OR p.search_name LIKE ? OR r.legacy_number LIKE ?
       OR CAST(r.official_number AS TEXT) LIKE ?)`;
   const params = [...scope.params,projectId,projectId,val,val,val,match,like,like,like,like];
-  const joins = "FROM cert_revisions r JOIN cert_projects cp ON r.project_id=cp.id JOIN parties p ON p.id=cp.customer_id";
+  const joins = "FROM cert_revisions r JOIN cert_projects cp ON r.project_id=cp.id JOIN parties p ON p.id=cp.customer_id LEFT JOIN cert_legacy_workflow lw ON lw.revision_id=r.id";
   const total = database.get(`SELECT count(*) AS total ${joins} WHERE ${where}`,params).total;
   const items = database.all(`
-    SELECT r.id,r.project_id,r.status,r.pdf_status,r.type,r.revision,r.version,r.official_number,
-      r.legacy_number,r.work_to,r.collection_cutoff,r.issued_at,r.updated_at,r.header_json,
-      json_extract(r.snapshot_json,'$.totals.current') AS current,
+    SELECT r.id,r.project_id,${displayStatus} AS status,r.pdf_status,r.type,r.revision,r.version,r.official_number,
+      r.legacy_number,COALESCE(json_extract(lw.edited_json,'$.header.work_to'),r.work_to) AS work_to,r.collection_cutoff,r.issued_at,r.updated_at,r.header_json,
+      COALESCE(json_extract(lw.edited_json,'$.totals.current'),json_extract(r.snapshot_json,'$.totals.current')) AS current,
       json_extract(r.snapshot_json,'$.totals.cumulative_payable') AS cumulative_payable,
       cp.name AS project_name,p.display_name AS customer_name
     ${joins} WHERE ${where} ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?
@@ -104,7 +106,7 @@ function certificateList(database, req, access) {
 
 function normalizeListStatus(status) {
   if (!status || status === "all") return "";
-  if (!["draft","in_review","approved","issued","historical"].includes(status)) fail(400,"Unknown certificate status");
+  if (!["draft","in_review","approved","issued","historical","unapproved"].includes(status)) fail(400,"Unknown certificate status");
   return status;
 }
 
@@ -162,8 +164,17 @@ function reportResponse(database, req, access) {
       FROM cert_legacy_records a JOIN cert_revisions r ON r.id=a.revision_id
       WHERE a.project_id=? AND a.record_type='work_row'
         AND COALESCE(json_extract(a.data_json,'$.date'),r.work_to,'0001-01-01')<=?
-        AND (? IS NULL OR json_extract(a.data_json,'$.location') = (SELECT name FROM cert_locations WHERE id=?))`,
+        AND (? IS NULL OR json_extract(a.data_json,'$.location') = (SELECT name FROM cert_locations WHERE id=?))
+        AND NOT EXISTS (SELECT 1 FROM cert_legacy_workflow lw WHERE lw.revision_id=r.id AND lw.approved_at IS NOT NULL AND lw.edited_json IS NOT NULL)`,
     [project.id,workCutoff,locationId,locationId]);
+    for (const legacy of database.all(`SELECT r.* FROM cert_revisions r JOIN cert_legacy_workflow lw ON lw.revision_id=r.id
+      WHERE r.project_id=? AND lw.approved_at IS NOT NULL AND lw.edited_json IS NOT NULL
+      AND json_extract(lw.edited_json,'$.header.work_to')<=?`,[project.id,workCutoff])) {
+      const snapshot = legacySnapshot(database,legacy);
+      const lines = snapshot.lines.filter((line) => !locationId || line.location_id === locationId);
+      if (lines.length) historic.count++;
+      historic.amount += lines.reduce((sum,line) => sum + (toMinor(line.current) || 0),0);
+    }
     const work = portions.reduce((acc,row) => {
       const snapshot = parse(row.snapshot_json);
       if (locationId && !row.location_id) {
@@ -185,7 +196,9 @@ function reportResponse(database, req, access) {
     },{current:0,cumulative:0,cumulative_earned:0,supports_settlement:true});
     const profile = getProfile(database,project.id,workCutoff);
     const ledger = allocationLedger(database,project.id,profile,collectionCutoff,{workCutoff,locationId});
-    const earned = work.cumulative_earned + historic.amount;
+    const historicalAdvances = ledger.entries.reduce((sum,entry) =>
+      sum + (entry.kind === "advance" && entry.source === "historical" ? (ledger.recognizedAmounts.get(entry.id) || 0) : 0),0);
+    const earned = work.cumulative_earned + historic.amount - historicalAdvances;
     const amounts = {current:work.current,cumulative:work.cumulative + historic.amount,
       cumulative_earned:work.supports_settlement ? earned : null,ordinary_collections:ledger.ordinary_minor,
       cumulative_payable:work.supports_settlement ? earned - ledger.ordinary_minor + ledger.released_recovery_minor : null,
@@ -239,6 +252,8 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
       locationId:header.location_id || null,
     }) : null;
     return {...model, header, issuer: {...model.issuer, ...branding()}, prepared_by: user?.display_name || "",
+      prepared_at:new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Cairo", dateStyle:"short", timeStyle:"short"}).format(new Date()),
+      show_status_watermark: options.watermark !== "0",
       include_receipts: options.receipts == null ? undefined : options.receipts === "1",
       receipts: paymentDetails ? recognizedReceipts(paymentDetails) : model.receipts,
       payment_details_through: cutoff,

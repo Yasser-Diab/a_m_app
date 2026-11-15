@@ -119,6 +119,10 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
       <Field label={t("مقاس الورق", "Paper size")}><select value={options.paper || ""} onChange={(event) => { setError(null); setOptions({ ...options, paper: event.target.value }); }}>
         <option value="">{t("الافتراضي", "Default")}</option><option value="A4">A4</option><option value="Letter">Letter</option>
       </select></Field>
+      <Field label={t("علامة حالة الاعتماد", "Approval watermark")}><select value={options.watermark ?? "1"} onChange={(event) => {
+        setError(null);
+        setOptions({ ...options, watermark: event.target.value });
+      }}><option value="1">{t("إظهار", "Show")}</option><option value="0">{t("إخفاء", "Hide")}</option></select></Field>
       <Field label={t("تجميع الأعمال", "Work grouping")}><select value={options.group == null ? "" : options.group === "0" ? "none" : options.subtotals === "1" ? "subtotals" : "groups"} onChange={(event) => {
         const value = event.target.value;
         setError(null); setOptions({ ...options, group: value ? (value === "none" ? "0" : "1") : null, subtotals: value ? (value === "subtotals" ? "1" : "0") : null });

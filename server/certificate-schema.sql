@@ -229,3 +229,10 @@ CREATE TABLE IF NOT EXISTS cert_legacy_records (
   PRIMARY KEY(fingerprint,record_type,source_key)
 );
 CREATE INDEX IF NOT EXISTS idx_cert_legacy_project ON cert_legacy_records(project_id,record_type);
+CREATE TABLE IF NOT EXISTS cert_legacy_workflow (
+  revision_id INTEGER PRIMARY KEY REFERENCES cert_revisions(id) ON DELETE CASCADE,
+  edited_json TEXT,
+  approved_json TEXT,
+  approved_at TEXT,
+  approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);

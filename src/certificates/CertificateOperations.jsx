@@ -82,8 +82,10 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
         <Field label={t("أساس احتساب التحصيلات", "Collection basis")}><select value={draft.collections_basis ?? ""} onChange={(event) => update("collections_basis", event.target.value)}><option value="">{t("موروث", "Inherit")}</option><option value="received">{t("تاريخ الاستلام", "Receipt date")}</option><option value="cleared">{t("تاريخ التحصيل", "Clearance date")}</option></select></Field>
         <Field label={t("الإخراج الافتراضي", "Default output")}><select value={draft.output_mode ?? ""} onChange={(event) => update("output_mode", event.target.value)}><option value="">{t("موروث", "Inherit")}</option><option value="auto">{t("تلقائي", "Automatic")}</option><option value="cover">{t("ملخص وتفاصيل", "Summary and details")}</option><option value="detail">{t("التفاصيل فقط", "Details only")}</option></select></Field>
         <Field label={t("أنواع الأعمال بالترتيب، نوع في كل سطر", "Work types in order, one per line")} className="pc-span"><textarea rows={3} value={types} onChange={(event) => setTypes(event.target.value)} /></Field>
-        <label className="pc-check"><input type="checkbox" checked={Boolean(draft.group_work_types)} onChange={(event) => update("group_work_types", event.target.checked)} />{t("تجميع الأعمال حسب النوع", "Group works by type")}</label>
-        <label className="pc-check"><input type="checkbox" disabled={!draft.group_work_types} checked={Boolean(draft.show_group_subtotals)} onChange={(event) => update("show_group_subtotals", event.target.checked)} />{t("عرض إجمالي كل نوع", "Show subtotals by type")}</label>
+        <div className="pc-choice-grid pc-span">
+          <label className="pc-check"><input type="checkbox" checked={Boolean(draft.group_work_types)} onChange={(event) => update("group_work_types", event.target.checked)} />{t("تجميع الأعمال حسب النوع", "Group works by type")}</label>
+          <label className="pc-check"><input type="checkbox" disabled={!draft.group_work_types} checked={Boolean(draft.show_group_subtotals)} onChange={(event) => update("show_group_subtotals", event.target.checked)} />{t("عرض إجمالي كل نوع", "Show subtotals by type")}</label>
+        </div>
       </div>
     </fieldset>
     <fieldset disabled={!canManage || busy}>

@@ -5,7 +5,7 @@ import { Collections, ProjectPicker, ProjectSettings, Reports } from "./Certific
 import { Field, Money, Problem, queryString, Status, useCertificateApi, useDebounce, useResource } from "./shared.jsx";
 import "./certificates.css";
 
-const statuses = ["draft", "in_review", "approved", "issued"];
+const statuses = ["unapproved", "draft", "in_review", "approved", "issued"];
 const pageSize = 25;
 
 function directCertificateId() {
@@ -107,6 +107,6 @@ function CertificateList({ request, revision, t, locale, project, setProject, se
 
 function statusLabel(key) {
   return {
-    draft: ["مسودة", "Draft"], in_review: ["قيد المراجعة", "In review"], approved: ["معتمد", "Approved"], issued: ["صادر", "Issued"],
+    unapproved: ["غير معتمد", "Unapproved"], draft: ["مسودة", "Draft"], in_review: ["قيد المراجعة", "In review"], approved: ["معتمد", "Approved"], issued: ["صادر", "Issued"],
   }[key];
 }

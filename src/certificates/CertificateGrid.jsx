@@ -18,13 +18,15 @@ export const GRID_COLUMNS = [
   { key: "rate", label: ["السعر", "Rate"], kind: "number", modes: ["area", "linear", "count", "direct", "adjustment"] },
   { key: "agreed_amount", label: ["المبلغ المتفق عليه", "Agreed amount"], kind: "number", modes: ["lump"], width: 130 },
   { key: "recognition", label: ["أساس التقييم", "Recognition"], kind: "recognition", modes: ["area", "linear", "count", "direct", "lump"], width: 130 },
-  { key: "progress", label: ["نسبة الإنجاز %", "Progress %"], kind: "number", modes: ["area", "linear", "count", "direct", "lump"] },
+  { key: "progress", label: ["نسبة الإنجاز المدخلة %", "Entered progress %"], kind: "number", modes: ["area", "linear", "count", "direct", "lump"] },
   { key: "claim_amount", label: ["المبلغ المطالب به", "Claim amount"], kind: "number", modes: ["lump"], width: 135 },
   { key: "adjustment_amount", label: ["قيمة التسوية", "Adjustment amount"], kind: "number", modes: ["adjustment"], width: 130 },
   { key: "reason", label: ["سبب التسوية", "Adjustment reason"], modes: ["adjustment"], width: 150 },
   { key: "note", label: ["ملاحظة للعميل", "Customer note"], width: 155 },
-  { key: "previous", label: ["السابق", "Previous"], kind: "money" },
-  { key: "current", label: ["الحالي", "Current"], kind: "money" },
+  { key: "previous_progress", label: ["الإنجاز السابق %", "Previous progress %"], kind: "computedPercent" },
+  { key: "current_progress", label: ["الإنجاز الحالي %", "Current progress %"], kind: "computedPercent" },
+  { key: "previous", label: ["القيمة السابقة", "Previous value"], kind: "money" },
+  { key: "current", label: ["القيمة الحالية", "Current value"], kind: "money" },
   { key: "cumulative", label: ["التراكمي", "Cumulative"], kind: "money" },
 ];
 
@@ -33,7 +35,7 @@ const modes = {
   count: ["بالعدد", "Count"], direct: ["كمية مباشرة", "Direct quantity"],
   lump: ["مقطوعية", "Lump sum"], adjustment: ["تسوية معتمدة", "Approved adjustment"],
 };
-const gridKeys = GRID_COLUMNS.filter(({ kind }) => kind !== "money").map(({ key }) => key);
+const gridKeys = GRID_COLUMNS.filter(({ kind }) => !["money", "computedPercent"].includes(kind)).map(({ key }) => key);
 const pageSize = 36;
 
 export function emptyLine() {
@@ -66,6 +68,10 @@ const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, loc
       const coord = { "data-row-id": row._gridId, "data-column": key, "aria-label": label };
       let content = null;
       if (kind === "money") content = <Money value={row[key]} locale={locale} />;
+      else if (kind === "computedPercent") {
+        const percent = Object.hasOwn(row, key) ? value : key === "current_progress" && !row.carried_forward ? row.progress : null;
+        content = percent == null || percent === "" ? "—" : <bdi>{numberText(percent)}%</bdi>;
+      }
       else if (applicable && readOnly) content = <bdi>{kind === "mode" && modes[value] ? t(...modes[value]) :
         kind === "location" ? optionLabel(locations.get(String(value))) || row.location || row.location_name || "—" :
           key === "progress" ? `${numberText(value ?? 100)}%` : kind === "number" ? numberText(value ?? "") : value ?? ""}</bdi>;
@@ -107,8 +113,8 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   const [sortedView, setSortedView] = useState(false);
   const [fullReadView, setFullReadView] = useState(false);
   const readColumns = useMemo(() => GRID_COLUMNS.filter(({ key }) =>
-    ["description", "quantity", "unit", "rate", "progress", "current"].includes(key) ||
-    (["previous", "cumulative"].includes(key) ? rows.some((row) => Number(row.previous) !== 0 && row.previous != null) :
+    ["description", "quantity", "unit", "rate", "previous_progress", "current_progress", "previous", "current", "cumulative"].includes(key) ||
+    (key !== "progress" &&
       !["mode", "recognition", "dimension_unit"].includes(key) &&
       rows.some((row) => row[key] != null && row[key] !== ""))), [rows]);
   const columns = readOnly && !fullReadView ? readColumns : GRID_COLUMNS;

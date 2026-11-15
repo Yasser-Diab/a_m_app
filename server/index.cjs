@@ -21,6 +21,7 @@ const {
 } = require("./certificate-access.cjs");
 const {commercialAccess, commercialProjects, projectPaymentRows} = require("./commercial-ledger.cjs");
 const {certificateDocumentInput} = require("./certificate-revisions.cjs");
+const {legacySnapshot} = require("./certificate-history.cjs");
 const {getProject: getCertificateProject, projectLocations: certificateLocations} = require("./certificate-projects.cjs");
 const {addReceipt: addCertificateReceipt} = require("./certificate-ledger.cjs");
 const {
@@ -2576,7 +2577,8 @@ function accountStatementData(database, query, type, certificateAccess) {
       const revisions = database.all(`SELECT * FROM cert_revisions
         WHERE project_id IN (${ids.map(() => "?").join(",")}) AND status IN ('historical','approved','issued')`, ids);
       for (const revision of revisions) {
-        const model = revision.snapshot_json ? JSON.parse(revision.snapshot_json) : certificateDocumentInput(database, revision);
+        const model = revision.status === "historical" ? legacySnapshot(database,revision) :
+          (revision.snapshot_json ? JSON.parse(revision.snapshot_json) : certificateDocumentInput(database, revision));
         const accrual = roundMoney(numberOrZero(model.totals?.current) + (model.totals?.components || [])
           .filter((component) => component.category !== "advance_recovery").reduce((sum, component) => sum + numberOrZero(component.amount), 0));
         if (!accrual) continue;
@@ -2585,11 +2587,11 @@ function accountStatementData(database, query, type, certificateAccess) {
         const history = revision.status === "historical";
         const progress = (model.lines || []).filter((line) => !line.carried_forward).map((line) => {
           const value = numberOrNull(line.progress) ?? 100;
-          return history && value >= 0 && value <= 1 ? value * 100 : value;
+          return history && !model.edited && value >= 0 && value <= 1 ? value * 100 : value;
         });
         const label = statementReportLanguage === "en" ? "Certificate No." : "مستخلص رقم";
         ledgerRows.push({document_id:`certificate-${revision.id}`, document_type:"progress_certificate", document_no:number,
-          entry_date:revision.work_to || "", customer_name:project.customer_name, project:project.name, project_label:project.name,
+          entry_date:model.header?.work_to || revision.work_to || "", customer_name:project.customer_name, project:project.name, project_label:project.name,
           building_unit:model.header?.location || "", description:`${label} ${number}`, is_payment:0, credit:0, debit:accrual,
           gross_total: numberOrZero(model.totals?.current), real_gross_total:numberOrZero(model.totals?.current), real_debit:accrual,
           completion_percent:progress.length ? roundMoney(progress.reduce((sum, value) => sum + value, 0) / progress.length) : 100});

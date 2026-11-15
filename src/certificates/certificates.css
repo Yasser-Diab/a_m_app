@@ -16,7 +16,7 @@
 .pc-tabs button[aria-pressed="true"] { font-weight: 700; }
 .pc-workspace [hidden] { display: none; }
 .pc-name[aria-current="true"] { text-decoration: underline; }
-.pc-output-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.pc-output-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: 10px; }
 .pc-output-actions { justify-content: flex-start; }
 .pc-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--pc-radius); padding: clamp(12px, 1.8vw, 22px); min-inline-size: 0; }
 .pc-toolbar, .pc-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -84,8 +84,15 @@
 .pc-dialog .pc-combo { margin-block-end: 83px; }
 .pc-dialog .pc-combo-options { max-block-size: 120px; }
 .pc-preview { width: 100%; height: min(71vh, 800px); border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); }
-.pc-check { display: flex; align-items: flex-start; gap: 7px; }
-.pc-check input { margin-block-start: 3px; flex: 0 0 auto; }
+.pc-check, .pc-grants label:has(> input[type="checkbox"]) {
+  display: inline-flex; align-items: flex-start; gap: 8px; min-inline-size: 0;
+  padding-block: 6px; overflow-wrap: anywhere;
+}
+:is(.pc-workspace, .pc-dialog, .pc-grants) label > input[type="checkbox"] {
+  appearance: auto; flex: 0 0 17px; inline-size: 17px; block-size: 17px;
+  min-inline-size: 17px; min-block-size: 17px; max-inline-size: 17px; max-block-size: 17px;
+  margin: 2px 0 0; padding: 0; accent-color: var(--accent);
+}
 .pc-grants { margin-block: 11px; }
 .pc-grants fieldset, .pc-stack fieldset { min-inline-size: 0; display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 8px; }
 .pc-grants legend { font-size: .9rem; font-weight: 600; }
@@ -94,6 +101,10 @@
 .pc-grid :focus-visible { outline-offset: -2px; }
 @media (max-width: 640px) {
   .pc-panel { padding: 11px; }
+  .pc-tabs { flex-wrap: wrap; }
+  .pc-tabs button { min-block-size: 36px; }
+  .pc-dialog { padding: 12px; max-block-size: 94dvh; }
+  .pc-preview { block-size: min(56dvh, 520px); min-block-size: 260px; }
   .pc-grid-scroll { max-block-size: 52vh; }
   .pc-grid-toolbar h3 { width: 100%; }
 }

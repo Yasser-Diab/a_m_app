@@ -141,6 +141,7 @@ async function main() {
     draft = await action("return",draft.version,"Confirm late receipt");
     draft = await action("submit",draft.version);
     draft = await action("approve",draft.version);
+    const afterApproval = await api(scope + "/collections",token,"POST",{kind:"receipt",amount:1,received_at:date},201);
     const issued = await Promise.all([
       action("issue",draft.version,undefined,"issue-request"),
       action("issue",draft.version,undefined,"issue-request"),
@@ -148,13 +149,17 @@ async function main() {
     for (const result of issued) {
       assert.equal(result.status,"issued");
       assert.equal(result.official_number,1);
+      assert.equal(result.totals.ordinary_collections,55);
     }
+    await api(scope + "/collections",token,"POST",{kind:"reversal",reverses_id:afterApproval.id,received_at:date},201);
     const second = await api(cert,token,"POST",{project_id:project.id,header,
       lines:[{...lines[0],mode:"direct",quantity:3,unit:"m",rate:100,recognition:"cumulative"}]},201);
     assert.equal(second.totals.previous,275);
     assert.equal(second.totals.current,50);
     assert.equal(second.totals.cumulative,325);
     assert.equal(second.totals.last_current,275);
+    assert.equal(second.lines[0].previous_progress,83.33);
+    assert.equal(Number(second.lines[0].current_progress.toFixed(2)),16.67);
     const report = await api(cert + "/reports?project_id=" + project.id + "&work_cutoff=" + date + "&collection_cutoff=" + date,viewToken);
     assert.equal(report.totals.cumulative,275);
     assert.equal(report.totals.ordinary_collections,55);
@@ -208,23 +213,46 @@ async function main() {
       customers:[{source_id:"legacy-customer",name:"Legacy Test Customer"}],
       projects:[{source_id:"legacy-project",customer_source_id:"legacy-customer",name:"Legacy Project"}],
       certificates:[{source_id:"legacy-certificate",project_source_id:"legacy-project",source_number:"9",work_to:date,
-        lines:[{source_sheet:"old",source_row:1,description:"Legacy work",mode:"direct",quantity:2,unit:"m",rate:100,progress:1,amount:200}]}],
-      receipts:[{source_id:"legacy-receipt",project_source_id:"legacy-project",kind:"advance",date,amount:50}],
+        lines:[{source_sheet:"old",source_row:1,description:"Legacy work",mode:"direct",quantity:2,unit:"m",rate:100,progress:0.6,amount:120}]},
+      {source_id:"legacy-certificate-2",project_source_id:"legacy-project",source_number:"10",work_to:date,
+        lines:[{source_sheet:"old",source_row:2,description:"Legacy work",mode:"direct",quantity:2,unit:"m",rate:100,progress:0.4,amount:80}]}],
+      receipts:[{source_id:"legacy-receipt",project_source_id:"legacy-project",source_number:"9",kind:"advance",date,amount:50},
+      {source_id:"legacy-receipt-2",project_source_id:"legacy-project",source_number:"10",kind:"receipt",date:"2026-10-11",amount:25}],
     });
-    const legacy = (await api(cert + "?status=issued&q=Legacy+Project",token)).items[0];
+    const imported = (await api(cert + "?status=unapproved&q=Legacy+Project",token)).items;
+    const legacy = imported.find((item) => item.legacy_number === "9");
     assert.equal(legacy.legacy_number,"9");
-    const legacyDetail = await api(cert + "/" + legacy.id,token);
-    assert.equal(legacyDetail.lines[0].progress,100);
+    const legacyRoute = cert + "/" + legacy.id;
+    const legacyDetail = await api(legacyRoute,token);
+    assert.equal(legacyDetail.lines[0].progress,60);
     assert.equal(legacyDetail.totals.advance_receipts,50);
+    assert.equal(legacyDetail.totals.cumulative_payable,70);
+    const nextLegacy = await api(cert + "/" + imported.find((item) => item.legacy_number === "10").id,token);
+    assert.equal(nextLegacy.lines[0].previous_progress,60);
+    assert.equal(nextLegacy.lines[0].current_progress,40);
+    assert.equal(nextLegacy.totals.previous,120);
+    assert.equal(nextLegacy.totals.current,80);
+    assert.equal(nextLegacy.totals.cumulative,200);
+    assert.equal(nextLegacy.totals.cumulative_payable,125);
     const legacyStatement = await api("/documents/statement?customer=Legacy+Test+Customer&report_language=en",token);
     assert.equal(legacyStatement.totals.debit,200);
-    assert.equal(legacyStatement.totals.credit,50);
-    const correction = await api(cert + "/" + legacy.id + "/action",token,"POST",{
-      action:"revise", reason:"Correct an item", version:legacyDetail.version,
+    assert.equal(legacyStatement.totals.credit,75);
+    const original = db.get("SELECT snapshot_json FROM cert_revisions WHERE id=?",[legacy.id]).snapshot_json;
+    await api(legacyRoute + "/action",token,"POST",{action:"revise",reason:"Draft test",version:legacyDetail.version},409);
+    const edited = await api(legacyRoute,token,"PUT",{
+      version:legacyDetail.version,lines:[{...legacyDetail.lines[0], description:"Edited legacy work"}],
     });
+    assert.equal(edited.id,legacy.id);
+    assert.equal(edited.totals.current,120);
+    assert.equal(edited.lines[0].description,"Edited legacy work");
+    assert.equal(db.get("SELECT snapshot_json FROM cert_revisions WHERE id=?",[legacy.id]).snapshot_json,original);
+    const approved = await api(legacyRoute + "/action",token,"POST",{action:"approve",version:edited.version});
+    assert.equal(approved.status,"approved");
+    await api(legacyRoute,token,"PUT",{version:approved.version,lines:[]},409);
+    const correction = await api(legacyRoute + "/action",token,"POST",{action:"revise", reason:"Correct an item",version:approved.version});
     assert.equal(correction.totals.current,0);
-    assert.equal(correction.totals.previous,200);
-    assert.equal(correction.lines[0].description,"Legacy work");
+    assert.equal(correction.totals.previous,120);
+    assert.equal(correction.lines[0].description,"Edited legacy work");
     await api("/auth/logout",viewToken,"POST",{user_id:viewer.id});
     await api(cert + "/access",viewToken,"GET",undefined,401);
     assert.equal(db.get("PRAGMA foreign_key_check"),null);

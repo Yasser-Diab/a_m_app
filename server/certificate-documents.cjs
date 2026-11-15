@@ -85,6 +85,7 @@ async function writeCertificateXlsx(model) {
   if (model.watermark) identity.addRow([model.watermark]);
   for (const group of model.fieldGroups) for (const field of group) identity.addRow([field.label, field.value]);
   if (model.preparedBy) identity.addRow([model.labels.prepared, model.preparedBy]);
+  if (model.preparedAt) identity.addRow(['',model.preparedAt]);
   if (model.issuer.website) identity.addRow([model.issuer.website, model.issuer.shortName]);
   if (model.appVersion) identity.addRow([`EasyCommercial ${model.appVersion}`]);
   const type = { key: 'work_type', label: model.labels.work_type, weight: 18, kind: 'text' };

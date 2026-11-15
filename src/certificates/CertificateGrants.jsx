@@ -1,7 +1,7 @@
 const capabilityLabels = {
   view: ["عرض المستخلصات", "View certificates"],
   create: ["إنشاء ونسخ المسودات", "Create and copy drafts"],
-  edit_draft: ["تعديل المسودات", "Edit drafts"],
+  edit_draft: ["تعديل المستخلصات غير المعتمدة", "Edit unapproved certificates"],
   import: ["استيراد البنود", "Import work rows"],
   create_master: ["إضافة العملاء والمشروعات والمواقع", "Create customers, projects and locations"],
   manage_settings: ["إدارة إعدادات المستخلصات", "Manage certificate settings"],

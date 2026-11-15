@@ -91,7 +91,7 @@ export function Status({ value, t }) {
   const labels = {
     draft: ["مسودة", "Draft"], in_review: ["قيد المراجعة", "In review"],
     submitted: ["قيد المراجعة", "In review"], review: ["قيد المراجعة", "In review"],
-    approved: ["معتمد", "Approved"], issued: ["صادر", "Issued"],
+    unapproved: ["غير معتمد", "Unapproved"], approved: ["معتمد", "Approved"], issued: ["صادر", "Issued"],
     legacy: ["صادر", "Issued"], historical: ["صادر", "Issued"], imported: ["صادر", "Issued"],
     void: ["ملغى", "Void"], voided: ["ملغى", "Voided"],
     superseded: ["مستبدل", "Superseded"], ready: ["جاهز", "Ready"],

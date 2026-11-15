@@ -1,4 +1,7 @@
-const MODEL_VERSION = 2;
+const QRCode = require('qrcode-svg');
+const {progressAtAmount} = require('./certificate-valuation.cjs');
+
+const MODEL_VERSION = 3;
 
 const labels = {
   en: {
@@ -14,13 +17,13 @@ const labels = {
     description: 'Works', width: 'Width', length: 'Length', height: 'Height',
     dimension_unit: 'Measure unit', count: 'Count', billed_quantity: 'Quantity', unit: 'Unit',
     rate: 'Rate', agreed_amount: 'Agreed amount', progress: 'Progress', note: 'Note',
-    last_current: 'Last certificate current', previous: 'Previously certified', current: 'Current certificate',
-    cumulative: 'Certified to date', cover: 'Consolidated work', detail: 'Work details',
+    last_current: 'Last certificate current', previous: 'Previous value', current: 'Current value',
+    cumulative: 'Cumulative value', cover: 'Consolidated work', detail: 'Work details',
     subtotal: 'Work type subtotal', total: 'Total work', finance: 'Settlement', basis: 'Basis',
     current_payable: 'Current net payable', cumulative_payable: 'Net payable to date',
     current_credit: 'Current credit', cumulative_credit: 'Credit to date',
     ordinary_collections: 'Ordinary collections', advance_recovery: 'Advance recovery',
-    settled_work: 'Certified work', receipts: 'Payment details', advance_receipts: 'Advance payments received',
+    settled_work: 'Work value', receipts: 'Payment details', advance_receipts: 'Advance payments received',
     collection_received: 'Receipt date', collection_cleared: 'Clearance date',
     received_date: 'Received', method: 'Method', reference: 'Reference', amount: 'Amount',
     receipt_type: 'Type', status: 'Status', payment_details_through: 'Payment details through',
@@ -46,13 +49,13 @@ const labels = {
     description: 'الأعمال', width: 'العرض', length: 'الطول', height: 'الارتفاع',
     dimension_unit: 'وحدة القياس', count: 'العدد', billed_quantity: 'الكمية', unit: 'الوحدة',
     rate: 'سعر الوحدة', agreed_amount: 'القيمة المتفق عليها', progress: 'نسبة الإنجاز', note: 'ملاحظة',
-    last_current: 'جاري المستخلص السابق', previous: 'الأعمال السابقة المعتمدة', current: 'جاري المستخلص',
-    cumulative: 'إجمالي الأعمال المعتمدة', cover: 'ملخص الأعمال', detail: 'تفاصيل الأعمال',
+    last_current: 'جاري المستخلص السابق', previous: 'القيمة السابقة', current: 'القيمة الحالية',
+    cumulative: 'القيمة التراكمية', cover: 'ملخص الأعمال', detail: 'تفاصيل الأعمال',
     subtotal: 'إجمالي نوع العمل', total: 'إجمالي الأعمال', finance: 'التسوية المالية', basis: 'الأساس',
     current_payable: 'صافي المستحق للفترة', cumulative_payable: 'صافي المستحق حتى تاريخه',
     current_credit: 'رصيد دائن للفترة', cumulative_credit: 'رصيد دائن حتى تاريخه',
     ordinary_collections: 'التحصيلات العادية', advance_recovery: 'استرداد الدفعة المقدمة',
-    settled_work: 'الأعمال المعتمدة', receipts: 'تفاصيل الدفعات', advance_receipts: 'الدفعات المقدمة المستلمة',
+    settled_work: 'قيمة الأعمال', receipts: 'تفاصيل الدفعات', advance_receipts: 'الدفعات المقدمة المستلمة',
     collection_received: 'تاريخ الاستلام', collection_cleared: 'تاريخ التسوية',
     received_date: 'تاريخ الاستلام', method: 'طريقة التحصيل', reference: 'المرجع', amount: 'المبلغ',
     receipt_type: 'النوع', status: 'الحالة', payment_details_through: 'تفاصيل الدفعات حتى',
@@ -137,20 +140,53 @@ function detailColumns(lines, moneyKeys, sharedLocation, translations) {
     (pricedQuantity || populated('unit')) && column('unit', 7),
     (pricedQuantity || populated('rate')) && column('rate', 11, 'money'),
     populated('agreed_amount') && column('agreed_amount', 14, 'money'),
-    populated('progress') && column('progress', 13, 'percent'),
+    populated('previous_progress') && column('previous_progress', 10, 'percent'),
+    populated('current_progress') && column('current_progress', 10, 'percent'),
     ...moneyKeys.map((key) => column(key, 15, 'money')),
     populated('note') && column('note', 18),
   ];
   return columns.filter(Boolean).map((entry) => ({ label: translations[entry.key], ...entry }));
 }
 
+function quantitySummary(lines) {
+  const totals = new Map();
+  for (const line of lines) {
+    if (line.billed_quantity == null || !line.unit) continue;
+    const unit = /^(m2|m²|م2|م²|sqm|متر مربع)$/i.test(line.unit) ? 'm²' : line.unit;
+    totals.set(unit, (totals.get(unit) || 0) + line.billed_quantity);
+  }
+  const format = new Intl.NumberFormat('en-US',{maximumFractionDigits:6});
+  return [...totals].map(([unit, value]) => `${format.format(value)} ${unit}`).join(' + ');
+}
+
+function certificateQr({issuer, shortName, issuedOn, quantity, due, currency, customer, project}) {
+  const payable = due == null ? 'Pending' : `${currency} ${new Intl.NumberFormat('en-US',{
+    minimumFractionDigits:2, maximumFractionDigits:2,
+  }).format(due)}`;
+  const payload = [
+    `Company: ${issuer.slice(0,180)}${shortName ? ` #${shortName.slice(0,30)}#` : ''}`,
+    `Date of issuance: ${issuedOn || 'Pending issuance'}`,
+    `Total quantity: ${quantity.slice(0,130) || 'None'}`,
+    `Total due amount: ${payable}`,
+    `Customer: ${customer.slice(0,160)} #${project.slice(0,125)}#`,
+  ].join('\n').toWellFormed();
+  const svg = new QRCode({content:payload,padding:4,width:256,height:256,ecl:'M',join:true}).svg();
+  return 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64');
+}
+
 function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const header = input.header || {};
   const locale = (header.locale || input.locale) === 'ar' ? 'ar' : 'en';
-  const historical = input.status === 'historical';
+  const historical = input.legacy === true || input.status === 'historical';
   const issued = historical || input.status === 'issued' || Boolean(input.official_number);
+  const approved = input.status === 'approved' || input.status === 'issued';
   const t = { ...labels[locale],
-    stamp: locale === 'ar' ? 'ختم الشركة' : 'Company stamp', prepared: locale === 'ar' ? 'أعد التقرير' : 'Prepared by' };
+    stamp: locale === 'ar' ? 'ختم الشركة' : 'Company stamp', prepared: 'By',
+    previous_progress: locale === 'ar' ? 'الإنجاز السابق' : 'Previous progress',
+    current_progress: locale === 'ar' ? 'الإنجاز الحالي' : 'Current progress',
+    total_quantity: locale === 'ar' ? 'إجمالي الكمية' : 'Total quantity',
+    recorded_basis: locale === 'ar' ? 'الأعمال والدفعات المسجلة' : 'Recorded work and payments',
+  };
   const project = input.project || {};
   const customer = input.customer || {};
   const issuer = input.issuer || input.branding || {};
@@ -160,7 +196,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const issuerAlternate = issuerAr;
   const choices = header.optional_fields;
   const officialNumber = text(input.official_number ?? (historical ? input.legacy_number : ''));
-  const watermark = issued ? '' : variant === 'customer' ? (locale === 'ar' ? 'مسودة' : 'Draft') : t.draft;
+  const watermark = input.show_status_watermark === false ? '' : approved ? 'APPROVED' : 'UNAPPROVED';
   const certificateType = t[`${header.type || 'progress'}_type`] || t.progress_type;
   const currency = /^[A-Z]{3}$/.test(text(header.currency)) ? text(header.currency) : 'EGP';
   const totals = input.totals || {};
@@ -179,14 +215,16 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       dimension_unit: measured ? text(line.dimension_unit) : '',
       count: measured ? number(line.count) : null,
       billed_quantity: number(line.billed_quantity ?? line.quantity), unit: text(line.unit),
-      rate: number(line.rate), agreed_amount: number(line.agreed_amount), progress: number(line.progress) ?? 100,
+      rate: number(line.rate), agreed_amount: number(line.agreed_amount),
+      previous_progress: Object.hasOwn(line,'previous_progress') ? number(line.previous_progress) :
+        (line.previous ? progressAtAmount(line,money(line.previous)) : 0),
+      current_progress: Object.hasOwn(line,'current_progress') ? number(line.current_progress) :
+        line.carried_forward ? 0 : (line.recognition === 'cumulative' ? progressAtAmount(line,money(line.current)) : number(line.progress) ?? 100),
       note: text(line.note), last_current: comparable ? money(line.last_current) : null,
       previous: money(line.previous), current: money(line.current), cumulative: money(line.cumulative),
     };
   });
-  const moneyKeys = historical ? ['current'] : comparable
-    ? ['last_current', 'previous', 'current', 'cumulative']
-    : ['previous', 'current', 'cumulative'];
+  const moneyKeys = comparable ? ['last_current', 'previous', 'current', 'cumulative'] : ['previous', 'current', 'cumulative'];
   const columns = detailColumns(lines, moneyKeys, locations.size < 2 && sharedLocation && [...locations].every((name) => !name || name === sharedLocation), t);
   const groups = new Map();
   const detailGroups = [];
@@ -203,15 +241,19 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   }
   const components = totals.components || [];
   const recordedCollections = [
-    ...(totals.advance_receipts ? [{key:'advance_receipts', cumulative:money(totals.advance_receipts)}] : []),
+    ...(totals.advance_receipts ? [{key:'advance_receipts',
+      previous:historical ? -money(totals.previous_advance_receipts) : null,
+      current:historical ? -money(totals.current_advance_receipts) : null,
+      cumulative:(historical ? -1 : 1) * money(totals.advance_receipts)}] : []),
     ...(totals.ordinary_collections == null || (historical && !totals.ordinary_collections) ? [] : [{
       key:'ordinary_collections',
       basis:text(t['collection_' + input.rule_settings?.collections_basis]),
+      previous:totals.previous_collections == null ? null : -money(totals.previous_collections),
       current:totals.current_collections == null ? null : -money(totals.current_collections),
       cumulative:-money(totals.ordinary_collections),
     }]),
   ];
-  const financeRows = (historical ? recordedCollections : [
+  const financeRows = [
     { key: 'settled_work', previous: money(totals.previous), current: money(totals.current), cumulative: money(totals.cumulative) },
     ...components.filter((entry) => (entry.category || entry.kind) !== 'advance_recovery').map((entry) => ({
       label: text(entry.label || entry.name || t[entry.category || entry.kind] || t.other_rule),
@@ -233,15 +275,15 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       cumulative: number(totals.reversed_advance_recovery),
     }] : []),
     ...recordedCollections,
-    {
+    ...(totals.current_payable == null ? [] : [{
       key: money(totals.current_payable) < 0 ? 'current_credit' : 'current_payable',
       current: Math.abs(money(totals.current_payable)), emphasis: true,
-    },
-    {
+    }]),
+    ...(totals.cumulative_payable == null ? [] : [{
       key: money(totals.cumulative_payable) < 0 ? 'cumulative_credit' : 'cumulative_payable',
       cumulative: Math.abs(money(totals.cumulative_payable)), emphasis: true,
-    },
-  ]).map((entry) => ({ ...entry, label: entry.label || t[entry.key] }));
+    }]),
+  ].map((entry) => ({ ...entry, label: entry.label || t[entry.key] }));
 
   const receiptColumns = [
     column('received_date', 11), column('receipt_type', 10),
@@ -256,6 +298,11 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     allocation: number(receipt.allocated_amount ?? receipt.allocation),
   })) : [];
 
+  const issueDate = text(input.issued_at || header.issue_date || (historical ? header.work_to : '')).slice(0,10);
+  const quantity = quantitySummary(lines);
+  const customerName = nameForPrint(customer, locale);
+  const projectName = nameForPrint(project, locale);
+  const shortName = text(issuer.companyAbbreviation || issuer.abbreviation);
   const fieldGroups = [
     [metadata('customer', nameForPrint(customer, locale), { required: true, wide: true }),
       metadata('customer_code', customer.code, { isolated: true }),
@@ -271,12 +318,13 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       metadata('contract_date', header.contract_date || project.contract_date, { isolated: true })],
     [metadata('certificate', [certificateType, officialNumber].filter(Boolean).join(' · '), { required: true, wide: true }),
       metadata('revision', variant === 'internal' ? input.revision : '', { isolated: true }),
-      metadata('issue_date', text(input.issued_at || header.issue_date).slice(0, 10), { isolated: true }),
+      metadata('issue_date', issueDate, { isolated: true }),
       metadata('work_from', header.work_from, { isolated: true }),
       metadata('work_to', header.work_to, { isolated: true }),
       metadata('collection_cutoff', header.collection_cutoff || (historical && receipts.length ? header.work_to : ''), { isolated: true }),
       metadata('payment_details_through', receipts.length ? input.payment_details_through : '', {isolated:true}),
       metadata('currency', currency, { isolated: true }),
+      metadata('total_quantity', quantity, { isolated: true }),
       metadata('title', header.title),
       metadata('notes', choices?.notes === true || choices?.includes?.('notes') ? header.notes : '', { wide: true })],
   ].map((group) => visibleMetadata(group, choices, t)).filter((group) => group.length);
@@ -287,21 +335,23 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
 
   return {
     modelVersion: MODEL_VERSION, locale, direction: locale === 'ar' ? 'rtl' : 'ltr', labels: t,
-    variant, issued, historical, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',
+    variant, issued, historical, approved, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',
     currency, outputMode, measured, paper: header.paper_size === 'Letter' ? 'Letter' : 'A4',
     landscape: measured || columns.length > 9,
     issuer: {
       name: issuerName,
       alternate: issuerAlternate !== issuerName ? issuerAlternate : '',
       website: text(issuer.website),
-      shortName: text(issuer.companyAbbreviation || issuer.abbreviation),
+      shortName,
       logo: /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/i.test(issuer.logo_data_url || issuer.logoDataUrl || issuer.logoDataUri || '')
         ? (issuer.logo_data_url || issuer.logoDataUrl || issuer.logoDataUri) : '',
     },
-    preparedBy: text(input.prepared_by), appVersion: text(input.app_version),
+    preparedBy: text(input.prepared_by), preparedAt: text(input.prepared_at), appVersion: text(input.app_version),
+    qr: certificateQr({issuer:issuerName,shortName,issuedOn:issueDate,quantity,due:totals.cumulative_payable,currency,
+      customer:customerName,project:projectName}),
     signatures: (input.rule_settings?.signatures || []).map((person) => ({ name: text(person.name), title: text(person.title) })).filter((person) => person.name),
     showGroupSubtotals: Boolean(header.group_work_types && header.show_group_subtotals),
-    identities: { customer: nameForPrint(customer, locale), project: nameForPrint(project, locale) },
+    identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
     detailGroups: detailGroups.map(({ name, lines: groupLines }) => ({
       name, lines: groupLines, totals: financialRollup(groupLines, moneyKeys),

@@ -58,7 +58,8 @@ function importedReceipts(database, project, existing = []) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !row.amount_minor) return [];
     if (entry.reference && known.has(JSON.stringify([lookup(entry.reference), date, row.amount_minor]))) return [];
     return [{id:`receipt-import-${row.rowid}`, received_at:date, cleared_at:date, kind:entry.kind === "advance" ? "advance" : "receipt",
-      status:"cleared", amount_minor:row.amount_minor, reference:entry.reference || "", location:entry.location, source:"historical"}];
+      status:"cleared", amount_minor:row.amount_minor, reference:entry.reference || "", location:entry.location,
+      certificate_number:entry.source_number, source:"historical"}];
   });
 }
 

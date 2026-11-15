@@ -6,16 +6,17 @@ const {customerReceipts} = require("./commercial-ledger.cjs");
 const DATE_FLOOR = "0001-01-01";
 
 function allocationLedger(database, projectId, profile, cutoff, options = {}) {
-  const {workCutoff = cutoff,previousCutoff = DATE_FLOOR,locationId = null,revisionId = null,seriesKey = null} = options;
+  const {workCutoff = cutoff,previousCutoff = DATE_FLOOR,locationId = null,revisionId = null,seriesKey = null,
+    includeImported = () => true, includeReceipt = () => true} = options;
   const clearance = profile.settings.collections_basis === "cleared";
   const project = database.get("SELECT * FROM cert_projects WHERE id=?", [projectId]);
   const {active, prior, imported} = customerReceipts(database, project);
   const location = locationId === null ? null : database.get(
     "SELECT name, code FROM cert_locations WHERE project_id=? AND id=?", [projectId,locationId]);
   const locationNames = new Set([lookup(location?.name), lookup(location?.code)].filter(Boolean));
-  const external = [...prior, ...imported].filter((row) => row.received_at && row.received_at <= cutoff &&
+  const external = [...prior, ...imported.filter(includeImported)].filter((row) => row.received_at && row.received_at <= cutoff &&
     (locationId === null || locationNames.has(lookup(row.location))));
-  const entries = [...active, ...external].filter((row) => row.received_at <= cutoff)
+  const entries = [...active, ...external].filter((row) => row.received_at <= cutoff && includeReceipt(row))
     .sort((left, right) => left.received_at.localeCompare(right.received_at));
   const ids = new Set(active.map(({id}) => id));
   const allocations = database.all(`SELECT a.*,r.location_id AS certificate_location_id,r.series_key AS certificate_series

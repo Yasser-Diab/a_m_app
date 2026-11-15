@@ -48,6 +48,12 @@ function quantityAt(value, scale) {
   return divide(value, step) * step;
 }
 
+function progressAtAmount(line, value) {
+  const base = line.mode === "lump" ? Number(line.agreed_amount) :
+    Number(line.billed_quantity ?? line.quantity) * Number(line.rate);
+  return Number.isFinite(base) && base > 0 ? Math.round(value / base * 10000) / 100 : null;
+}
+
 function calculateLine(line, before, settings) {
   const errors = [];
   const complain = (field, message) => errors.push({field, message, line_id: line.id});
@@ -65,6 +71,7 @@ function calculateLine(line, before, settings) {
   const overridden = present(line.override_quantity);
   const override = decimal(line.override_quantity);
   const previous = BigInt(toMinor(before?.cumulative) || 0);
+  let previousProgress = before ? before.cumulative_progress ?? progressAtAmount(before,money(previous)) : 0;
   const lastCurrent = before ? BigInt(toMinor(before.current) || 0) : null;
   let geometric = null;
   let unroundedBillable = null;
@@ -80,7 +87,8 @@ function calculateLine(line, before, settings) {
   if (!line.description && !line.work_item) complain("description", "Work description is required");
   if (line.carried_forward) {
     return {line: {...line, previous: money(previous), current: 0, cumulative: money(previous),
-      last_current: lastCurrent === null ? null : money(lastCurrent), billed_quantity: null,
+      previous_progress:previousProgress, current_progress:0, cumulative_progress:previousProgress,
+      last_current: lastCurrent === null ? null : money(lastCurrent), billed_quantity: before?.billed_quantity ?? before?.quantity ?? null,
       geometric_quantity: null}, errors};
   }
 
@@ -145,12 +153,20 @@ function calculateLine(line, before, settings) {
     complain("progress", "Certified work would exceed the agreed amount");
   if (gross > BigInt(MAX) * SCALE || gross < -BigInt(MAX) * SCALE)
     complain("rate", "Calculated amount exceeds the supported limit");
+  const applicable = mode !== "adjustment" && !(mode === "lump" && claim !== null);
+  if (applicable && recognition === "cumulative" && before)
+    previousProgress = progressAtAmount({...line,billed_quantity:billed == null ? null : numeric(billed)},money(previous));
+  const currentProgress = applicable ? recognition === "cumulative" ?
+    (previousProgress == null ? null : numeric(completion) - previousProgress) : numeric(completion) :
+    progressAtAmount({...line,billed_quantity:billed == null ? null : numeric(billed)},money(current));
+  const cumulativeProgress = currentProgress == null || previousProgress == null ? null : previousProgress + currentProgress;
   return {
     errors,
     line: {
       ...line,
       unit: mode === "area" ? "m²" : mode === "linear" ? "m" : mode === "count" ? line.unit || "pcs" : line.unit,
       previous: money(previous), current: money(current), cumulative: money(previous + current),
+      previous_progress:previousProgress, current_progress:currentProgress, cumulative_progress:cumulativeProgress,
       last_current: lastCurrent === null ? null : money(lastCurrent),
       geometric_quantity: geometric === null ? null : numeric(geometric),
       billed_quantity: billed === null ? null : numeric(billed),
@@ -165,9 +181,7 @@ function calculateValuation(lines, baseline, profile, ledger) {
   const active = new Set(ordered.map((line) => line.identity));
   for (const [identity, before] of prior) {
     if (!active.has(identity)) ordered.push({
-      id: before.id, identity, location_id: before.location_id, location: before.location,
-      work_type: before.work_type, work_item: before.work_item, description: before.description,
-      mode: before.mode, carried_forward: true,
+      ...before, carried_forward: true,
     });
   }
 
@@ -248,6 +262,7 @@ function calculateValuation(lines, baseline, profile, ledger) {
       current_payable: money(net - currentCollected + periodReleased),
       cumulative_payable: money(previousNet + net - rawCollected + releasedRecovery),
       ordinary_collections: money(rawCollected), current_collections: money(currentCollected),
+      previous_collections: money(rawCollected-currentCollected),
       ...(ledger.advance_principal_minor ? {advance_receipts:money(ledger.advance_principal_minor)} : {}),
       advance_recovery: money(advanceRecovery), cumulative_advance_recovery: money(previousRecovery + advanceRecovery),
       reversed_advance_recovery: money(releasedRecovery), current_reversed_advance_recovery: money(periodReleased), components,
@@ -259,4 +274,4 @@ function calculateValuation(lines, baseline, profile, ledger) {
   };
 }
 
-module.exports = {calculateValuation, MODES, decimal, toMinor, money};
+module.exports = {calculateValuation, progressAtAmount, MODES, decimal, toMinor, money};

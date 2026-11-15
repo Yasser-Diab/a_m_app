@@ -13,7 +13,7 @@ const numberFormats = {
 function amount(value, kind = 'money') {
   if (value == null || !Number.isFinite(value)) return '';
   const suffix = kind === 'percent' ? '%' : '';
-  return `<bdi dir="ltr">${numberFormats[kind].format(value)}${suffix}</bdi>`;
+  return `<bdi dir="ltr">${numberFormats[kind].format(value || 0)}${suffix}</bdi>`;
 }
 
 function rowCells(row, columns) {
@@ -34,13 +34,13 @@ function subtotalRow(values, columns, moneyKeys, title) {
 }
 
 function fullIdentity(model) {
-  const { issuer, fieldGroups, watermark } = model;
+  const { issuer, fieldGroups, qr } = model;
   return `<header class="full-identity">
     <div class="issuer">
       ${issuer.logo ? `<img src="${escapeHtml(issuer.logo)}" alt="">` : ''}
       <div>${issuer.name ? `<strong><bdi dir="auto">${escapeHtml(issuer.name)}</bdi></strong>` : ''}
       ${issuer.alternate ? `<div class="issuer-details"><bdi dir="auto">${escapeHtml(issuer.alternate)}</bdi></div>` : ''}</div>
-      ${watermark ? `<span class="draft">${escapeHtml(watermark)}</span>` : ''}
+      ${qr ? `<img class="certificate-qr" src="${escapeHtml(qr)}" alt="Certificate QR code">` : ''}
     </div>
     <div class="identities" style="--groups:${Math.max(1, fieldGroups.length)}">
       ${fieldGroups.map((group) => `<dl>${group.map((field) => `<div${field.wide ? ' class="wide"' : ''}><dt>${escapeHtml(field.label)}</dt><dd><bdi dir="${field.isolated ? 'ltr' : 'auto'}">${escapeHtml(field.value)}</bdi></dd></div>`).join('')}</dl>`).join('')}
@@ -48,20 +48,22 @@ function fullIdentity(model) {
 }
 
 function compactIdentity(model) {
-  const { issuer, officialNumber, certificateType, identities, watermark } = model;
+  const { issuer, officialNumber, certificateType, identities, qr } = model;
   return `<header class="compact-identity"><strong><bdi dir="auto">${escapeHtml(issuer.name)}</bdi></strong>
     <bdi dir="auto">${escapeHtml(identities.project)}</bdi><span>${escapeHtml(certificateType)} <bdi dir="ltr">${escapeHtml(officialNumber)}</bdi></span>
-    ${watermark ? `<span class="draft">${escapeHtml(watermark)}</span>` : ''}</header>`;
+    ${qr ? `<img class="certificate-qr" src="${escapeHtml(qr)}" alt="Certificate QR code">` : ''}</header>`;
 }
 
 function pageTemplate(id, title, table, model) {
   return `<template id="${id}"><article class="sheet">${fullIdentity(model)}${compactIdentity(model)}
+    ${model.watermark ? `<div class="status-watermark" data-approved="${model.approved}" dir="ltr">${escapeHtml(model.watermark)}</div>` : ''}
     <main class="page-content">${title ? `<h1>${escapeHtml(title)}</h1>` : ''}${table || ''}</main>
     <footer><div><div dir="${model.direction}">${escapeHtml(model.labels.page)} <bdi dir="ltr" class="page-number"></bdi> ${escapeHtml(model.labels.of)} <bdi dir="ltr" class="page-total"></bdi></div>
       ${model.appVersion ? `<small>EasyCommercial ${escapeHtml(model.appVersion)}</small>` : ''}</div>
     <div class="footer-company"><div><bdi dir="ltr">${escapeHtml(model.issuer.website)}</bdi></div>
       <div><bdi dir="auto">${escapeHtml(model.issuer.shortName)}</bdi></div></div>
-    <div class="footer-user" dir="${model.direction}">${model.preparedBy ? `${escapeHtml(model.labels.prepared)} <bdi dir="auto">${escapeHtml(model.preparedBy)}</bdi>` : ''}</div></footer></article></template>`;
+    <div class="footer-user" dir="ltr">${model.preparedBy ? `<div>By <bdi dir="auto">${escapeHtml(model.preparedBy)}</bdi></div>` : ''}
+      ${model.preparedAt ? `<small>${escapeHtml(model.preparedAt)}</small>` : ''}</div></footer></article></template>`;
 }
 
 function signaturesBlock(model) {
@@ -76,6 +78,7 @@ function financeBlock(model) {
   const showBasis = financeRows.some((row) => row.basis || row.basisValue != null);
   const valueColumns = ['previous', 'current', 'cumulative'];
   return `<section class="finance" aria-label="${escapeHtml(labels.finance)}"><h2>${escapeHtml(labels.finance)} <span><bdi dir="ltr">${escapeHtml(currency)}</bdi></span></h2>
+    ${model.historical && labels.recorded_basis ? `<div class="settlement-basis">${escapeHtml(labels.recorded_basis)}</div>` : ''}
     <table aria-label="${escapeHtml(labels.finance)}"><colgroup><col style="width:${showBasis ? 29 : 43}%">
     ${showBasis ? '<col style="width:20%">' : ''}${valueColumns.map(() => '<col>').join('')}</colgroup>
     <thead><tr><th></th>${showBasis ? `<th>${escapeHtml(labels.basis)}</th>` : ''}${valueColumns.map((key) => `<th class="number">${escapeHtml(labels[key])}</th>`).join('')}</tr></thead>
@@ -140,15 +143,18 @@ function buildCertificateHtml(model) {
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: white; color: #183148; }
     body { font: 10pt/1.36 Arial, Tahoma, sans-serif; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    .sheet { width: ${width}mm; height: ${height - 0.6}mm; padding: 12mm 13mm 9mm; display: flex; flex-direction: column; }
+    .sheet { position: relative; isolation: isolate; width: ${width}mm; height: ${height - 0.6}mm; padding: 10mm 13mm 9mm; display: flex; flex-direction: column; }
     .sheet + .sheet { break-before: page; }
     header, h1, h2, th, td, footer { overflow-wrap: anywhere; }
     .issuer { display: flex; align-items: center; gap: 3mm; border-block-end: 1.4pt solid #265e68; padding-block-end: 3mm; }
     .issuer img { width: 18mm; height: 14mm; object-fit: contain; }
+    .issuer:has(.certificate-qr), .compact-identity:has(.certificate-qr) { position: relative; min-height: 21mm; padding-left: 23mm; }
+    .issuer img.certificate-qr, .compact-identity img.certificate-qr { position: absolute; left: 0; top: 0; width: 20mm; height: 20mm; object-fit: contain; }
     .issuer strong { display: block; font-size: 19pt; line-height: 1.15; letter-spacing: -0.3pt; }
     .issuer-details { color: #3c5266; margin-block-start: 1mm; }
-    .draft { display: inline-block; margin-inline-start: auto; align-self: flex-start; padding: 1mm 2.4mm; border: 0.6pt solid #a16b27; border-radius: 1mm; color: #774507; font-weight: 700; white-space: nowrap; }
-    .identities { display: grid; grid-template-columns: repeat(var(--groups), minmax(0, 1fr)); gap: 3mm; margin-block: 3mm; }
+    .status-watermark { position: absolute; left: 50%; top: 49%; z-index: 3; transform: translate(-50%, -50%) rotate(-25deg); pointer-events: none; white-space: nowrap; font-size: 36pt; font-weight: 700; letter-spacing: 2pt; opacity: .3; color: #934044; }
+    .status-watermark[data-approved="true"] { color: #427052; }
+    .identities { display: grid; grid-template-columns: repeat(var(--groups), minmax(0, 1fr)); gap: 3mm; margin-block: 2mm; }
     .identities dl { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 2mm; align-content: start; border-inline-start: 0.75pt solid #c7d8dc; padding-inline-start: 2.4mm; margin: 0; }
     .identities dl > div { min-width: 0; margin-block-start: 1mm; }
     .identities .wide { grid-column: 1 / -1; }
@@ -163,7 +169,7 @@ function buildCertificateHtml(model) {
     h2 { font-size: 11pt; margin: 2mm 0 1.4mm; }
     h2 span { font-size: 8pt; font-weight: 400; margin-inline-start: 2mm; color: #466476; }
     table { width: 100%; table-layout: fixed; border: 0; border-collapse: collapse; font-size: 9pt; }
-    th, td { border-block-end: 0.65pt solid #d4dee4; padding: 1.25mm 1.5mm; vertical-align: top; text-align: start; }
+    th, td { border-block-end: 0.65pt solid #d4dee4; padding: .9mm 1.5mm; vertical-align: top; text-align: start; }
     thead th { background: #e5eef1; border-block-end: 1pt solid #b5cbd1; color: #183148; font-weight: 700; }
     table .number { font-variant-numeric: tabular-nums; text-align: end; }
     tr.group th { background: #f3f7f8; font-size: 9pt; color: #26525a; }
@@ -172,6 +178,7 @@ function buildCertificateHtml(model) {
     .empty { color: #3c5266; padding-block: 4mm; text-align: center; }
     .finance { padding-block-start: 1.5mm; }
     .finance tbody th { font-weight: 400; }
+    .settlement-basis { color: #466476; font-size: 8pt; margin-block-end: 1.3mm; }
     .finance .payable { background: #e5eef1; color: #183148; font-weight: 700; }
     .finance .payable th { font-weight: 700; }
     footer { direction: ltr; border-block-start: 0.7pt solid #adc2c9; padding-block-start: 1.5mm; margin-block-start: 2mm; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4mm; color: #3c5266; font-size: 8pt; }

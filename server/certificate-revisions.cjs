@@ -2,7 +2,8 @@ const crypto = require("node:crypto");
 const {audit, date, encode, fail, idOf, lookup, now, parse, setting, str, today} = require("./certificate-access.cjs");
 const {getProject, getCustomer, getProfile, projectLocations, cleanRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, DATE_FLOOR} = require("./certificate-ledger.cjs");
-const {calculateValuation, MODES, money} = require("./certificate-valuation.cjs");
+const {calculateValuation, MODES, decimal, money, toMinor} = require("./certificate-valuation.cjs");
+const {legacySnapshot, legacyLines, legacyCertificateInput} = require("./certificate-history.cjs");
 
 function normalizeHeader(input = {}, project, profile, originalType) {
   const type = originalType && !["progress", "final"].includes(originalType) ? originalType :
@@ -91,36 +92,27 @@ function replaceLines(database, id, lines) {
 function scopeBaseline(database, row, header) {
   if (row.revises_id) {
     const parent = getRevision(database, row.revises_id);
-    if (parent.status === "historical") {
-      const snapshot = parse(parent.snapshot_json);
-      return {...snapshot, lines: snapshot.lines.map((line) => ({...line, location_id:line.location_id ?? null}))};
-    }
+    if (parent.status === "historical") return legacyCertificateInput(database,parent,{useEdits:false});
+    if (parent.status === "approved") return certificateDocumentInput(database,parent);
   }
   const prior = database.get(`
     SELECT snapshot_json FROM cert_revisions WHERE project_id=? AND series_key=? AND location_id IS ?
       AND id<>? AND status='issued' AND work_to<=?
     ORDER BY work_to DESC,issued_at DESC,id DESC LIMIT 1
   `, [row.project_id, scopeKey(header), header.location_id, row.id, header.work_to]);
-  return prior && parse(prior.snapshot_json);
+  if (prior) return parse(prior.snapshot_json);
+  const earlier = header.location_id == null && database.get(`SELECT * FROM cert_revisions
+    WHERE project_id=? AND series_key=? AND status='historical' AND work_to<=?
+    ORDER BY work_to DESC,CAST(legacy_number AS INTEGER) DESC,id DESC LIMIT 1`,
+  [row.project_id,scopeKey(header),header.work_to]);
+  return earlier ? legacyCertificateInput(database,earlier,{useEdits:false}) : null;
 }
 
 function certificateDocumentInput(database, row, lines = null) {
+  if (row.status === "historical")
+    return {...legacyCertificateInput(database,row),version:row.version,pdf_status:row.pdf_status};
   if (row.snapshot_json) {
-    const snapshot = parse(row.snapshot_json);
-    if (row.status === "historical") {
-      snapshot.lines = (snapshot.lines || []).map((line) => {
-        const progress = line.progress == null || line.progress === "" ? 100 : Number(line.progress);
-        return {...line, progress: Number.isFinite(progress) ? (progress >= 0 && progress <= 1 ? progress * 100 : progress) : 100};
-      });
-      const cutoff = snapshot.header.collection_cutoff || snapshot.header.work_to;
-      if (cutoff) {
-        const ledger = allocationLedger(database, row.project_id, getProfile(database, row.project_id, cutoff), cutoff);
-        snapshot.receipts = recognizedReceipts(ledger);
-        snapshot.totals.ordinary_collections = money(ledger.ordinary_minor);
-        snapshot.totals.advance_receipts = money(ledger.advance_principal_minor);
-      }
-    }
-    return {...snapshot, version:row.version, pdf_status:row.pdf_status};
+    return {...parse(row.snapshot_json),version:row.version,pdf_status:row.pdf_status};
   }
   const header = parse(row.header_json);
   const project = getProject(database, row.project_id);
@@ -132,6 +124,8 @@ function certificateDocumentInput(database, row, lines = null) {
     previousCutoff:baseline?.header?.collection_cutoff ?? DATE_FLOOR,locationId:header.location_id,revisionId:row.id,seriesKey:row.series_key});
   const calculated = calculateValuation(lines || getLines(database, row.id), baseline, profile, ledger);
   const validation = [...calculated.errors];
+  if (row.revises_id && getRevision(database,row.revises_id).status === "approved")
+    validation.push({field:"revises_id",message:"Issue the original certificate before approving the correction"});
   if (!calculated.lines.some((line) => !line.carried_forward) && row.type !== "reopen")
     validation.push({field:"lines", message:"Enter at least one work row"});
   if (baseline?.header?.collection_cutoff > header.collection_cutoff)
@@ -197,7 +191,8 @@ function requireVersion(row, expected) {
 }
 
 function saveDraft(database, row, body, user, grant) {
-  if (row.status !== "draft") fail(409, "Only a draft can be edited");
+  if (row.status === "historical") return saveLegacyDraft(database,row,body,user);
+  if (!["draft","in_review"].includes(row.status)) fail(409, "Approved certificates require a correction");
   requireVersion(row, body.version);
   const old = parse(row.header_json);
   const project = getProject(database, row.project_id);
@@ -215,12 +210,48 @@ function saveDraft(database, row, body, user, grant) {
   const rows = normalizeLines(database, project, header, body.lines === undefined ? getLines(database, row.id) : body.lines);
   const reference = scopeKey(header);
   database.run(`UPDATE cert_revisions SET series_key=?,type=?,locale=?,location_id=?,work_to=?,collection_cutoff=?,
-    header_json=?,rules_version=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+    header_json=?,rules_version=?,status='draft',approved_json=NULL,baseline_id=NULL,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
   [reference,header.type,header.locale,header.location_id,header.work_to,header.collection_cutoff,encode(header),profile.version,row.id]);
   replaceLines(database, row.id, rows);
   audit(database, user, "draft_saved", {projectId: project.id, revisionId: row.id,
     reason: header.override_reason, details: {row_count:rows.length}});
   return getRevision(database, row.id);
+}
+
+function saveLegacyDraft(database,row,body,user) {
+  requireVersion(row,body.version);
+  const snapshot = legacySnapshot(database,row,true);
+  if (snapshot.approval_at) fail(409,"Approved certificates require a correction");
+  const project = getProject(database,row.project_id);
+  const settings = getProfile(database,project.id,snapshot.header.work_to);
+  const locationMap = new Map(projectLocations(database,project.id).map((location) => [lookup(location.name),location]));
+  const existing = legacyLines(snapshot,locationMap);
+  const header = {...snapshot.header,...normalizeHeader({...snapshot.header,...body.header,
+    contract_ref:snapshot.header.contract_ref,location_id:snapshot.header.location_id,rule_override:null},project,settings,row.type)};
+  const original = new Map(existing.map((line) => [line.id,line]));
+  const normalized = new Map(normalizeLines(database,project,header,existing).map((line) => [line.id,line]));
+  const validation = [];
+  const lines = normalizeLines(database,project,header,body.lines ?? existing).map((line) => {
+    const before = original.get(line.id);
+    const fields = normalized.get(line.id);
+    if (before && !before.location_id && !line.location_id) line.location = before.location || "";
+    const sameValuation = fields && ["mode","recognition","unit","dimension_unit"].every((key) => line[key] === fields[key]) &&
+      ["width","height","count","quantity","rate","agreed_amount","progress","claim_amount","adjustment_amount","override_quantity"]
+        .every((key) => decimal(line[key]) === decimal(fields[key]));
+    if (sameValuation && (line.description || line.work_item) && !snapshot.validation?.some((error) => error.line_id === line.id))
+      return {...before,...line};
+    const result = calculateValuation([line],null,{...settings,rules:[]},{ordinary_minor:0,period_ordinary_minor:0,advances:[]});
+    validation.push(...result.errors);
+    return result.lines[0];
+  });
+  if (!lines.length) validation.push({field:"lines",message:"Enter at least one work row"});
+  const current = money(lines.reduce((sum,line) => sum + (toMinor(line.current) || 0),0));
+  const edited = {edited:true,header,lines,validation,totals:{...snapshot.totals,current}};
+  database.run(`INSERT INTO cert_legacy_workflow (revision_id,edited_json) VALUES (?,?)
+    ON CONFLICT(revision_id) DO UPDATE SET edited_json=excluded.edited_json`,[row.id,encode(edited)]);
+  database.run("UPDATE cert_revisions SET version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?",[row.id]);
+  audit(database,user,"draft_saved",{projectId:project.id, revisionId:row.id,details:{row_count:lines.length}});
+  return getRevision(database,row.id);
 }
 
 function approvalKey(input) {
@@ -233,9 +264,10 @@ function validateReview(input) {
 }
 
 function makeRevision(database, row, action, reason, user) {
-  if (!["issued","historical"].includes(row.status)) fail(409, "Only issued certificates can be revised");
+  const source = certificateDocumentInput(database,row);
+  if (!["approved","issued"].includes(source.status) || (action !== "revise" && row.status === "approved"))
+    fail(409, "Approve the certificate before creating a correction");
   if (!reason) fail(400, "A reason is required for this request");
-  const source = parse(row.snapshot_json);
   const project = getProject(database, row.project_id);
   const root = row.root_id || row.id;
   const latest = database.get("SELECT * FROM cert_revisions WHERE root_id=? ORDER BY revision DESC LIMIT 1", [root]);
@@ -249,7 +281,7 @@ function makeRevision(database, row, action, reason, user) {
   const collectionCutoff = workTo > source.header.collection_cutoff ? workTo : source.header.collection_cutoff;
   const header = {...source.header, type, work_from:null, work_to:workTo, collection_cutoff:collectionCutoff,
     rule_override:null, override_reason:null};
-  const lines = type === "void" || row.status === "historical" ? source.lines.map((line) =>
+  const lines = type === "void" || row.status === "historical" ? source.lines.filter((line) => !line.carried_forward).map((line) =>
     ({...line, mode:"adjustment", adjustment_amount:type === "void" ? -line.current : 0, recognition:"incremental", reason})) : [];
   return createDraft(database, project, {header, lines}, user, {type,rootId:root,revisesId:row.id,number:row.revision+1,reason});
 }
@@ -277,18 +309,34 @@ function runAction(database, row, body, user, enqueueRender) {
     database.run(`UPDATE cert_revisions SET status='in_review',baseline_id=?,approved_json=?,version=version+1,
       updated_at=CURRENT_TIMESTAMP WHERE id=?`, [model.baseline?.id ?? null,approvalKey(model),row.id]);
   } else if (action === "return") {
-    if (!["in_review","approved"].includes(row.status)) fail(409, "Certificate must be in review or approved");
+    if (row.status !== "in_review" && !(row.status === "approved" && !row.snapshot_json))
+      fail(409, "Only certificates in review can be returned to draft");
     if (!reason) fail(400, "Enter the review comments");
     database.run(`UPDATE cert_revisions SET status='draft',approved_json=NULL,version=version+1,
       updated_at=CURRENT_TIMESTAMP WHERE id=?`, [row.id]);
   } else if (action === "approve" || action === "issue") {
-    if (row.status !== (action === "approve" ? "in_review" : "approved"))
-      fail(409, action === "approve" ? "Submit the draft before approval" : "Approve the certificate before issuance");
+    if (action === "approve" ? !["draft","in_review","historical"].includes(row.status) : row.status !== "approved")
+      fail(409, action === "approve" ? "This certificate is already approved" : "Approve the certificate before issuance");
     const model = certificateDocumentInput(database,row);
     validateReview(model);
-    if (row.approved_json !== approvalKey(model)) fail(409, "Certificate calculation, baseline or print details changed. Return it to draft and submit again");
-    if (action === "approve") {
-      database.run("UPDATE cert_revisions SET status='approved',version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [row.id]);
+    if ((row.status === "in_review" || action === "issue") && row.approved_json !== approvalKey(model))
+      fail(409, "Certificate calculation, baseline or print details changed. Return it to draft and submit again");
+    if (row.status === "historical") {
+      if (model.approval_at) fail(409,"This certificate is already approved");
+      const approvedAt = now();
+      database.run(`INSERT INTO cert_legacy_workflow (revision_id,approved_json,approved_at,approved_by) VALUES (?,?,?,?)
+        ON CONFLICT(revision_id) DO UPDATE SET approved_json=excluded.approved_json,approved_at=excluded.approved_at,approved_by=excluded.approved_by`,
+      [row.id,encode({...model,status:"approved",approval_at:approvedAt}),approvedAt,user.id]);
+      database.run("UPDATE cert_revisions SET version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?",[row.id]);
+    } else if (action === "approve") {
+      const awaitingIssue = database.get(`SELECT 1 FROM cert_revisions
+        WHERE project_id=? AND series_key=? AND location_id IS ? AND status='approved' AND id<>?`,
+      [row.project_id,row.series_key,row.location_id,row.id]);
+      if (awaitingIssue) fail(409,"Issue the previously approved certificate in this scope first");
+      database.run(`UPDATE cert_revisions SET status='approved',approved_json=?,baseline_id=?,snapshot_json=?,version=version+1,
+        updated_at=CURRENT_TIMESTAMP WHERE id=?`,[approvalKey(model),model.baseline?.id ?? null,encode({...model,status:"approved"}),row.id]);
+      for (const movement of model.recoveries) database.run("INSERT INTO cert_advance_recoveries VALUES (?,?,?,?)",
+        [row.project_id,movement.advance_id,row.id,movement.amount_minor]);
     } else {
       database.run("INSERT OR IGNORE INTO cert_series (project_id,reference) VALUES (?,?)", [row.project_id,row.series_key]);
       const series = database.get("SELECT * FROM cert_series WHERE project_id=? AND reference=?", [row.project_id,row.series_key]);
@@ -309,7 +357,7 @@ function runAction(database, row, body, user, enqueueRender) {
       database.run(`UPDATE cert_revisions SET status='issued',official_number=?,issued_at=?,pdf_status='pending',
         snapshot_json=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`, [number,timestamp,encode(frozen),row.id]);
       for (const movement of model.recoveries) {
-        database.run("INSERT INTO cert_advance_recoveries VALUES (?,?,?,?)",
+        database.run("INSERT OR IGNORE INTO cert_advance_recoveries VALUES (?,?,?,?)",
           [row.project_id,movement.advance_id,row.id,movement.amount_minor]);
       }
       enqueueRender(database,row.id,frozen);
@@ -325,6 +373,7 @@ function runAction(database, row, body, user, enqueueRender) {
 function forAccess(database, row, access) {
   const raw = certificateDocumentInput(database, row);
   const result = {...raw};
+  if (row.status === "approved" && !row.snapshot_json) result.can_return_legacy_approval = true;
   const collectionAccess = access.capabilities.includes("view_collections");
   const auditAccess = access.capabilities.includes("view_audit");
   if (!collectionAccess) {
@@ -337,7 +386,7 @@ function forAccess(database, row, access) {
       .map(({details_json,...event}) => ({...event,details:parse(details_json)}));
   }
   if (!auditAccess) {
-    const editor = row.status === "draft" && access.capabilities.includes("edit_draft");
+    const editor = ["draft","in_review","unapproved"].includes(raw.status) && access.capabilities.includes("edit_draft");
     const settingsAccess = access.capabilities.includes("manage_settings");
     result.lines = raw.lines.map(({reason,exact_amount,...line}) => editor ? {...line,reason} : line);
     if (!settingsAccess && !editor) {
