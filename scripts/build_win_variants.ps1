@@ -55,7 +55,7 @@ try {
     Remove-VariantOutput -Variant $variant
     Invoke-CheckedNative npm run build:web:raw
     Invoke-CheckedNative node scripts/verify_built_assets.cjs dist
-    Invoke-CheckedNative npx electron-builder --win nsis --config electron-builder.variant.cjs @BuilderArguments
+    Invoke-CheckedNative npx electron-builder --win nsis --config electron-builder.variant.cjs --publish=never @BuilderArguments
   }
 }
 finally {

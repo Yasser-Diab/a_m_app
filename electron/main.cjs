@@ -1417,6 +1417,7 @@ function reportFolderForType(type = '') {
   if (normalized.includes('invoice')) return 'Invoices';
   if (normalized.includes('statement')) return 'Account Statements';
   if (normalized.includes('productive') || normalized.includes('quantit')) return 'الانتاجية';
+  if (normalized === 'progress-certificates') return 'Progress Certificates';
   if (normalized.includes('contractor') || normalized.includes('certificate')) {
     return 'Contractor Certifications';
   }

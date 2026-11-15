@@ -23,8 +23,6 @@ module.exports = {
     "dist/**/*",
     "electron/**/*",
     "server/**/*",
-    "tools/print_pdf.cjs",
-    "data/price_offer.empty.db",
     "src/assets/sticker logo s.png",
     "src/assets/export_logo.png",
     "build/**/*",
@@ -32,7 +30,6 @@ module.exports = {
     "config/app-variants.json",
   ],
   asarUnpack: [
-    "data/price_offer.empty.db",
     "node_modules/sql.js/dist/*.wasm",
   ],
   extraMetadata: {

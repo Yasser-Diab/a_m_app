@@ -189,19 +189,14 @@ $androidAssetName = "EasyCommercial-Android-v$version.apk"
 $androidAssetPath = Join-Path $releaseDir $androidAssetName
 $windowsAsset = if ($mainInstaller) { New-ReleaseAssetInfo -Path $windowsAssetPath -AssetName $mainInstaller.Name } else { $null }
 $androidAsset = if (Test-Path -LiteralPath $androidAssetPath) { New-ReleaseAssetInfo -Path $androidAssetPath -AssetName $androidAssetName } else { $null }
-$arabicReleaseNote = -join @(
-  [char]0x062a, [char]0x062d, [char]0x062f, [char]0x064a, [char]0x062b,
-  [char]0x0020,
-  [char]0x0627, [char]0x0633, [char]0x062a, [char]0x0642, [char]0x0631, [char]0x0627, [char]0x0631
-)
-$releaseNoteAr = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("2KrYtdit2YrYrSDZiNit2K/Yp9iqINmI2KrZgtin2LHZitixINin2YTZhNi62Kkg2KfZhNil2YbYrNmE2YrYstmK2Kkv2KfZhNi52LHYqNmK2KnYjCDYpdi22KfZgdipINmF2LPYqtiu2YTYtSDZhdmC2KfZiNmEINit2K/ZitirINin2K7YqtmK2KfYsdmK2Iwg2YjYqtit2LPZitmGINin2KrYtdin2YQg2KfZhNiz2YrYsdmB2LEg2KfZhNmF2K3ZhNmKINi52YTZiSDYrNmH2KfYsiDYp9mE2YXYp9iz2KrYsS4="))
-$releaseNoteEn = "localized report units and filenames, optional modern contractor certificates, and more reliable master-PC local server connection."
+$releaseNoteAr = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("2KfZhNmF2LPYqtiu2YTYtdin2Kog2YjYp9mE2KrYrdi12YrZhNin2Kog2YjYqtit2LPZitmGINiz2LHYudipINin2YTYqti02LrZitmELg=="))
+$releaseNoteEn = "Progress Certificates & Collections, a more compact workspace, and faster startup."
 $manifest = [ordered]@{
   version = $version
   channel = "stable"
   publishedAt = (Get-Date).ToUniversalTime().ToString("o")
   minimumSupportedVersion = "2.0.0"
-  databaseSchemaVersion = 12
+  databaseSchemaVersion = 13
   serverApiVersion = 2
   releaseNotes = [ordered]@{
     ar = "Easy Commercial ${version}: $releaseNoteAr"
@@ -230,13 +225,6 @@ $manifest = [ordered]@{
 $manifestJson = $manifest | ConvertTo-Json -Depth 8
 [System.IO.File]::WriteAllText($manifestPath, $manifestJson, [System.Text.UTF8Encoding]::new($false))
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $releaseRoot "easy-commercial-update.json") -Force
-
-Copy-Item -LiteralPath (Join-Path $root "INSTALL.txt") -Destination (Join-Path $releaseDir "INSTALL.txt") -Force
-$versionInstall = Join-Path $root "INSTALL_$version.md"
-if (Test-Path $versionInstall) {
-  Copy-Item -LiteralPath $versionInstall -Destination (Join-Path $releaseDir "INSTALL_$version.md") -Force
-}
-Copy-Item -LiteralPath (Join-Path $root "README.md") -Destination (Join-Path $releaseDir "README.md") -Force
 
 if (Test-Path (Join-Path $root "dist")) {
   $webDir = Join-Path $releaseDir "web"

@@ -1,0 +1,170 @@
+:root {
+  --workspace-gap: clamp(12px, 1.35vw, 22px);
+  --workspace-radius: 14px;
+  --workspace-focus: color-mix(in srgb, var(--accent) 78%, var(--text));
+  --workspace-shadow: 0 1px 2px rgb(0 0 0 / 5%), 0 8px 24px rgb(0 0 0 / 5%);
+}
+
+.shell > .sidebar {
+  gap: 14px;
+  padding: var(--workspace-gap) 12px;
+  border-inline-start: 0;
+  border-inline-end: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.shell > .workspace {
+  padding: var(--workspace-gap);
+  scrollbar-gutter: stable;
+}
+
+.shell .brand > div:not(.am-brand-mark) strong {
+  color: #f3d28a;
+}
+
+.shell .brand::before {
+  display: none;
+}
+
+.shell .main-nav {
+  gap: 7px;
+}
+
+.shell .main-nav button {
+  min-height: 42px;
+  gap: 10px;
+  border-radius: 9px;
+  text-align: start;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.shell .main-nav button > svg {
+  flex: 0 0 auto;
+}
+
+.shell .main-nav button.active {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  box-shadow: none;
+}
+
+.shell .main-nav button.active::before {
+  inset: 8px auto 8px 0;
+  inset-inline: 0 auto;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  opacity: 1;
+}
+
+.workspace > .topbar,
+.workspace .panel {
+  border-radius: var(--workspace-radius);
+  box-shadow: var(--workspace-shadow);
+}
+
+.workspace > .topbar {
+  min-height: 64px;
+  border-color: var(--line);
+  padding: 10px 14px;
+  gap: 12px;
+  margin-block-end: var(--workspace-gap);
+}
+
+.workspace > .topbar > .top-logo {
+  width: 48px;
+  height: 48px;
+}
+
+.workspace .title-stack h1 {
+  font-size: clamp(1.13rem, 1.8vw, 1.5rem);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.workspace .panel-head h2,
+.workspace .form-section h3 {
+  line-height: 1.35;
+}
+
+.workspace .top-actions,
+.workspace .smart-table-scroll table,
+.workspace .table-scroll table {
+  font-variant-numeric: tabular-nums;
+}
+
+.shell button:focus-visible,
+.shell a:focus-visible,
+.shell summary:focus-visible {
+  outline: 2px solid var(--workspace-focus);
+  outline-offset: 2px;
+}
+
+:root[data-theme='gold'] body {
+  animation: none;
+}
+
+:root[data-theme='gold'] .sidebar,
+:root[data-theme='gold'] .topbar,
+:root[data-theme='gold'] .panel,
+:root[data-theme='gold'] .table-scroll,
+:root[data-theme='gold'] .smart-entry-table {
+  backdrop-filter: none;
+}
+
+.splash-screen,
+.splash-screen::before,
+.splash-mark {
+  animation-duration: 550ms;
+}
+
+@media (min-width: 861px) {
+  .shell > .workspace > .topbar {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 12;
+  }
+}
+
+@media (max-width: 860px) {
+  .shell .main-nav {
+    gap: 6px;
+  }
+
+  .shell > .sidebar {
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--line);
+  }
+
+  .shell > .workspace {
+    scrollbar-gutter: auto;
+  }
+
+  .workspace > .topbar {
+    min-height: 0;
+    padding: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .workspace > .topbar > .top-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .workspace > .topbar > .top-actions .icon-button {
+    width: 36px;
+    min-height: 36px;
+    flex: 0 0 36px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-screen,
+  .splash-screen::before,
+  .splash-mark {
+    animation: none;
+  }
+}

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 
 const root = path.resolve(__dirname, '..');
 const packageVersion = require(path.join(root, 'package.json')).version;
@@ -30,7 +31,7 @@ if (!metadata.includes(`EasyCommercial-Setup-${version}.exe`)) {
   throw new Error('latest.yml installer path does not match the packaged installer.');
 }
 
-const releaseRoot = path.join(root, 'releases');
+const releaseRoot = path.resolve(root, process.env.EASY_COMMERCIAL_RELEASE_ROOT || 'releases');
 const releaseDir = path.join(releaseRoot, `EasyCommercial_V${version}`);
 const manifestPath = path.join(releaseRoot, 'easy-commercial-update.json');
 if (fs.existsSync(manifestPath)) {
@@ -40,9 +41,15 @@ if (fs.existsSync(manifestPath)) {
   }
   const windowsAsset = manifest.windows?.downloadUrl;
   const androidAsset = manifest.android?.downloadUrl;
-  for (const assetName of [windowsAsset, androidAsset].filter(Boolean)) {
-    if (!fs.existsSync(path.join(releaseDir, assetName))) {
-      throw new Error(`Release manifest asset does not exist in ${releaseDir}: ${assetName}`);
+  for (const asset of [manifest.windows, manifest.android].filter(Boolean)) {
+    const assetPath = path.join(releaseDir, asset.downloadUrl);
+    if (!fs.existsSync(assetPath)) {
+      throw new Error(`Release manifest asset does not exist: ${assetPath}`);
+    }
+    const bytes = fs.readFileSync(assetPath);
+    const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+    if (bytes.length !== asset.size || sha256 !== asset.sha256) {
+      throw new Error(`Release manifest asset integrity does not match: ${assetPath}`);
     }
   }
   if (androidAsset && !fs.existsSync(path.join(releaseRoot, 'apk', androidAsset))) {
@@ -53,4 +60,4 @@ if (fs.existsSync(manifestPath)) {
   }
 }
 
-console.log(`Verified Easy Commercial ${version} installer, APK, and updater metadata.`);
+console.log(`Verified Easy Commercial ${version} ${fs.existsSync(manifestPath) ? 'installer, APK, and release manifest' : 'Windows updater files'}.`);

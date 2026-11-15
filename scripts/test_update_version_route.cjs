@@ -62,7 +62,7 @@ function requestJson(port, route) {
     const port = httpServer.address().port;
     const health = await requestJson(port, '/api/health');
     assert.equal(health.data.serverVersion, version);
-    assert.equal(health.data.databaseSchemaVersion, 12);
+    assert.equal(health.data.databaseSchemaVersion, 13);
 
     const oldDevice = await requestJson(
       port,

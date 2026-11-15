@@ -1,0 +1,436 @@
+const fs = require("node:fs");
+const path = require("node:path");
+const express = require("express");
+const {
+  CAPABILITIES, accessFor, adminAccess, audit, authorize, date, encode, fail,
+  featureEnabled, getGrant, idOf, inScope, initializeSessionSecret, issueCertificateSession,
+  certificateSessionUser, revokeCertificateSession, lookup, parse, scopeSql, setGrant, setting, setSetting, str, today,
+} = require("./certificate-access.cjs");
+const {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, createLocation,
+  projectLocations, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
+const {allocationLedger, addReceipt, updateReceipt, collectionResponse} = require("./certificate-ledger.cjs");
+const {getRevision, certificateDocumentInput, createDraft, saveDraft, runAction, forAccess} = require("./certificate-revisions.cjs");
+const {importLegacyCertificates} = require("./certificate-legacy.cjs");
+const {stageImport, commitImport} = require("./certificate-imports.cjs");
+const {money, toMinor} = require("./certificate-valuation.cjs");
+const {
+  initializeCertificateArtifacts, enqueueCertificateRender, processCertificateRender,
+  resumeCertificateRenders, registerCertificateDocumentRoutes,
+} = require("./certificate-documents.cjs");
+
+function initializeCertificates(database) {
+  database.transaction(() => {
+    database.exec(fs.readFileSync(path.join(__dirname, "certificate-schema.sql"), "utf8"));
+    if (!database.all("PRAGMA table_info(cert_receipt_allocations)").some(({name}) => name === "allocated_at"))
+      database.run("ALTER TABLE cert_receipt_allocations ADD COLUMN allocated_at TEXT");
+    initializeSessionSecret(database);
+    initializeCertificateArtifacts(database);
+    if (!setting(database,"certificates_shared_projects_seeded")) {
+      const rows = database.all(`
+        SELECT DISTINCT d.party_id,d.project FROM documents d JOIN parties p ON p.id=d.party_id
+        WHERE p.role='customer' AND d.deleted_at IS NULL AND TRIM(COALESCE(d.project,'')) <> ''
+      `);
+      const projects = new Map();
+      for (const row of rows) {
+        const key = lookup(row.project);
+        if (!key) continue;
+        const resolved = createProject(database,{customer_id:row.party_id,name:row.project,raw:{host_seeded:true}});
+        projects.set(row.party_id + ":" + key,resolved.id);
+      }
+      for (const row of database.all(`
+        SELECT DISTINCT party_id,project,building_unit FROM work_items
+        WHERE deleted_at IS NULL AND party_id IS NOT NULL AND TRIM(COALESCE(building_unit,'')) <> ''
+      `)) {
+        const projectId = projects.get(row.party_id + ":" + lookup(row.project));
+        if (projectId && lookup(row.building_unit)) createLocation(database,projectId,{name:row.building_unit,kind:"building"});
+      }
+      setSetting(database,"certificates_shared_projects_seeded","1");
+    }
+  });
+}
+
+function canChangeUsers(database, req, {target, role} = {}) {
+  if (!target && role !== "admin" && role !== "manager") return true;
+  const protectedUser = target && (["admin","manager"].includes(target.role) || getGrant(database,target.id).capabilities.length);
+  if (!protectedUser && role !== "admin" && role !== "manager") return true;
+  const actor = certificateSessionUser(database,req);
+  return Boolean(actor && ["admin","manager"].includes(actor.role));
+}
+
+function hasMasterPermission(access) {
+  return access.user.can_edit_company_settings || ["admin","manager"].includes(access.user.role);
+}
+
+function projectsResponse(database, req, access) {
+  const scope = scopeSql(access,"id");
+  const customerId = idOf(req.query.customer_id);
+  const matches = lookup(req.query.q);
+  const rows = database.all(`
+    SELECT id,name,alternate_name,customer_id,code,address,contract_ref,contract_date,currency FROM cert_projects
+    WHERE ${scope.clause} AND (? IS NULL OR customer_id=?)
+      AND (? = '' OR search_name LIKE ? OR alternate_name LIKE ? OR code LIKE ? OR contract_ref LIKE ?)
+    ORDER BY name LIMIT 200
+  `, [...scope.params,customerId,customerId,matches,`%${matches}%`,`%${str(req.query.q)}%`,`%${matches}%`,`%${str(req.query.q)}%`]);
+  return rows;
+}
+
+function certificateList(database, req, access) {
+  const scope = scopeSql(access,"r.project_id");
+  const projectId = idOf(req.query.project_id);
+  if (projectId && !inScope(access,projectId)) fail(404,"Project not found");
+  const pageSize = Math.max(1,Math.min(200,Math.trunc(Number(req.query.limit) || 100)));
+  const page = Math.max(1,Math.min(1e6,Math.trunc(Number(req.query.page) || 1)));
+  const status = str(req.query.status);
+  const val = normalizeListStatus(status);
+  const match = lookup(req.query.q);
+  const like = `%${match}%`;
+  const where = `${scope.clause} AND (? IS NULL OR r.project_id=?)
+    AND (? = '' OR r.status=?)
+    AND (? = '' OR cp.search_name LIKE ? OR p.search_name LIKE ? OR r.legacy_number LIKE ?
+      OR CAST(r.official_number AS TEXT) LIKE ?)`;
+  const params = [...scope.params,projectId,projectId,val,val,match,like,like,like,like];
+  const joins = "FROM cert_revisions r JOIN cert_projects cp ON r.project_id=cp.id JOIN parties p ON p.id=cp.customer_id";
+  const total = database.get(`SELECT count(*) AS total ${joins} WHERE ${where}`,params).total;
+  const items = database.all(`
+    SELECT r.id,r.project_id,r.status,r.pdf_status,r.type,r.revision,r.version,r.official_number,
+      r.legacy_number,r.work_to,r.collection_cutoff,r.issued_at,r.updated_at,r.header_json,
+      json_extract(r.snapshot_json,'$.totals.current') AS current,
+      json_extract(r.snapshot_json,'$.totals.cumulative_payable') AS cumulative_payable,
+      cp.name AS project_name,p.display_name AS customer_name
+    ${joins} WHERE ${where} ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?
+  `, [...params,pageSize,(page-1)*pageSize]).map(({header_json,...row}) => ({...row,header:parse(header_json)}));
+  return {items,total,page,limit:pageSize};
+}
+
+function normalizeListStatus(status) {
+  if (!status || status === "all") return "";
+  if (!["draft","in_review","approved","issued","historical"].includes(status)) fail(400,"Unknown certificate status");
+  return status;
+}
+
+function sourceList(database, project) {
+  const certificates = database.all(`
+    SELECT id,official_number,revision,work_to,snapshot_json FROM cert_revisions WHERE project_id=? AND status='issued'
+    ORDER BY work_to DESC,id DESC LIMIT 12
+  `, [project.id]).map(({snapshot_json,...row}) => ({
+    ...row,label:`#${row.official_number} · r${row.revision}`,
+    lines:parse(snapshot_json).lines.map(({identity,location_id,location,work_type,work_item,description,mode,
+      width,height,dimension_unit,count,quantity,unit,rate,agreed_amount}) =>
+      ({identity,location_id,location,work_type,work_item,description,mode,width,height,dimension_unit,count,quantity,
+        unit,rate,agreed_amount,prior_certified:true})),
+  }));
+  const quotationRows = database.all(`SELECT id,operation_no,project,title,entry_date FROM documents
+    WHERE party_id=? AND deleted_at IS NULL AND document_type='price_offer' AND status='approved' ORDER BY id DESC`,
+  [project.customer_id]).filter((quotation) => lookup(quotation.project) === lookup(project.name)).slice(0,25);
+  const quotations = quotationRows.map((quote) => ({
+    id:quote.id, label:quote.title || quote.operation_no, reference:quote.operation_no, date:quote.entry_date,
+    lines:database.all(`SELECT id,work_type,description,statement_text,unit,unit_code,rate
+      FROM work_items WHERE document_id=? AND deleted_at IS NULL AND COALESCE(collection_amount,0)=0 ORDER BY id LIMIT 2500`,
+    [quote.id]).map((row) => ({
+      identity:"quotation:" + quote.id + ":" + row.id,work_type:row.work_type, description:row.description || row.statement_text,
+      unit:row.unit,rate:row.rate,mode:row.unit_code === "count" ? "count" : "direct",source:quote.operation_no,
+    })),
+  }));
+  return {certificates,quotations};
+}
+
+function reportResponse(database, req, access) {
+  const projectId = idOf(req.query.project_id);
+  if (projectId && !inScope(access,projectId)) fail(404,"Project not found");
+  const locationId = idOf(req.query.location_id);
+  if (locationId && !projectId) fail(400,"Select a project for a location report");
+  if (locationId) checkedLocation(database,projectId,locationId);
+  const workCutoff = date(req.query.work_cutoff,true) || today();
+  const collectionCutoff = date(req.query.collection_cutoff,true) || today();
+  const scope = scopeSql(access,"cp.id");
+  const projects = database.all(`SELECT cp.id,cp.name,cp.currency FROM cert_projects cp WHERE ${scope.clause}
+    AND (? IS NULL OR cp.id=?) ORDER BY cp.name`,[...scope.params,projectId,projectId]);
+  const totalsByCurrency = new Map();
+  const items = [];
+  for (const project of projects) {
+    const portions = database.all(`
+      SELECT id,series_key,location_id,official_number,revision,work_to,snapshot_json,
+        ROW_NUMBER() OVER (PARTITION BY series_key,location_id ORDER BY work_to DESC,issued_at DESC,id DESC) as latest
+      FROM cert_revisions WHERE project_id=? AND status='issued' AND work_to<=? AND (? IS NULL OR location_id IS ? OR location_id IS NULL)
+    `,[project.id,workCutoff,locationId,locationId]).filter((row) => row.latest === 1);
+    const historic = database.get(`SELECT COUNT(DISTINCT a.revision_id) AS count, COALESCE(SUM(a.amount_minor),0) AS amount
+      FROM cert_legacy_records a JOIN cert_revisions r ON r.id=a.revision_id
+      WHERE a.project_id=? AND a.record_type='work_row'
+        AND COALESCE(json_extract(a.data_json,'$.date'),r.work_to,'0001-01-01')<=?
+        AND (? IS NULL OR json_extract(a.data_json,'$.location') = (SELECT name FROM cert_locations WHERE id=?))`,
+    [project.id,workCutoff,locationId,locationId]);
+    const work = portions.reduce((acc,row) => {
+      const snapshot = parse(row.snapshot_json);
+      if (locationId && !row.location_id) {
+        const lines = snapshot.lines.filter((line) => line.location_id === locationId);
+        for (const line of lines) {
+          acc.current += toMinor(line.current) || 0;
+          acc.cumulative += toMinor(line.cumulative) || 0;
+        }
+        if (lines.length) acc.supports_settlement = false;
+      } else {
+        const value = snapshot.totals;
+        acc.current += toMinor(value.current) || 0;
+        acc.cumulative += toMinor(value.cumulative) || 0;
+        acc.cumulative_earned += toMinor(value.cumulative_earned) || 0;
+      }
+      return acc;
+    },{current:0,cumulative:0,cumulative_earned:0,supports_settlement:true});
+    const profile = getProfile(database,project.id,workCutoff);
+    const ledger = allocationLedger(database,project.id,profile,collectionCutoff,{workCutoff,locationId});
+    const amounts = {current:work.current,cumulative:work.cumulative,
+      cumulative_earned:work.supports_settlement ? work.cumulative_earned : null,ordinary_collections:ledger.ordinary_minor,
+      cumulative_payable:work.supports_settlement ? work.cumulative_earned - ledger.ordinary_minor + ledger.released_recovery_minor : null,
+      historical_work:historic.amount,unapplied_collections:ledger.unapplied_minor};
+    const asMoney = (value) => value === null ? null : money(value);
+    const moneyFields = Object.fromEntries(Object.entries(amounts).map(([key,value]) => [key,asMoney(value)]));
+    const combined = totalsByCurrency.get(project.currency) || {};
+    for (const [key,value] of Object.entries(amounts))
+      combined[key] = value === null || combined[key] === null ? null : (combined[key] || 0)+value;
+    totalsByCurrency.set(project.currency,combined);
+    items.push({project_id:project.id,project_name:project.name,currency:project.currency,certificate_count:portions.length,
+      historical_count:historic.count,...moneyFields});
+  }
+  const currencies = Object.fromEntries([...totalsByCurrency].map(([code,raw]) => [code,
+    Object.fromEntries(Object.entries(raw).map(([key,value]) => [key,value === null ? null : money(value)]))]));
+  const totals = totalsByCurrency.size === 1 ? Object.values(currencies)[0] : {};
+  return {items,totals,currencies,location_id:locationId,work_cutoff:workCutoff,collection_cutoff:collectionCutoff};
+}
+
+function registerCertificateRoutes(app, database, dataDir) {
+  const router = express.Router();
+  app.use("/api/certificates",router);
+  router.use((req,_res,next) => {
+    if (!certificateSessionUser(database,req)) fail(401,"Sign in again to access certificates");
+    next();
+  });
+  const checked = (req, capability, projectId = null) => authorize(database,req,capability,projectId);
+  const revision = (req, capability) => {
+    checked(req,capability);
+    const row = getRevision(database,req.params.id);
+    return {row,access:checked(req,capability,row.project_id)};
+  };
+  const project = (req, capability) => {
+    const projectId = idOf(req.params.projectId);
+    if (!projectId) fail(404,"Project not found");
+    const access = checked(req,capability,projectId);
+    return {project:getProject(database,projectId),access};
+  };
+  const admin = (req) => adminAccess(database,req);
+  const detail = (row,access) => forAccess(database,row,access);
+
+  router.get("/access",(req,res) => {
+    const {user,...access} = accessFor(database,req);
+    res.json(access);
+  });
+  router.get("/admin/feature",(req,res) => {
+    admin(req);
+    res.json({enabled:featureEnabled(database)});
+  });
+  router.put("/admin/feature",(req,res) => {
+    const access = admin(req);
+    const enabled = req.body.enabled === true;
+    database.transaction(() => {
+      setSetting(database,"certificates_enabled",enabled ? "1" : "0");
+      audit(database,access.user,"feature_changed",{details:{enabled}});
+    });
+    res.json({enabled:featureEnabled(database)});
+  });
+  router.get("/admin/projects",(req,res) => {
+    admin(req);
+    res.json(database.all(`SELECT cp.id,cp.name,p.display_name AS customer_name
+      FROM cert_projects cp JOIN parties p ON p.id=cp.customer_id ORDER BY cp.name`));
+  });
+  router.get("/admin/users/:userId",(req,res) => {
+    admin(req);
+    const userId = idOf(req.params.userId);
+    if (!database.get("SELECT 1 FROM users WHERE id=?",[userId])) fail(404,"User not found");
+    res.json(getGrant(database,userId));
+  });
+  router.put("/admin/users/:userId",(req,res) => {
+    const access = admin(req);
+    res.json(setGrant(database,access.user,idOf(req.params.userId),req.body));
+  });
+  router.get("/customers",(req,res) => {
+    const access = checked(req,"view");
+    const scope = scopeSql(access,"cp.id");
+    const match = lookup(req.query.q);
+    const like = "%" + match + "%";
+    const typed = "%" + str(req.query.q) + "%";
+    res.json(database.all(`
+      SELECT p.id,p.display_name,p.base_name AS name,p.address,p.tax_no,c.code,c.alternate_name
+      FROM parties p LEFT JOIN cert_customer_profiles c ON c.customer_id=p.id
+      WHERE p.role='customer' AND (?=1 OR EXISTS (
+        SELECT 1 FROM cert_projects cp WHERE cp.customer_id=p.id AND ${scope.clause}
+      )) AND (?='' OR p.search_name LIKE ? OR p.display_name LIKE ? OR c.code LIKE ? OR c.alternate_name LIKE ?)
+      ORDER BY p.display_name LIMIT 120
+    `,[access.all_projects ? 1 : 0,...scope.params,match,like,typed,like,typed]));
+  });
+  router.post("/customers",(req,res) => {
+    const access = checked(req,"create_master");
+    if ((!access.allow_project_creation && !access.all_projects) || !hasMasterPermission(access))
+      fail(403,"Customer creation requires company settings and new-project permission");
+    const customer = database.transaction(() => {
+      const saved = createCustomer(database,req.body);
+      if (saved.created) {
+        saveCustomerProfile(database,saved.id,req.body);
+        audit(database,access.user,"customer_created",{details:{customer_id:saved.id}});
+      } else if (!access.all_projects && !database.get(`
+        SELECT 1 FROM cert_projects p JOIN cert_project_grants g ON g.project_id=p.id WHERE g.user_id=? AND p.customer_id=?
+      `,[access.user.id,saved.id]) && !database.get("SELECT 1 FROM cert_customer_creators WHERE customer_id=? AND user_id=?",[saved.id,access.user.id])) {
+        fail(409,"A matching customer exists. Request the customer or project from the administrator");
+      }
+      database.run("INSERT OR IGNORE INTO cert_customer_creators (customer_id,user_id) VALUES (?,?)",[saved.id,access.user.id]);
+      return {...getCustomer(database,saved.id),created:saved.created};
+    });
+    res.status(customer.created ? 201 : 200).json(customer);
+  });
+  router.put("/customers/:customerId/settings",(req,res) => {
+    const access = checked(req,"manage_settings");
+    const customerId = idOf(req.params.customerId);
+    const scope = scopeSql(access,"cp.id");
+    if (!access.all_projects && !database.get(`
+      SELECT 1 FROM cert_projects cp WHERE cp.customer_id=? AND ${scope.clause}`,[customerId,...scope.params]))
+      fail(404,"Customer not found");
+    if (!access.all_projects && database.get(`SELECT 1 FROM cert_projects cp
+      WHERE cp.customer_id=? AND NOT (${scope.clause})`,[customerId,...scope.params]))
+      fail(403,"Customer defaults require access to all of this customer's projects");
+    getCustomer(database,customerId);
+    const input = {rules:req.body.rules === undefined ? undefined : cleanRules(req.body.rules),
+      settings:cleanSettings(req.body.settings)};
+    database.transaction(() => {
+      database.run(`INSERT INTO cert_customer_profiles (customer_id,settings_json) VALUES (?,?)
+        ON CONFLICT(customer_id) DO UPDATE SET settings_json=excluded.settings_json`,[customerId,encode(input)]);
+      audit(database,access.user,"customer_defaults_updated",{details:{customer_id:customerId}});
+    });
+    res.json(input);
+  });
+  router.put("/admin/company-defaults",(req,res) => {
+    const access = admin(req);
+    const input = {rules:cleanRules(req.body.rules || []),settings:cleanSettings(req.body.settings)};
+    database.transaction(() => {
+      setSetting(database,"certificates_company_defaults",encode(input));
+      audit(database,access.user,"company_defaults_updated");
+    });
+    res.json(input);
+  });
+  router.get("/projects",(req,res) => res.json(projectsResponse(database,req,checked(req,"view"))));
+  router.post("/projects",(req,res) => {
+    const access = checked(req,"create_master");
+    if (!access.allow_project_creation && !access.all_projects) fail(403,"New-project permission is required");
+    const linkedCustomer = idOf(req.body.customer_id);
+    const canLink = access.all_projects || database.get(`
+      SELECT 1 FROM cert_customer_creators WHERE customer_id=? AND user_id=?
+      UNION SELECT 1 FROM cert_projects cp JOIN cert_project_grants g ON g.project_id=cp.id WHERE cp.customer_id=? AND g.user_id=?`,
+      [linkedCustomer,access.user.id,linkedCustomer,access.user.id]);
+    if (!canLink) fail(404,"Customer not found");
+    const saved = database.transaction(() => {
+      const result = createProject(database,req.body,access.user.id);
+      if (!result.created && !inScope(access,result.id)) fail(409,"A matching project exists. Request access from the administrator");
+      if (result.created) {
+        if (!access.all_projects) database.run("INSERT INTO cert_project_grants VALUES (?,?)",[access.user.id,result.id]);
+        audit(database,access.user,"project_created",{projectId:result.id});
+      }
+      return {...getProject(database,result.id),created:result.created};
+    });
+    res.status(saved.created ? 201 : 200).json(saved);
+  });
+  router.get("/projects/:projectId",(req,res) => {
+    const {project:row} = project(req,"view");
+    const profile = getProfile(database,row.id);
+    const baseline = database.get(`SELECT id,official_number,revision,work_to,collection_cutoff FROM cert_revisions
+      WHERE project_id=? AND status='issued' ORDER BY work_to DESC,issued_at DESC,id DESC LIMIT 1`,[row.id]);
+    res.json({...row,customer:getCustomer(database,row.customer_id),locations:projectLocations(database,row.id),
+      work_types:profile.settings.work_types,work_items:profile.settings.work_items,
+      settings:{...profile, latest_version:latestVersion(database,row.id)},baseline});
+  });
+  router.post("/projects/:projectId/locations",(req,res) => {
+    const {project:row,access} = project(req,"create_master");
+    const location = database.transaction(() => {
+      const result = createLocation(database,row.id,req.body);
+      if (result.created) audit(database,access.user,"location_created",{projectId:row.id,details:{location_id:result.id}});
+      return {...projectLocations(database,row.id).find((entry) => entry.id === result.id),created:result.created};
+    });
+    res.status(location.created ? 201 : 200).json(location);
+  });
+  router.put("/projects/:projectId/settings",(req,res) => {
+    const {project:row,access} = project(req,"manage_settings");
+    res.json(database.transaction(() => saveProjectRules(database,row.id,req.body,access.user)));
+  });
+  router.get("/projects/:projectId/sources",(req,res) => {
+    const {project:row} = project(req,"create");
+    res.json(sourceList(database,row));
+  });
+  router.get("/projects/:projectId/collections",(req,res) => {
+    const {project:row} = project(req,"view_collections");
+    const cutoff = date(req.query.cutoff,true) || today();
+    const ledger = allocationLedger(database,row.id,getProfile(database,row.id,cutoff),cutoff);
+    res.json(collectionResponse(database,row,ledger,cutoff));
+  });
+  router.post("/projects/:projectId/collections",(req,res) => {
+    const {project:row,access} = project(req,"manage_collections");
+    checked(req,"view_collections",row.id);
+    res.status(201).json(database.transaction(() => addReceipt(database,row,req.body,access.user)));
+  });
+  router.post("/projects/:projectId/collections/:receiptId/action",(req,res) => {
+    const {project:row,access} = project(req,"manage_collections");
+    checked(req,"view_collections",row.id);
+    res.json(database.transaction(() => updateReceipt(database,row,idOf(req.params.receiptId),req.body,access.user)));
+  });
+  router.get("/reports",(req,res) => res.json(reportResponse(database,req,checked(req,"view"))));
+
+  router.get("/",(req,res) => res.json(certificateList(database,req,checked(req,"view"))));
+  router.post("/",(req,res) => {
+    const projectId = idOf(req.body.project_id);
+    if (!projectId) fail(400,"Select a project");
+    const access = checked(req,"create",projectId);
+    if (req.body.header?.rule_override) checked(req,"manage_settings",projectId);
+    if (Array.isArray(req.body.lines) && req.body.lines.length) checked(req,"edit_draft",projectId);
+    const row = database.transaction(() => createDraft(database,getProject(database,projectId),req.body,access.user));
+    res.status(201).json(detail(row,access));
+  });
+
+  registerCertificateDocumentRoutes(router,{
+    database,dataDir,authorize:checked,
+    getCertificate:(id) => getRevision(database,id),
+    documentFor:(_req,row) => certificateDocumentInput(database,row),
+    issueAccess:(req,projectId) => checked(req,"issue",projectId),
+  });
+
+  router.get("/:id",(req,res) => {
+    const {row,access} = revision(req,"view");
+    res.json(detail(row,access));
+  });
+  router.put("/:id",(req,res) => {
+    const {row,access} = revision(req,"edit_draft");
+    res.json(detail(database.transaction(() => saveDraft(database,row,req.body,access.user,access)),access));
+  });
+  router.post("/:id/action",(req,res) => {
+    const action = str(req.body.action);
+    const capability = ["submit","approve","issue"].includes(action) ? action : action === "return" ? "approve" : "revise";
+    const {row,access} = revision(req,capability);
+    const updated = database.transaction(() => runAction(database,row,req.body,access.user,enqueueCertificateRender));
+    res.json(detail(updated,access));
+    if (action === "issue" && updated.pdf_status === "pending") {
+      void processCertificateRender(database,updated.id,dataDir).catch((error) => console.warn("Certificate render paused: " + error.message));
+    }
+  });
+  router.post("/:id/import/stage",(req,res) => {
+    const {row,access} = revision(req,"import");
+    res.json(database.transaction(() => stageImport(database,row,req.body,access.user)));
+  });
+  router.post("/:id/import/commit",(req,res) => {
+    const {row,access} = revision(req,"import");
+    checked(req,"edit_draft",row.project_id);
+    res.json(detail(database.transaction(() => commitImport(database,row,req.body,access)),access));
+  });
+  router.use((error,req,res,next) => {
+    if (res.headersSent) return next(error);
+    if (!error.status) console.error("Certificate operation failed:",error);
+    res.status(error.status || 500).json({error:error.status ? error.message : "Certificate operation failed",
+      ...error.extra});
+  });
+}
+
+module.exports = {initializeCertificates, registerCertificateRoutes, issueCertificateSession, revokeCertificateSession,
+  certificateSessionUser, canChangeUsers, importLegacyCertificates, resumeCertificateRenders, CAPABILITIES};

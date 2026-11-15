@@ -1,0 +1,205 @@
+const crypto = require("node:crypto");
+const {displayPartyName, stripPartyPrefix} = require("./domain.cjs");
+const {decimal} = require("./certificate-valuation.cjs");
+const {audit, currency, date, encode, fail, idOf, lookup, parse, setting, str, today} = require("./certificate-access.cjs");
+const RULE_CATEGORIES = ["vat", "retention", "contractor_withholding", "engineering_stamp",
+  "social_insurance", "works_insurance", "other", "advance_recovery"];
+const DEFAULT_SETTINGS = {minimum_area: 0, quantity_precision: 4, count_precision: 0,
+  collections_basis: "received", work_types: [], work_items: [], output_mode: "auto"};
+
+function getProject(database, id) {
+  const project = database.get(`
+    SELECT cp.id,cp.customer_id,cp.name,cp.alternate_name,cp.code,cp.address,cp.contract_ref,
+           cp.contract_date,cp.currency,cp.created_at,COALESCE(json_extract(cp.raw_json,'$.workbook_project_missing'),0) AS historical_only,p.display_name AS customer_name
+    FROM cert_projects cp JOIN parties p ON p.id=cp.customer_id WHERE cp.id=?
+  `, [id]);
+  if (!project) fail(404, "Project not found");
+  return project;
+}
+
+function getCustomer(database, id) {
+  const customer = database.get(`
+    SELECT p.id,p.base_name AS name,p.display_name,p.category,p.address,p.tax_no,
+      c.code,c.alternate_name,c.print_contact
+    FROM parties p LEFT JOIN cert_customer_profiles c ON c.customer_id=p.id
+    WHERE p.id=? AND p.role='customer'
+  `, [id]);
+  if (!customer) fail(404, "Customer not found");
+  return customer;
+}
+
+function createCustomer(database, input) {
+  const name = stripPartyPrefix(str(input.name || input.display_name));
+  const tax = str(input.tax_no);
+  const normalized = lookup(name);
+  if (!normalized) fail(400, "Customer name is required");
+  if (tax) {
+    const found = database.get("SELECT id FROM parties WHERE role='customer' AND tax_no=?", [tax]);
+    if (found) return {id: found.id, created: false};
+  }
+  const named = database.get("SELECT id,tax_no FROM parties WHERE role='customer' AND search_name=?", [normalized]);
+  if (named && (!tax || !named.tax_no || named.tax_no === tax)) return {id: named.id, created: false};
+  const searchName = named ? normalized + " " + lookup(tax) : normalized;
+  const kind = ["retail", "corporate"].includes(input.category) ? input.category : null;
+  const saved = database.run(`
+    INSERT INTO parties (role,category,base_name,display_name,search_name,address,tax_no)
+    VALUES ('customer',?,?,?,?,?,?)
+  `, [kind, name, str(input.display_name) || displayPartyName(name, kind ?? "unselected"),
+    searchName, str(input.address), tax]);
+  return {id: saved.lastInsertRowid, created: true};
+}
+
+function saveCustomerProfile(database, customerId, input) {
+  database.run(`
+    INSERT INTO cert_customer_profiles (customer_id,code,alternate_name,print_contact,raw_json)
+    VALUES (?,?,?,?,?) ON CONFLICT(customer_id) DO UPDATE SET
+    code=COALESCE(NULLIF(excluded.code,''),cert_customer_profiles.code),
+    alternate_name=COALESCE(NULLIF(excluded.alternate_name,''),cert_customer_profiles.alternate_name),
+    print_contact=COALESCE(NULLIF(excluded.print_contact,''),cert_customer_profiles.print_contact),
+    raw_json=COALESCE(cert_customer_profiles.raw_json,excluded.raw_json)
+  `, [customerId, str(input.code), str(input.alternate_name), str(input.print_contact),
+    input.raw ? encode(input.raw) : null]);
+}
+
+function createProject(database, input, userId = null) {
+  const customer = getCustomer(database, idOf(input.customer_id));
+  const name = str(input.name);
+  const searchName = lookup(name);
+  if (!searchName) fail(400, "Project name is required");
+  const contract = str(input.contract_ref);
+  const address = str(input.address);
+  const code = str(input.code);
+  const existing = database.get(`SELECT id FROM cert_projects
+    WHERE customer_id=? AND search_name=? AND contract_ref=? AND address=?`,
+  [customer.id, searchName, contract, address]);
+  if (existing) return {id: existing.id, created: false};
+  if (code && database.get("SELECT 1 FROM cert_projects WHERE customer_id=? AND code=?", [customer.id, code]))
+    fail(409, "A project already uses that code for this customer");
+  const record = database.run(`
+    INSERT INTO cert_projects (customer_id,name,search_name,alternate_name,code,address,contract_ref,contract_date,currency,raw_json,created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+  `, [customer.id, name, searchName, str(input.alternate_name), code, address, contract,
+    date(input.contract_date, true), currency(input.currency), input.raw ? encode(input.raw) : null, userId]);
+  return {id: record.lastInsertRowid, created: true};
+}
+
+function projectLocations(database, projectId) {
+  const all = database.all("SELECT id,parent_id,kind,name,code FROM cert_locations WHERE project_id=?", [projectId]);
+  const byId = new Map(all.map((row) => [row.id, row]));
+  const label = (row) => row.parent_id && byId.has(row.parent_id) ? label(byId.get(row.parent_id)) + " › " + row.name : row.name;
+  return all.map((row) => ({...row, label: label(row)}))
+    .sort((a,b) => a.label.localeCompare(b.label, "ar", {numeric:true}));
+}
+
+function createLocation(database, projectId, input) {
+  const name = str(input.name);
+  const keyed = lookup(name);
+  const parentId = idOf(input.parent_id);
+  const kind = str(input.kind) || "building";
+  if (!keyed || !["block","building","floor","unit","site","other"].includes(kind)) fail(400, "Location name and type are required");
+  if (parentId && !database.get("SELECT 1 FROM cert_locations WHERE id=? AND project_id=?", [parentId, projectId]))
+    fail(400, "Parent location is outside this project");
+  const old = database.get("SELECT id FROM cert_locations WHERE project_id=? AND parent_id IS ? AND search_name=? AND kind=?",
+    [projectId, parentId, keyed, kind]);
+  if (old) return {id: old.id, created: false};
+  const record = database.run("INSERT INTO cert_locations (project_id,parent_id,kind,name,search_name,code) VALUES (?,?,?,?,?,?)",
+    [projectId, parentId, kind, name, keyed, str(input.code)]);
+  return {id: record.lastInsertRowid, created: true};
+}
+
+function getProfile(database, projectId, at = today(), version = null) {
+  const row = version === null ? database.get(
+    "SELECT * FROM cert_rule_versions WHERE project_id=? AND effective_at<=? ORDER BY effective_at DESC,version DESC LIMIT 1", [projectId, at])
+    : database.get("SELECT * FROM cert_rule_versions WHERE project_id=? AND version=?", [projectId, version]);
+  const company = parse(setting(database, "certificates_company_defaults", "{}"), {});
+  const customer = database.get(`SELECT cp.settings_json FROM cert_customer_profiles cp
+    JOIN cert_projects p ON p.customer_id=cp.customer_id WHERE p.id=?`, [projectId]);
+  const client = parse(customer?.settings_json, {});
+  const chosen = parse(row?.settings_json, {});
+  return {version: row?.version || null, effective_at: row?.effective_at || null,
+    rules: parse(row?.rules_json, client.rules ?? company.rules ?? []),
+    settings: {...DEFAULT_SETTINGS, ...company.settings, ...client.settings, ...chosen},
+    origins: {company: Boolean(company.settings || company.rules), customer: Boolean(customer?.settings_json), project: Boolean(row)}};
+}
+
+function cleanRules(input) {
+  if (!Array.isArray(input) || input.length > 30) fail(400, "Enter up to 30 rules");
+  let advanceRules = 0;
+  return input.map((entry) => {
+    const category = str(entry?.category);
+    if (!RULE_CATEGORIES.includes(category)) fail(400, "Unknown financial rule");
+    const rate = entry.rate == null || entry.rate === "" ? null : str(entry.rate, 40);
+    const amount = entry.amount == null || entry.amount === "" ? null : str(entry.amount, 40);
+    const cap = entry.cap == null || entry.cap === "" ? null : str(entry.cap, 40);
+    for (const value of [rate, amount, cap]) {
+      if (value !== null && (decimal(value) === null || decimal(value) < 0n))
+        fail(400, "Rule amounts, caps and rates must be zero or greater");
+    }
+    if (rate !== null && decimal(rate) > decimal(100)) fail(400, "Percentage rate cannot exceed 100");
+    if (category === "advance_recovery" && ++advanceRules > 1) fail(400, "Configure a single advance recovery rule");
+    if (rate !== null && amount !== null) fail(400, "Choose a percentage or a fixed amount for each rule");
+    return {category, label: str(entry.label), rate, amount, cap,
+      basis: entry.basis === "running" ? "running" : "work",
+      sign: entry.sign === "addition" || (category === "vat" && entry.sign !== "deduction") ? "addition" : "deduction",
+      enabled: entry.enabled !== false};
+  });
+}
+
+function cleanSettings(input = {}, base = {}) {
+  const settings = {...base};
+  for (const key of ["quantity_precision", "count_precision"]) {
+    if (Object.hasOwn(input, key) && (input[key] === "inherit" || input[key] == null)) delete settings[key];
+    else if (Object.hasOwn(input, key)) {
+      const n = Number(input[key]);
+      if (!Number.isInteger(n) || n < 0 || n > 6) fail(400, "Precision must be from 0 to 6");
+      settings[key] = n;
+    }
+  }
+  if (Object.hasOwn(input, "minimum_area")) {
+    if (input.minimum_area === "inherit" || input.minimum_area == null) delete settings.minimum_area;
+    else if (input.minimum_area === "disabled") settings.minimum_area = 0;
+    else if (decimal(input.minimum_area) === null || decimal(input.minimum_area) < 0n) fail(400, "Minimum area must be zero or greater");
+    else settings.minimum_area = str(input.minimum_area, 40);
+  }
+  for (const [key,choices] of [["collections_basis",["cleared","received"]],["output_mode",["auto","detail","cover"]]]) {
+    if (!Object.hasOwn(input,key)) continue;
+    if (input[key] === "inherit" || input[key] == null || input[key] === "") delete settings[key];
+    else if (!choices.includes(input[key])) fail(400,"Unsupported " + key.replace("_"," "));
+    else settings[key] = input[key];
+  }
+  if (Array.isArray(input.work_types)) settings.work_types = [...new Set(input.work_types.map((value) => str(value)).filter(Boolean))].slice(0, 150);
+  if (Array.isArray(input.work_items)) settings.work_items = input.work_items.slice(0, 1000).map((item) => ({
+    id: str(item.id, 100) || crypto.randomUUID(), work_type: str(item.work_type), description: str(item.description, 2000),
+    work_item: str(item.work_item), unit: str(item.unit), rate: str(item.rate, 40),
+  }));
+  return settings;
+}
+
+function latestVersion(database, projectId) {
+  return database.get("SELECT MAX(version) AS latest FROM cert_rule_versions WHERE project_id=?", [projectId]).latest || 0;
+}
+
+function saveProjectRules(database, projectId, body, user) {
+  const latest = latestVersion(database, projectId);
+  if (!Number.isSafeInteger(Number(body.expected_version)) || Number(body.expected_version) !== latest)
+    fail(409, "Project rules changed. Reload before applying a new version", {expected_version: latest});
+  const newest = latest ? getProfile(database, projectId, today(), latest) : getProfile(database, projectId);
+  const inherited = latest ? parse(database.get("SELECT settings_json FROM cert_rule_versions WHERE project_id=? AND version=?",
+    [projectId, latest]).settings_json, {}) : {};
+  const rules = body.rules === undefined ? newest.rules : cleanRules(body.rules);
+  const settings = cleanSettings({...body.settings, ...(Array.isArray(body.work_types) ? {work_types: body.work_types} : {})}, inherited);
+  const at = date(body.effective_at, true) || today();
+  database.run("INSERT INTO cert_rule_versions (project_id,version,effective_at,rules_json,settings_json,created_by) VALUES (?,?,?,?,?,?)",
+    [projectId, latest + 1, at, encode(rules), encode(settings), user.id]);
+  audit(database, user, "project_rules_versioned", {projectId, details: {version: latest + 1, effective_at: at}});
+  return {...getProfile(database, projectId, today(), latest + 1), latest_version: latest + 1};
+}
+
+function checkedLocation(database, projectId, locationId) {
+  if (locationId && !database.get("SELECT 1 FROM cert_locations WHERE project_id=? AND id=?", [projectId, locationId]))
+    fail(400, "Location belongs to a different project");
+  return locationId;
+}
+
+module.exports = {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, projectLocations,
+  createLocation, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation};

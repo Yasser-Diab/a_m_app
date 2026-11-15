@@ -1,0 +1,94 @@
+.pc-workspace, .pc-grants, .pc-dialog {
+  --pc-gap: 14px;
+  --pc-radius: 12px;
+  --pc-tint: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  color: var(--text);
+  min-inline-size: 0;
+}
+.pc-workspace, .pc-grants, .pc-editor, .pc-stack, .pc-grant-form { display: grid; gap: var(--pc-gap); align-content: start; }
+.pc-workspace { padding-block-end: 20px; }
+.pc-workspace h2, .pc-workspace h3, .pc-dialog h2 { margin: 0; }
+.pc-workspace h2, .pc-dialog h2 { font-size: 1.18rem; }
+.pc-workspace h3 { font-size: 1rem; }
+.pc-workspace p, .pc-grants p, .pc-dialog p { margin-block: 0; }
+.pc-tabs { display: flex; align-items: center; gap: 6px; padding: 6px; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--pc-radius); }
+.pc-tabs button { flex: 0 0 auto; justify-content: flex-start; border-color: transparent; background: transparent; min-block-size: 40px; }
+.pc-tabs button[aria-pressed="true"] { color: var(--accent); background: var(--pc-tint); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.pc-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--pc-radius); padding: clamp(12px, 1.8vw, 22px); min-inline-size: 0; }
+.pc-toolbar, .pc-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pc-toolbar { justify-content: flex-start; }
+.pc-spread { justify-content: space-between; }
+.pc-toolbar h2, .pc-toolbar h3 { margin-inline-end: auto; }
+.pc-toolbar > .pc-field { flex: 1 1 155px; }
+.pc-form, .pc-choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 12px; align-items: start; }
+.pc-field, .pc-combo { display: grid; gap: 5px; min-inline-size: 0; }
+.pc-field > :is(label, span), .pc-combo > label { color: var(--text); font-size: .87rem; font-weight: 600; }
+.pc-field input, .pc-field select, .pc-field textarea, .pc-combo input { width: 100%; min-inline-size: 0; }
+.pc-field textarea { resize: vertical; }
+.pc-span { grid-column: 1 / -1; }
+.pc-caption { color: var(--muted); font-size: .88rem; }
+.pc-chip, .pc-status { display: inline-flex; align-items: center; border-radius: 20px; border: 1px solid var(--line); padding: 3px 9px; font-weight: 600; font-size: .82rem; white-space: nowrap; background: var(--surface-2); }
+.pc-status[data-status="approved"], .pc-status[data-status="issued"], .pc-status[data-status="ready"], .pc-status[data-status="cleared"] { background: var(--pc-tint); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 25%, var(--line)); }
+.pc-status[data-status="failed"], .pc-status[data-status="void"], .pc-status[data-status="voided"] { color: var(--danger); }
+.pc-problem { color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--danger) 22%, var(--line)); border-radius: 9px; padding: 10px 12px; overflow-wrap: anywhere; }
+.pc-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 9px; }
+.pc-cards > div { display: grid; gap: 7px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+.pc-cards .pc-payable { background: var(--pc-tint); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.pc-cards strong { font-size: 1.1rem; }
+.pc-money { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pc-table-scroll, .pc-grid-scroll { overflow: auto; border: 1px solid var(--line); border-radius: 9px; }
+.pc-table, .pc-grid { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .9rem; }
+.pc-table th, .pc-table td { text-align: start; border-block-end: 1px solid var(--line); padding: 8px 10px; }
+.pc-table tbody tr:last-child td, .pc-table tbody tr:last-child th { border-block-end: 0; }
+.pc-table thead th { background: var(--surface-2); white-space: nowrap; }
+.pc-table a, .pc-table button.pc-name { color: var(--accent); }
+.pc-table button.pc-name { justify-content: flex-start; text-align: start; background: transparent; border-color: transparent; }
+.pc-empty, .pc-grid-empty { padding: 20px; color: var(--muted); text-align: center; }
+.pc-combo { position: relative; }
+.pc-combo-control { display: flex; }
+.pc-combo-control button { flex: 0 0 auto; margin-inline-start: 4px; }
+.pc-combo-options { position: absolute; inset: calc(100% + 3px) 0 auto; max-block-size: 235px; overflow-y: auto; z-index: 12; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+.pc-combo-options [role="option"] { display: grid; gap: 3px; min-block-size: 34px; padding: 7px 10px; cursor: pointer; }
+.pc-combo-options [role="option"]:hover, .pc-combo-options [aria-selected="true"] { background: var(--pc-tint); }
+.pc-combo-options small { color: var(--muted); }
+.pc-grid-section { display: grid; gap: 8px; min-inline-size: 0; }
+.pc-grid-scroll { max-block-size: min(58vh, 650px); grid-template-columns: minmax(0, 1fr); overscroll-behavior-inline: contain; }
+.pc-grid { table-layout: fixed; width: max-content; min-inline-size: 100%; }
+.pc-grid td, .pc-grid th { border-inline-end: 1px solid var(--line); border-block-end: 1px solid var(--line); padding: 4px 6px; text-align: start; background: var(--surface); }
+.pc-grid tbody tr:nth-child(even) td, .pc-grid tbody tr:nth-child(even) th { background: var(--surface-2); }
+.pc-grid thead th { position: sticky; inset-block-start: 0; z-index: 3; padding: 8px 6px; background: var(--surface-2); }
+.pc-grid .pc-grid-index { position: sticky; inset-inline-start: 0; z-index: 2; min-inline-size: 47px; text-align: center; }
+.pc-grid thead .pc-grid-index { z-index: 4; }
+.pc-grid-index button { display: inline-grid; place-content: center; min-inline-size: 33px; padding: 2px; }
+.pc-grid input, .pc-grid select, .pc-grid .pc-grid-location { min-block-size: 32px; min-inline-size: 0; inline-size: 100%; padding: 4px 5px; border: 1px solid transparent; border-radius: 5px; background: transparent; text-align: start; }
+.pc-grid-location { justify-content: flex-start; white-space: normal; }
+.pc-grid input:focus, .pc-grid select:focus, .pc-grid button:focus-visible { background: var(--surface); outline: 2px solid var(--accent); outline-offset: -2px; }
+.pc-grid .pc-grid-off { background: color-mix(in srgb, var(--line) 32%, var(--surface)); }
+.pc-grid .pc-grid-selected, .pc-grid tbody tr:nth-child(even) .pc-grid-selected { background: var(--pc-tint); }
+.pc-grid .pc-row-invalid .pc-grid-index { border-inline-start: 3px solid var(--danger); }
+.pc-grid-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding: 7px 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; }
+.pc-grid-footer strong { margin-inline-end: 5px; }
+.pc-grid-footer small { color: var(--muted); }
+.pc-grid-search { display: flex; gap: 4px; }
+.pc-grid-search input { width: min(34vw, 180px); }
+.pc-dialog { width: min(calc(100vw - 22px), 590px); max-block-size: min(92vh, 1000px); padding: 17px; border: 1px solid var(--line-strong); border-radius: var(--pc-radius); background: var(--surface); box-shadow: var(--shadow); overflow: auto; }
+.pc-dialog[open] { display: grid; gap: var(--pc-gap); }
+.pc-dialog-wide { width: min(calc(100vw - 22px), 1240px); }
+.pc-dialog::backdrop { background: rgb(17 26 32 / 54%); }
+.pc-dialog > header { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.pc-dialog .pc-combo { margin-block-end: 83px; }
+.pc-dialog .pc-combo-options { max-block-size: 120px; }
+.pc-preview { width: 100%; height: min(71vh, 800px); border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); }
+.pc-check { display: flex; align-items: flex-start; gap: 7px; }
+.pc-check input { margin-block-start: 3px; flex: 0 0 auto; }
+.pc-grants { margin-block: 11px; }
+.pc-grants fieldset, .pc-stack fieldset { min-inline-size: 0; display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.pc-grants legend { font-size: .9rem; font-weight: 600; }
+.pc-project-grants { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px; max-block-size: 180px; overflow: auto; }
+.pc-workspace :focus-visible, .pc-dialog :focus-visible, .pc-grants :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pc-grid :focus-visible { outline-offset: -2px; }
+@media (max-width: 640px) {
+  .pc-panel { padding: 11px; }
+  .pc-grid-scroll { max-block-size: 52vh; }
+  .pc-grid-toolbar h3 { width: 100%; }
+}

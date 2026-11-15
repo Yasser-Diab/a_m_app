@@ -1,4 +1,6 @@
 import React, {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -90,6 +92,7 @@ import {
   renderManagerPayPalCheckout,
 } from "./manager-paypal-checkout.js";
 import "./styles.css";
+import "./workspace-theme.css";
 
 const APP_NAME = "Easy Commercial";
 const APP_SLOGAN = "Quotes · Invoices · Accounts · Payments";
@@ -172,6 +175,7 @@ const UI_TRANSLATIONS = {
     "المقاول - بحث": "Contractor - Search",
     "العميل": "Customer",
     "المقاول": "Contractor",
+    "المستخلصات والتحصيلات": "Progress Certificates & Collections",
     "رقم / مستند": "No. / Document",
     "كل مستندات المحدد": "All selected documents",
     "المشروع (اختياري)": "Project (optional)",
@@ -517,7 +521,7 @@ function applyUiTranslations(root, language = "ar") {
   const attrOriginals = applyUiTranslations.attrOriginals || (applyUiTranslations.attrOriginals = new WeakMap());
   const shouldSkip = (node) => {
     const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
-    return !!element?.closest?.(".document-preview, .smart-entry-table, .smart-table-scroll, iframe, script, style, textarea");
+    return !!element?.closest?.("[data-localized], .document-preview, .smart-entry-table, .smart-table-scroll, .pc-workspace, .pc-grants, iframe, script, style, textarea");
   };
   const translateString = (value) => {
     const clean = String(value ?? "").replace(/\s+/g, " ").trim();
@@ -651,6 +655,7 @@ const NAV = [
   { id: "statement", label: "كشف حساب", icon: WalletCards },
   { id: "payments", label: "الدفعات", icon: WalletCards },
   { id: "contractor", label: "المقاولين", icon: ClipboardList },
+  { id: "progress-certificates", label: "المستخلصات والتحصيلات", icon: ClipboardList },
   { id: "quantities", label: "الكميات المنتجة", icon: FileSpreadsheet },
   { id: "entry", label: "إدخال / تعديل", icon: Plus },
   { id: "settings", label: "الإعدادات", icon: Settings },
@@ -682,6 +687,7 @@ const ROUTE_APP_VARIANTS = {
   certificate: "main",
   certificates: "main",
   "contractor-certificates": "main",
+  "progress-certificates": "main",
 };
 
 const ROUTE_INITIAL_TABS = {
@@ -702,6 +708,7 @@ const ROUTE_INITIAL_TABS = {
   certificate: "contractor",
   certificates: "contractor",
   "contractor-certificates": "contractor",
+  "progress-certificates": "progress-certificates",
   entry: "entry",
   settings: "settings",
   quantities: "quantities",
@@ -725,6 +732,8 @@ const APP_VARIANT = getAppVariant();
 const APP_VARIANT_ID = "main";
 const INITIAL_ACTIVE_TAB = ROUTE_INITIAL_TABS[currentRouteKey()] || APP_VARIANT.defaultTab;
 const NAV_ITEMS = NAV;
+const ProgressCertificates = lazy(() => import("./certificates/Certificates.jsx"));
+const CertificateGrants = lazy(() => import("./certificates/CertificateGrants.jsx"));
 
 const WORKFLOWS = {
   offer: {
@@ -1877,6 +1886,10 @@ async function shareNativeReport(blob, fileName) {
   return uri;
 }
 
+function saveNativeCertificate(blob, fileName) {
+  return saveNativeReport(blob, fileName, { folder: "Progress Certificates" });
+}
+
 const NATIVE_SETTINGS_PATH = "accounting-management-settings.json";
 
 async function loadNativeSettings() {
@@ -1958,7 +1971,12 @@ function NoticeCenter({ notices, onClose }) {
   );
 }
 
-function SessionStatusChip({ user, online, now }) {
+function SessionStatusChip({ user, online }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   if (!user) return null;
   const startedAt = user.session_started_at || user.last_seen_at || new Date().toISOString();
   const duration = compactDuration(now - new Date(startedAt).getTime());
@@ -2121,7 +2139,9 @@ function App() {
   );
   const [resolvedDark, setResolvedDark] = useState(false);
   const [activeTab, setActiveTab] = useState(
-    () => localStorage.getItem("easyCommercialActiveTab") || INITIAL_ACTIVE_TAB,
+    () => currentRouteKey() === "progress-certificates"
+      ? INITIAL_ACTIVE_TAB
+      : localStorage.getItem("easyCommercialActiveTab") || INITIAL_ACTIVE_TAB,
   );
   const [health, setHealth] = useState(null);
   const [bootstrap, setBootstrap] = useState(null);
@@ -2256,7 +2276,6 @@ function App() {
     }
   });
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine !== false);
-  const [sessionNow, setSessionNow] = useState(() => Date.now());
   const [subscriptionState, setSubscriptionState] = useState(null);
   const [managerEvents, setManagerEvents] = useState([]);
   const notifiedManagerEventIdsRef = useRef(new Set());
@@ -2296,13 +2315,8 @@ function App() {
   }, [busy]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setShowSplash(false), 5000);
+    const timer = window.setTimeout(() => setShowSplash(false), 550);
     return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setSessionNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -2551,6 +2565,7 @@ function App() {
     return () => media.removeEventListener?.("change", applyTheme);
   }, [themeMode]);
 
+  const certificateSession = currentUser?.certificate_session;
   const api = useMemo(
     () => ({
       async request(path, options = {}) {
@@ -2559,6 +2574,7 @@ function App() {
           response = await fetch(buildUrl(apiBase, path), {
             ...options,
             headers: {
+              ...(certificateSession ? { Authorization: `Bearer ${certificateSession}` } : {}),
               ...(options.body ? { "Content-Type": "application/json" } : {}),
               ...(options.headers || {}),
             },
@@ -2606,8 +2622,43 @@ function App() {
         return data ?? {};
       },
     }),
-    [apiBase],
+    [apiBase, certificateSession],
   );
+
+  const [certificateAccess, setCertificateAccess] = useState(null);
+  const refreshCertificateAccess = useCallback(async (signal) => {
+    if (!certificateSession) {
+      setCertificateAccess(null);
+      return;
+    }
+    try {
+      const access = await api.request("/api/certificates/access", {
+        headers: { Authorization: `Bearer ${certificateSession}` },
+        signal,
+      });
+      if (!signal?.aborted) setCertificateAccess(access);
+    } catch (error) {
+      if (!signal?.aborted) setCertificateAccess({ error: error.status });
+    }
+  }, [api, certificateSession]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setCertificateAccess(null);
+    refreshCertificateAccess(controller.signal);
+    const timer = window.setInterval(() => refreshCertificateAccess(controller.signal), 45000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [refreshCertificateAccess]);
+
+  const canViewCertificates = certificateAccess?.enabled &&
+    certificateAccess.capabilities?.includes("view");
+  const [visitedCertificates, setVisitedCertificates] = useState(false);
+  useEffect(() => {
+    if (activeTab === "progress-certificates" && canViewCertificates) setVisitedCertificates(true);
+  }, [activeTab, canViewCertificates]);
 
   const companyHeaderLogo = reportBranding?.logoDataUri || appLogo;
 
@@ -3002,7 +3053,9 @@ function App() {
         .then((data) => {
           if (data?.user) {
             setCurrentUser((user) =>
-              user && user.id === data.user.id ? userWithFreshSession(data.user) : user,
+              user && user.id === data.user.id
+                ? userWithFreshSession({ ...data.user, certificate_session: user.certificate_session })
+                : user,
             );
           }
         })
@@ -3013,6 +3066,7 @@ function App() {
     const markOffline = () => {
       api.request("/api/auth/logout", {
         method: "POST",
+        headers: { Authorization: "" },
         body: JSON.stringify({
           user_id: currentUser.id,
           ...buildPresencePayload("offline"),
@@ -3268,6 +3322,7 @@ function App() {
         currentUser.session_started_at || now.toISOString();
       api.request("/api/auth/logout", {
         method: "POST",
+        headers: certificateSession ? { Authorization: `Bearer ${certificateSession}` } : {},
         body: JSON.stringify({
           user_id: currentUser.id,
           summary: `${APP_NAME} logout`,
@@ -4138,7 +4193,6 @@ function App() {
                 <SessionStatusChip
                   user={currentUser}
                   online={appServerConnected}
-                  now={sessionNow}
                 />
                 <button
                   type="button"
@@ -4242,8 +4296,9 @@ function App() {
               <span>{APP_BYLINE}</span>
             </div>
           </div>
-          <nav className="main-nav">
-            {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+          <nav className="main-nav" data-localized>
+            {NAV_ITEMS.filter(({ id }) => id !== "progress-certificates" || canViewCertificates)
+              .map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 className={activeTab === id ? "active" : ""}
@@ -4259,7 +4314,7 @@ function App() {
         <section className="workspace">
           <header className="topbar">
             <div className="title-stack">
-              <h1>{localizedActiveNavLabel}</h1>
+              <h1 data-localized>{localizedActiveNavLabel}</h1>
               <button
                 type="button"
                 className="server-address-chip"
@@ -4274,7 +4329,6 @@ function App() {
               <SessionStatusChip
                 user={currentUser}
                 online={appServerConnected}
-                now={sessionNow}
               />
               <button
                 type="button"
@@ -4391,6 +4445,37 @@ function App() {
                 setSubscriptionModalVisible(false);
               }}
             />
+          )}
+
+          {(activeTab === "progress-certificates" || visitedCertificates) && canViewCertificates && (
+            <div hidden={activeTab !== "progress-certificates"}>
+              <Suspense fallback={<LoadingOverlay />}>
+                <ProgressCertificates
+                  key={certificateSession}
+                  api={api}
+                  apiBase={apiBase}
+                  session={certificateSession}
+                  access={certificateAccess}
+                  uiLanguage={uiLanguage}
+                  defaultReportLanguage={defaultReportLanguage}
+                  refreshKey={refreshKey}
+                  onAccessChanged={refreshCertificateAccess}
+                  saveNativeReport={window.Capacitor?.isNativePlatform?.() ? saveNativeCertificate : undefined}
+                  shareNativeReport={window.Capacitor?.isNativePlatform?.() ? shareNativeReport : undefined}
+                />
+              </Suspense>
+            </div>
+          )}
+          {activeTab === "progress-certificates" && !canViewCertificates && (
+            <section className="panel empty-state" role="status">
+              {uiLanguage === "en"
+                ? certificateSession && !certificateAccess
+                  ? "Checking certificate access…"
+                  : "Certificate access requires an active session and a grant from your administrator."
+                : certificateSession && !certificateAccess
+                  ? "جارٍ التحقق من صلاحية المستخلصات…"
+                  : "يتطلب فتح المستخلصات تسجيل دخول نشطًا وصلاحية من مدير النظام."}
+            </section>
           )}
 
           {activeTab === "dashboard" && (
@@ -4673,6 +4758,8 @@ function App() {
               openUpdateDownload={openUpdateDownload}
               managerEvents={managerEvents}
               onManagerEventAction={updateManagerEventState}
+              certificateAccess={certificateAccess}
+              onCertificateAccessChanged={refreshCertificateAccess}
             />
           )}
         </section>
@@ -17244,6 +17331,8 @@ function ManagerEventCenter({ events = [], onAction }) {
 function SettingsView({
   api,
   currentUser,
+  certificateAccess,
+  onCertificateAccessChanged,
   apiBase,
   setApiBase,
   themeMode,
@@ -17286,6 +17375,7 @@ function SettingsView({
     terms.terms_corporate_en || { sections: [] },
   );
   const [users, setUsers] = useState([]);
+  const [certificateGrantsOpen, setCertificateGrantsOpen] = useState(false);
   const [newUser, setNewUser] = useState({
     username: "",
     display_name: "",
@@ -17368,7 +17458,7 @@ function SettingsView({
   const managerPaypalCardSubmitRef = useRef(null);
   const managerCheckoutRenderIdRef = useRef(0);
   const isCompanyAdmin = ["admin", "manager"].includes(currentUser?.role);
-  const adminUnlocked = isCompanyAdmin || password === "23320001";
+  const adminUnlocked = isCompanyAdmin;
   const canEditCompanySettings = canUser(currentUser, "can_edit_company_settings");
   const canEditTerms = canUser(currentUser, "can_edit_terms");
   const canEditTableStyles = canUser(currentUser, "can_edit_table_styles");
@@ -19326,6 +19416,19 @@ function SettingsView({
         </form>
         {isCompanyAdmin ? (
           <>
+            <details onToggle={(event) => setCertificateGrantsOpen(event.currentTarget.open)}>
+              <summary>{l("صلاحيات المستخلصات والتحصيلات", "Certificates & Collections permissions")}</summary>
+              {certificateGrantsOpen && <Suspense fallback={null}>
+                <CertificateGrants
+                  api={api}
+                  session={currentUser?.certificate_session}
+                  access={certificateAccess}
+                  users={users}
+                  uiLanguage={uiLanguage}
+                  onSaved={onCertificateAccessChanged}
+                />
+              </Suspense>}
+            </details>
             <form className="form-grid user-form" onSubmit={addUser}>
               <Field label={t("اسم الدخول")}>
                 <input

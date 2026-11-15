@@ -4,7 +4,18 @@ __pycache__/
 dist/
 dist-installer/
 dist-android/
-android/
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/app/src/main/assets/
+/android/app/capacitor.build.gradle
+/android/capacitor.settings.gradle
+/android/capacitor-cordova-android-plugins/
+/android/local.properties
+/android/app/google-services.json
+*.keystore
+*.jks
+/Source Code/
 tmp_asar_extract/
 tmp/
 release/
@@ -21,6 +32,8 @@ upgrade-backups/
 *.apk
 *.blockmap
 *.xlsm
+*.xlsb
+*.md
 Screenshot*.png
 tmp_report.pdf
 logo_0003.png
@@ -28,10 +41,8 @@ AccountingManagement_V*/
 AccountingStatement_V*/
 AccountingStatement_*/
 AccountingManagement_V2*_upgrade*/
-INSTALL_2*.md
 
 data/*.db
-!data/price_offer.empty.db
 data/backups/
 data/chat_uploads/
 data/exports/

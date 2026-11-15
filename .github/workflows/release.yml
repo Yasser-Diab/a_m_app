@@ -29,7 +29,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -46,7 +46,7 @@ jobs:
           }
 
       - name: Build Windows installer
-        run: npm run dist:win -- --publish never
+        run: npm run dist:win
 
       - name: Verify Windows updater assets
         run: npm run verify:release-assets
@@ -64,7 +64,6 @@ jobs:
           Copy-Item "dist-installer/EasyCommercial/latest.yml" "release-assets/" -Force
           $apk = Get-ChildItem "android/app/build/outputs/apk" -Filter "*.apk" -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           Copy-Item $apk.FullName "release-assets/EasyCommercial-Android-v$version.apk" -Force
-          Copy-Item "INSTALL.txt" "release-assets/INSTALL.txt" -Force
           Compress-Archive -Path "release-assets/*" -DestinationPath "EasyCommercial_V$version`_release.zip" -Force
 
       - name: Publish GitHub Release
