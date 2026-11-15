@@ -81,8 +81,12 @@ async function writeCertificateXlsx(model) {
   const identity = workbook.addWorksheet(model.labels.certificate, { views: [{ rightToLeft: model.direction === 'rtl' }] });
   identity.columns = [{ width: 27 }, { width: 70 }];
   identity.addRow([model.issuer.name]);
+  if (model.issuer.alternate) identity.addRow([model.issuer.alternate]);
   if (model.watermark) identity.addRow([model.watermark]);
   for (const group of model.fieldGroups) for (const field of group) identity.addRow([field.label, field.value]);
+  if (model.preparedBy) identity.addRow([model.labels.prepared, model.preparedBy]);
+  if (model.issuer.website) identity.addRow([model.issuer.website, model.issuer.shortName]);
+  if (model.appVersion) identity.addRow([`EasyCommercial ${model.appVersion}`]);
   const type = { key: 'work_type', label: model.labels.work_type, weight: 18, kind: 'text' };
   addWorksheet(workbook, model, model.labels.detail, [type, ...model.columns], model.lines);
   if (model.financeRows.length) addWorksheet(workbook, model, model.labels.finance, [
@@ -206,7 +210,8 @@ function registerCertificateDocumentRoutes(router, { database, authorize, docume
     access(req, 'view', row.project_id);
     access(req, capability, row.project_id);
     const variant = req.query.variant === 'internal' ? 'internal' : 'customer';
-    if (variant === 'internal') access(req, 'view_collections', row.project_id);
+    if (variant === 'internal' || req.query.receipts === '1' || req.query.collections_through)
+      access(req, 'view_collections', row.project_id);
     return { row, variant };
   }
 
@@ -229,13 +234,13 @@ function registerCertificateDocumentRoutes(router, { database, authorize, docume
     }
   }
 
-  function draftPdf(req, row, variant) {
-    const key = JSON.stringify([row.id, row.version, row.updated_at, variant]);
+  async function draftPdf(req, row, variant) {
+    const draft = await documentFor(req, row);
+    const key = createHash('sha256').update(JSON.stringify([draft, variant])).digest('hex');
     if (!previews.has(key)) {
-      const promise = Promise.resolve(documentFor(req, row)).then((draft) => {
-        const model = buildCertificateDocument(draft, { variant });
-        return renderCertificatePdf(model).then((rendered) => ({ ...rendered, model }));
-      }).finally(() => previews.delete(key));
+      const model = buildCertificateDocument(draft, { variant });
+      const promise = renderCertificatePdf(model).then((rendered) => ({ ...rendered, model }))
+        .finally(() => previews.delete(key));
       previews.set(key, promise);
     }
     return previews.get(key);
@@ -244,7 +249,7 @@ function registerCertificateDocumentRoutes(router, { database, authorize, docume
   function pdf(disposition) {
     return route(async (req, res) => {
       const { row, variant } = input(req);
-      if (row.status === 'issued') {
+      if (row.status === 'issued' && req.query.fresh !== '1') {
         const artifact = getArtifact(database, row.id, variant, true);
         if (!artifact || artifact.status !== 'ready' || !artifact.pdf) {
           const failed = artifact?.status === 'failed';
@@ -264,7 +269,7 @@ function registerCertificateDocumentRoutes(router, { database, authorize, docume
   router.get('/:id/pdf', pdf('attachment'));
   router.get('/:id/xlsx', route(async (req, res) => {
     const { row, variant } = input(req);
-    const artifact = row.status === 'issued' ? getArtifact(database, row.id, variant, false) : null;
+    const artifact = row.status === 'issued' && req.query.fresh !== '1' ? getArtifact(database, row.id, variant, false) : null;
     const model = artifact ? JSON.parse(artifact.document_json) : buildCertificateDocument(await documentFor(req, row), { variant });
     const buffer = await writeCertificateXlsx(model);
     recheck(req, row);

@@ -9,7 +9,7 @@ const {
 const {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, createLocation,
   projectLocations, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, addReceipt, updateReceipt, collectionResponse} = require("./certificate-ledger.cjs");
-const {getRevision, certificateDocumentInput, createDraft, saveDraft, runAction, forAccess} = require("./certificate-revisions.cjs");
+const {getRevision, certificateDocumentInput, createDraft, saveDraft, runAction, forAccess, recognizedReceipts} = require("./certificate-revisions.cjs");
 const {importLegacyCertificates} = require("./certificate-legacy.cjs");
 const {stageImport, commitImport} = require("./certificate-imports.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
@@ -85,10 +85,10 @@ function certificateList(database, req, access) {
   const match = lookup(req.query.q);
   const like = `%${match}%`;
   const where = `${scope.clause} AND (? IS NULL OR r.project_id=?)
-    AND (? = '' OR r.status=?)
+    AND (? = '' OR r.status=? OR (? = 'issued' AND r.status='historical'))
     AND (? = '' OR cp.search_name LIKE ? OR p.search_name LIKE ? OR r.legacy_number LIKE ?
       OR CAST(r.official_number AS TEXT) LIKE ?)`;
-  const params = [...scope.params,projectId,projectId,val,val,match,like,like,like,like];
+  const params = [...scope.params,projectId,projectId,val,val,val,match,like,like,like,like];
   const joins = "FROM cert_revisions r JOIN cert_projects cp ON r.project_id=cp.id JOIN parties p ON p.id=cp.customer_id";
   const total = database.get(`SELECT count(*) AS total ${joins} WHERE ${where}`,params).total;
   const items = database.all(`
@@ -110,19 +110,21 @@ function normalizeListStatus(status) {
 
 function sourceList(database, project) {
   const certificates = database.all(`
-    SELECT id,official_number,revision,work_to,snapshot_json FROM cert_revisions WHERE project_id=? AND status='issued'
+    SELECT id,official_number,legacy_number,revision,work_to,snapshot_json
+    FROM cert_revisions WHERE project_id=? AND status IN ('issued','historical')
     ORDER BY work_to DESC,id DESC LIMIT 12
   `, [project.id]).map(({snapshot_json,...row}) => ({
-    ...row,label:`#${row.official_number} · r${row.revision}`,
+    ...row,label:`#${row.official_number || row.legacy_number || row.id}${row.revision > 1 ? ` · R${row.revision}` : ""}`,
     lines:parse(snapshot_json).lines.map(({identity,location_id,location,work_type,work_item,description,mode,
       width,height,dimension_unit,count,quantity,unit,rate,agreed_amount}) =>
       ({identity,location_id,location,work_type,work_item,description,mode,width,height,dimension_unit,count,quantity,
         unit,rate,agreed_amount,prior_certified:true})),
   }));
-  const quotationRows = database.all(`SELECT id,operation_no,project,title,entry_date FROM documents
-    WHERE party_id=? AND deleted_at IS NULL AND document_type='price_offer' AND status='approved' ORDER BY id DESC`,
-  [project.customer_id]).filter((quotation) => lookup(quotation.project) === lookup(project.name)).slice(0,25);
-  const quotations = quotationRows.map((quote) => ({
+  const projectKeys = new Set([project.name, project.alternate_name, project.code].map(lookup).filter(Boolean));
+  const documents = database.all(`SELECT id,operation_no,project,title,entry_date,document_type FROM documents
+    WHERE party_id=? AND deleted_at IS NULL AND document_type IN ('price_offer','invoice') AND status='approved' ORDER BY id DESC`,
+  [project.customer_id]).filter((document) => projectKeys.has(lookup(document.project)));
+  const sourceDocuments = (type) => documents.filter((record) => record.document_type === type).slice(0,25).map((quote) => ({
     id:quote.id, label:quote.title || quote.operation_no, reference:quote.operation_no, date:quote.entry_date,
     lines:database.all(`SELECT id,work_type,description,statement_text,unit,unit_code,rate
       FROM work_items WHERE document_id=? AND deleted_at IS NULL AND COALESCE(collection_amount,0)=0 ORDER BY id LIMIT 2500`,
@@ -131,7 +133,7 @@ function sourceList(database, project) {
       unit:row.unit,rate:row.rate,mode:row.unit_code === "count" ? "count" : "direct",source:quote.operation_no,
     })),
   }));
-  return {certificates,quotations};
+  return {certificates,quotations:sourceDocuments("price_offer"),invoices:sourceDocuments("invoice")};
 }
 
 function reportResponse(database, req, access) {
@@ -144,7 +146,10 @@ function reportResponse(database, req, access) {
   const collectionCutoff = date(req.query.collection_cutoff,true) || today();
   const scope = scopeSql(access,"cp.id");
   const projects = database.all(`SELECT cp.id,cp.name,cp.currency FROM cert_projects cp WHERE ${scope.clause}
-    AND (? IS NULL OR cp.id=?) ORDER BY cp.name`,[...scope.params,projectId,projectId]);
+    AND (cp.id=? OR (? IS NULL AND (EXISTS (SELECT 1 FROM cert_revisions r WHERE r.project_id=cp.id)
+      OR EXISTS (SELECT 1 FROM cert_receipts r WHERE r.project_id=cp.id)
+      OR EXISTS (SELECT 1 FROM cert_legacy_records r WHERE r.project_id=cp.id AND r.record_type='receipt'))))
+    ORDER BY cp.name`,[...scope.params,projectId,projectId]);
   const totalsByCurrency = new Map();
   const items = [];
   for (const project of projects) {
@@ -152,7 +157,7 @@ function reportResponse(database, req, access) {
       SELECT id,series_key,location_id,official_number,revision,work_to,snapshot_json,
         ROW_NUMBER() OVER (PARTITION BY series_key,location_id ORDER BY work_to DESC,issued_at DESC,id DESC) as latest
       FROM cert_revisions WHERE project_id=? AND status='issued' AND work_to<=? AND (? IS NULL OR location_id IS ? OR location_id IS NULL)
-    `,[project.id,workCutoff,locationId,locationId]).filter((row) => row.latest === 1);
+    `,[project.id,workCutoff,locationId,locationId]);
     const historic = database.get(`SELECT COUNT(DISTINCT a.revision_id) AS count, COALESCE(SUM(a.amount_minor),0) AS amount
       FROM cert_legacy_records a JOIN cert_revisions r ON r.id=a.revision_id
       WHERE a.project_id=? AND a.record_type='work_row'
@@ -164,23 +169,26 @@ function reportResponse(database, req, access) {
       if (locationId && !row.location_id) {
         const lines = snapshot.lines.filter((line) => line.location_id === locationId);
         for (const line of lines) {
-          acc.current += toMinor(line.current) || 0;
-          acc.cumulative += toMinor(line.cumulative) || 0;
+          const amount = toMinor(line.current) || 0;
+          if (row.latest === 1) acc.current += amount;
+          acc.cumulative += amount;
         }
         if (lines.length) acc.supports_settlement = false;
       } else {
         const value = snapshot.totals;
-        acc.current += toMinor(value.current) || 0;
-        acc.cumulative += toMinor(value.cumulative) || 0;
-        acc.cumulative_earned += toMinor(value.cumulative_earned) || 0;
+        const amount = toMinor(value.current) || 0;
+        if (row.latest === 1) acc.current += amount;
+        acc.cumulative += amount;
+        acc.cumulative_earned += toMinor(value.current_earned) ?? amount;
       }
       return acc;
     },{current:0,cumulative:0,cumulative_earned:0,supports_settlement:true});
     const profile = getProfile(database,project.id,workCutoff);
     const ledger = allocationLedger(database,project.id,profile,collectionCutoff,{workCutoff,locationId});
-    const amounts = {current:work.current,cumulative:work.cumulative,
-      cumulative_earned:work.supports_settlement ? work.cumulative_earned : null,ordinary_collections:ledger.ordinary_minor,
-      cumulative_payable:work.supports_settlement ? work.cumulative_earned - ledger.ordinary_minor + ledger.released_recovery_minor : null,
+    const earned = work.cumulative_earned + historic.amount;
+    const amounts = {current:work.current,cumulative:work.cumulative + historic.amount,
+      cumulative_earned:work.supports_settlement ? earned : null,ordinary_collections:ledger.ordinary_minor,
+      cumulative_payable:work.supports_settlement ? earned - ledger.ordinary_minor + ledger.released_recovery_minor : null,
       historical_work:historic.amount,unapplied_collections:ledger.unapplied_minor};
     const asMoney = (value) => value === null ? null : money(value);
     const moneyFields = Object.fromEntries(Object.entries(amounts).map(([key,value]) => [key,asMoney(value)]));
@@ -188,7 +196,7 @@ function reportResponse(database, req, access) {
     for (const [key,value] of Object.entries(amounts))
       combined[key] = value === null || combined[key] === null ? null : (combined[key] || 0)+value;
     totalsByCurrency.set(project.currency,combined);
-    items.push({project_id:project.id,project_name:project.name,currency:project.currency,certificate_count:portions.length,
+    items.push({project_id:project.id,project_name:project.name,currency:project.currency,certificate_count:portions.length + historic.count,
       historical_count:historic.count,...moneyFields});
   }
   const currencies = Object.fromEntries([...totalsByCurrency].map(([code,raw]) => [code,
@@ -197,7 +205,7 @@ function reportResponse(database, req, access) {
   return {items,totals,currencies,location_id:locationId,work_cutoff:workCutoff,collection_cutoff:collectionCutoff};
 }
 
-function registerCertificateRoutes(app, database, dataDir) {
+function registerCertificateRoutes(app, database, dataDir, { branding = () => ({}), appVersion = "" } = {}) {
   const router = express.Router();
   app.use("/api/certificates",router);
   router.use((req,_res,next) => {
@@ -218,6 +226,24 @@ function registerCertificateRoutes(app, database, dataDir) {
   };
   const admin = (req) => adminAccess(database,req);
   const detail = (row,access) => forAccess(database,row,access);
+  const printInput = (model, user, options = {}) => {
+    const settings = getProfile(database, model.project_id).settings;
+    const header = {...model.header};
+    if (["ar", "en"].includes(options.language)) header.locale = options.language;
+    if (["auto", "cover", "detail"].includes(options.layout)) header.output_mode = options.layout;
+    if (["A4", "Letter"].includes(options.paper)) header.paper_size = options.paper;
+    header.group_work_types = options.group == null ? (header.group_work_types ?? settings.group_work_types) : options.group === "1";
+    header.show_group_subtotals = options.subtotals == null ? (header.show_group_subtotals ?? settings.show_group_subtotals) : options.subtotals === "1";
+    const cutoff = options.receipts !== "0" && options.collections_through ? date(options.collections_through) : null;
+    const paymentDetails = cutoff ? allocationLedger(database, model.project_id, getProfile(database, model.project_id, cutoff), cutoff, {
+      locationId:header.location_id || null,
+    }) : null;
+    return {...model, header, issuer: {...model.issuer, ...branding()}, prepared_by: user?.display_name || "",
+      include_receipts: options.receipts == null ? undefined : options.receipts === "1",
+      receipts: paymentDetails ? recognizedReceipts(paymentDetails) : model.receipts,
+      payment_details_through: cutoff,
+      app_version: appVersion, rule_settings: {...model.rule_settings, signatures: settings.signatures || []}};
+  };
 
   router.get("/access",(req,res) => {
     const {user,...access} = accessFor(database,req);
@@ -401,7 +427,7 @@ function registerCertificateRoutes(app, database, dataDir) {
   registerCertificateDocumentRoutes(router,{
     database,dataDir,authorize:checked,
     getCertificate:(id) => getRevision(database,id),
-    documentFor:(_req,row) => certificateDocumentInput(database,row),
+    documentFor:(req,row) => printInput(certificateDocumentInput(database,row),certificateSessionUser(database,req),req.query),
     issueAccess:(req,projectId) => checked(req,"issue",projectId),
   });
 
@@ -417,7 +443,8 @@ function registerCertificateRoutes(app, database, dataDir) {
     const action = str(req.body.action);
     const capability = ["submit","approve","issue"].includes(action) ? action : action === "return" ? "approve" : "revise";
     const {row,access} = revision(req,capability);
-    const updated = database.transaction(() => runAction(database,row,req.body,access.user,enqueueCertificateRender));
+    const enqueue = (db, id, model) => enqueueCertificateRender(db,id,printInput(model,access.user));
+    const updated = database.transaction(() => runAction(database,row,req.body,access.user,enqueue));
     res.json(detail(updated,access));
     if (action === "issue" && updated.pdf_status === "pending") {
       void processCertificateRender(database,updated.id,dataDir).catch((error) => console.warn("Certificate render paused: " + error.message));

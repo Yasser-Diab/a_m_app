@@ -48,11 +48,11 @@ async function main() {
   assert.equal(simple.fieldGroups.flat().some((field) => field.key === 'tax_no'), false);
   const historical = buildCertificateDocument(fixture('en', [lump], { ...lump, current_payable: 25_000 },
     { status: 'historical', legacy_number: '2017-24', source_name: 'Workbook.xlsb' }));
-  assert.equal(historical.watermark, 'Historical import');
+  assert.equal(historical.watermark, '');
   assert.equal(historical.officialNumber, '2017-24');
   assert.deepEqual(historical.moneyKeys, ['current']);
   assert.equal(historical.financeRows.length, 0);
-  assert.equal(historical.fieldGroups.flat().find((field) => field.key === 'source_name').value, 'Workbook.xlsb');
+  assert.equal(historical.fieldGroups.flat().some((field) => ['source_name', 'revision'].includes(field.key)), false);
   await verifyPdf(historical, { pageCount: 1, detailPages: 1, hasCover: false });
   const english = await verifyPdf(simple, { pageCount: 1, detailPages: 1, hasCover: false });
 
@@ -77,13 +77,24 @@ async function main() {
     status: 'issued', official_number: 'PC-014', issued_at: '2026-11-15T09:00:00Z', baseline: { id: 5 },
     receipts: [{ id: 100, amount: 300, reference: 'PRIVATE-RECEIPT-100' }],
   });
+  issued.header.group_work_types = true;
+  issued.issuer = {companyNameEn:'Example Contracting', companyNameAr:'المثال للمقاولات', website:'example.test', companyAbbreviation:'EC'};
+  issued.rule_settings = {signatures:[{name:'Prepared Person', title:'Project Engineer'}]};
+  issued.prepared_by = 'Report Operator';
+  issued.app_version = '2.0.4';
   const arabicModel = buildCertificateDocument(issued);
   assert.equal(arabicModel.coverRows.length, 2);
   assert.equal(arabicModel.coverRows.reduce((sum, row) => sum + row.current, 0), 3400);
   assert.equal(arabicModel.columns.some((column) => column.key === 'height'), true);
   assert.equal(arabicModel.direction, 'rtl');
+  assert.equal(arabicModel.lines[0].progress, 100);
+  assert.equal(arabicModel.issuer.name, 'Example Contracting');
+  assert.equal(arabicModel.signatures[0].name, 'Prepared Person');
   assert.equal(JSON.stringify(arabicModel).includes('PRIVATE-RECEIPT-100'), false);
   assert.equal(buildCertificateDocument(issued, { variant: 'internal' }).receipts[0].reference, 'PRIVATE-RECEIPT-100');
+  const customerPayments = buildCertificateDocument({...issued, include_receipts:true});
+  assert.equal(customerPayments.receipts[0].amount, 300);
+  assert.equal(JSON.stringify(customerPayments).includes('PRIVATE-RECEIPT-100'), false);
   const arabic = await verifyPdf(arabicModel);
 
   const workbook = new ExcelJS.Workbook();

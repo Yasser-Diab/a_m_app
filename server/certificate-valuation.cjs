@@ -71,6 +71,9 @@ function calculateLine(line, before, settings) {
   let billed = null;
   let gross = 0n;
   const scale = Number.isInteger(settings.quantity_precision) ? settings.quantity_precision : 4;
+  const completion = progress ?? 100n * SCALE;
+  if (mode !== "adjustment" && present(line.progress) && (!positive(progress) || progress > 100n * SCALE))
+    complain("progress", "Progress must be from 0 to 100");
 
   if (before && (before.location_id !== line.location_id || before.work_type !== line.work_type))
     complain("identity", "Certified work identity must keep its location and work type");
@@ -110,14 +113,12 @@ function calculateLine(line, before, settings) {
     if (!positive(unroundedBillable)) complain("quantity", "Quantity must be zero or greater");
     if (mode === "direct" && !line.unit) complain("unit", "Quantity unit is required");
   } else if (mode === "lump") {
-    if (present(line.progress) && (!positive(progress) || progress > 100n * SCALE))
-      complain("progress", "Progress must be from 0 to 100");
     if (present(line.claim_amount) && !positive(claim)) complain("claim_amount", "Claim amount must be zero or greater");
-    if (claim === null && (!positive(agreed) || !positive(progress)))
-      complain("agreed_amount", "Enter a claim amount or an agreed amount and progress");
+    if (claim === null && !positive(agreed))
+      complain("agreed_amount", "Enter a claim amount or an agreed amount");
     if (claim !== null && progress !== null)
       complain("progress", "Select one claim basis, amount or percentage");
-    gross = claim ?? (agreed !== null && progress !== null ? divide(multiply(agreed, progress), 100n) : 0n);
+    gross = claim ?? divide(multiply(agreed ?? 0n, completion), 100n);
   } else if (mode === "adjustment") {
     if (adjustment === null) complain("adjustment_amount", "A signed adjustment amount is required");
     if (!line.reason) complain("reason", "An adjustment reason is required");
@@ -130,7 +131,7 @@ function calculateLine(line, before, settings) {
   if (unroundedBillable !== null) {
     const quantityScale = mode === "count" ? settings.count_precision ?? 0 : scale;
     billed = quantityAt(unroundedBillable, quantityScale);
-    gross = multiply(billed, rate ?? 0n);
+    gross = divide(multiply(multiply(billed, rate ?? 0n), completion), 100n);
   }
 
   if (["area", "linear", "count", "direct"].includes(mode) && !positive(rate))
@@ -247,6 +248,7 @@ function calculateValuation(lines, baseline, profile, ledger) {
       current_payable: money(net - currentCollected + periodReleased),
       cumulative_payable: money(previousNet + net - rawCollected + releasedRecovery),
       ordinary_collections: money(rawCollected), current_collections: money(currentCollected),
+      ...(ledger.advance_principal_minor ? {advance_receipts:money(ledger.advance_principal_minor)} : {}),
       advance_recovery: money(advanceRecovery), cumulative_advance_recovery: money(previousRecovery + advanceRecovery),
       reversed_advance_recovery: money(releasedRecovery), current_reversed_advance_recovery: money(periodReleased), components,
       groups: rankedGroups.map((group) => ({

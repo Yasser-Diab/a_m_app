@@ -17,7 +17,12 @@ const {
 const {
   audit: auditCertificateAccess, certificateSessionUser, getUserGrant, hasManagerRole,
   isAdmin: canAdministerCertificateGrants, setGrant: setCertificateGrant,
+  authorize: authorizeCertificate,
 } = require("./certificate-access.cjs");
+const {commercialAccess, commercialProjects, projectPaymentRows} = require("./commercial-ledger.cjs");
+const {certificateDocumentInput} = require("./certificate-revisions.cjs");
+const {getProject: getCertificateProject, projectLocations: certificateLocations} = require("./certificate-projects.cjs");
+const {addReceipt: addCertificateReceipt} = require("./certificate-ledger.cjs");
 const {
   fetchManagerSubscriptionStatus,
   registerManagerGatewayRoutes,
@@ -2175,10 +2180,8 @@ function effectiveAmount(row, key) {
 }
 
 function formatCompletion(row) {
-  const percent = completionPercent(
-    row.completion_percent ?? row.completion_ratio,
-  );
-  return Math.abs(percent - 100) > 0.005 ? `${money(percent)}%` : "";
+  const percent = numberOrNull(row.completion_percent) ?? completionPercent(row.completion_ratio);
+  return `${money(percent)}%`;
 }
 
 function contractorRowsUpToCertificate(rows, requested) {
@@ -2225,7 +2228,7 @@ function dimensionText(row, unit = "cm", locale = "ar") {
   return `${FSI}${w || h} ${unitText}${PDI}`;
 }
 
-function accountStatementData(database, query, type) {
+function accountStatementData(database, query, type, certificateAccess) {
   const statementReportLanguage = reportLocaleFrom(query.report_language);
   const selectedParty = query.party_id
     ? database.get("SELECT * FROM parties WHERE id = ?", [
@@ -2564,6 +2567,42 @@ function accountStatementData(database, query, type) {
           : row.collection_notes || "",
     });
   }
+  if (certificateAccess && !query.document_id && selectedParty?.role !== "contractor") {
+    const filters = {party_id:query.party_id, customer:query.party_id ? "" : query.customer, project:effectiveProject, currency:"EGP"};
+    const projects = commercialProjects(database, certificateAccess, filters);
+    const byId = new Map(projects.map((project) => [project.id, project]));
+    for (let start = 0; start < projects.length; start += 500) {
+      const ids = projects.slice(start, start + 500).map((project) => project.id);
+      const revisions = database.all(`SELECT * FROM cert_revisions
+        WHERE project_id IN (${ids.map(() => "?").join(",")}) AND status IN ('historical','approved','issued')`, ids);
+      for (const revision of revisions) {
+        const model = revision.snapshot_json ? JSON.parse(revision.snapshot_json) : certificateDocumentInput(database, revision);
+        const accrual = roundMoney(numberOrZero(model.totals?.current) + (model.totals?.components || [])
+          .filter((component) => component.category !== "advance_recovery").reduce((sum, component) => sum + numberOrZero(component.amount), 0));
+        if (!accrual) continue;
+        const project = byId.get(revision.project_id);
+        const number = revision.official_number || revision.legacy_number || (revision.revises_id && model.baseline?.official_number) || `#${revision.id}`;
+        const history = revision.status === "historical";
+        const progress = (model.lines || []).filter((line) => !line.carried_forward).map((line) => {
+          const value = numberOrNull(line.progress) ?? 100;
+          return history && value >= 0 && value <= 1 ? value * 100 : value;
+        });
+        const label = statementReportLanguage === "en" ? "Certificate No." : "مستخلص رقم";
+        ledgerRows.push({document_id:`certificate-${revision.id}`, document_type:"progress_certificate", document_no:number,
+          entry_date:revision.work_to || "", customer_name:project.customer_name, project:project.name, project_label:project.name,
+          building_unit:model.header?.location || "", description:`${label} ${number}`, is_payment:0, credit:0, debit:accrual,
+          gross_total: numberOrZero(model.totals?.current), real_gross_total:numberOrZero(model.totals?.current), real_debit:accrual,
+          completion_percent:progress.length ? roundMoney(progress.reduce((sum, value) => sum + value, 0) / progress.length) : 100});
+      }
+    }
+    for (const row of projectPaymentRows(database, certificateAccess, filters)) {
+      if (row.status === "pending") continue;
+      const label = row.kind === "advance" ? (statementReportLanguage === "en" ? "Advance payment" : "دفعة مقدمة") :
+        row.kind === "reversal" ? (statementReportLanguage === "en" ? "Payment reversal" : "عكس دفعة") : statementPaymentLabel(statementReportLanguage);
+      ledgerRows.push({...row, document_no:row.document_no, is_payment:1, debit:0, credit:row.collection_amount,
+        description:row.collection_note ? `${label} - ${row.collection_note}` : label, project_label:row.project});
+    }
+  }
   ledgerRows.sort(
     (a, b) =>
       String(a.entry_date || "").localeCompare(String(b.entry_date || "")) ||
@@ -2637,7 +2676,7 @@ function accountStatementData(database, query, type) {
     report_direction: reportLanguage === "en" ? "ltr" : "rtl",
     filters: query,
     branding: reportBranding(database),
-    prepared_by: query.user_name || "Eng. Yasser",
+    prepared_by: certificateAccess?.user.display_name || query.user_name || "Eng. Yasser",
     party: first.customer_name || query.customer || "",
     project:
       query.project ||
@@ -6813,9 +6852,7 @@ function renderReportHtmlV2(data) {
   const logoData = branding.logoDataUri || imageDataUri(REPORT_LOGO_PATH);
   const qrData = qrDataUri(data);
   const footerContact = brandingFooterContact(branding);
-  const footerPhone =
-    normalizeText(branding.companyPhone) || branding.companyAbbreviation;
-  const footerCenterContact = footerContact || branding.companyAbbreviation;
+  const footerCenterContact = branding.website || footerContact;
   const titleLine = data.operation_no
     ? locale === "en"
       ? `${data.title} ${reportText(locale, "number")} ${data.operation_no}`
@@ -6996,7 +7033,7 @@ function renderReportHtmlV2(data) {
     .term-block li::before{content:"-";position:absolute;${locale === "en" ? "left:0" : "right:0"};color:var(--brand-name);font-weight:700}
     .term-block li.important span{color:#c00000;font-weight:700}
     .footer{margin-top:12px;padding-top:7px;border-top:1px solid var(--report-line);display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;color:var(--brand-name);font-size:11px;direction:ltr;line-height:1.45;align-items:center}
-    .footer .left,.footer .center,.footer .right{text-align:center}.footer span{display:grid;min-height:42px;place-content:center;gap:2px}.footer em{font-style:normal}
+    .footer .left{text-align:left;justify-items:start}.footer .center{text-align:center}.footer .right{text-align:right;justify-items:end}.footer span{display:grid;min-height:42px;align-content:center;gap:2px}.footer em{font-style:normal}
     @media print{.footer{display:none}}
   </style></head><body><div class="page">
     <header class="brand-head">
@@ -7017,9 +7054,9 @@ function renderReportHtmlV2(data) {
     ${totalsHtml(data)}
     ${termsHtml(data)}
     <footer class="footer">
-      <span class="left"><strong>${escapeHtml(reportDate(data.generated_at))}</strong><em>${escapeHtml(footerPhone)}</em></span>
-      <span class="center"><strong>${escapeHtml(branding.companyAbbreviation)}</strong><em>${escapeHtml(footerCenterContact)}</em></span>
-      <span class="right"><strong>${reportText(locale, "pagePreview")}</strong><em>${reportText(locale, "by")} ${escapeHtml(data.prepared_by || "Eng. Yasser")}</em></span>
+      <span class="left"><strong>${reportText(locale, "pagePreview")}</strong><em>EasyCommercial ${escapeHtml(APP_VERSION)}</em></span>
+      <span class="center"><strong>${escapeHtml(footerCenterContact)}</strong><em>${escapeHtml(branding.companyAbbreviation)}</em></span>
+      <span class="right">${reportText(locale, "by")} ${escapeHtml(data.prepared_by || "Eng. Yasser")}</span>
     </footer>
   </div></body></html>`;
 }
@@ -7596,9 +7633,9 @@ async function writeCleanXlsx(data, outputPath) {
   await workbook.xlsx.writeFile(outputPath);
 }
 
-function buildReportData(database, query, type) {
+function buildReportData(database, query, type, certificateAccess) {
   if (["statement", "taxStatement", "nonTaxStatement"].includes(type))
-    return accountStatementData(database, query, type);
+    return accountStatementData(database, query, type, certificateAccess);
   const { rows, document, isLatestCertificate } = getReportRows(database, query, type);
   const summaryRows = groupedReport(database, type, query);
   const first = rows[0] || {};
@@ -7916,9 +7953,18 @@ function writePdf(html, outputPath, data = {}) {
     ...(data.branding || {}),
   };
   const footerContact = brandingFooterContact(branding);
-  const footerPhone =
-    normalizeText(branding.companyPhone) || branding.companyAbbreviation;
-  const footerCenterContact = footerContact || branding.companyAbbreviation;
+  const footerCenterContact = branding.website || footerContact;
+  const locale = reportLocaleFrom(data.report_language);
+  const footerMeta = {
+    companyAbbreviation: branding.companyAbbreviation,
+    companyNameColor: branding.companyNameColor,
+    lineColor: branding.lineColor,
+    bodyFontStack: branding.bodyFontStack,
+    footerContact: footerCenterContact,
+    preparedBy: data.prepared_by || "Eng. Yasser",
+    appVersion: APP_VERSION,
+    locale,
+  };
   if (
     electronRuntime &&
     typeof electronRuntime === "object" &&
@@ -7934,14 +7980,14 @@ function writePdf(html, outputPath, data = {}) {
       try {
         await win.loadFile(htmlPath);
         await new Promise((resolve) => setTimeout(resolve, 450));
-        const preparedBy = escapeHtml(data.prepared_by || "Eng. Yasser");
+        const preparedBy = escapeHtml(footerMeta.preparedBy);
         const pdfFontStack = branding.bodyFontStack.replace(/"/g, "'");
         const pdf = await win.webContents.printToPDF({
           landscape: false,
           printBackground: true,
           displayHeaderFooter: true,
           headerTemplate: "<div></div>",
-          footerTemplate: `<div style="width:100%;font-size:9.5px;color:${branding.companyNameColor};padding:4px 28px 0;font-family:${pdfFontStack};background:white"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;width:100%;min-height:42px;border-top:1px solid ${branding.lineColor}"><div style="text-align:left;line-height:1.45;min-width:0">${escapeHtml(reportDate(data.generated_at))}<br>${escapeHtml(footerPhone)}</div><div style="text-align:center;line-height:1.45;min-width:0">${escapeHtml(branding.companyAbbreviation)}<br>${escapeHtml(footerCenterContact)}</div><div style="text-align:right;line-height:1.45;min-width:0">Page <span class="pageNumber"></span> of <span class="totalPages"></span><br>By ${preparedBy}</div></div></div>`,
+          footerTemplate: `<div style="width:100%;font-size:9.5px;color:${branding.companyNameColor};padding:4px 28px 0;font-family:${pdfFontStack};background:white;direction:ltr"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;width:100%;min-height:42px;border-top:1px solid ${branding.lineColor}"><div style="text-align:left;line-height:1.45;min-width:0"><bdi dir="${locale === "ar" ? "rtl" : "ltr"}">${locale === "ar" ? "صفحة" : "Page"} <span class="pageNumber"></span> ${locale === "ar" ? "من" : "of"} <span class="totalPages"></span></bdi><br>EasyCommercial ${APP_VERSION}</div><div style="text-align:center;line-height:1.45;min-width:0">${escapeHtml(footerCenterContact)}<br>${escapeHtml(branding.companyAbbreviation)}</div><div style="text-align:right;line-height:1.45;min-width:0"><bdi>${reportText(locale, "by")} ${preparedBy}</bdi></div></div></div>`,
           pageSize: "A4",
           margins: {
             marginType: "custom",
@@ -7962,25 +8008,15 @@ function writePdf(html, outputPath, data = {}) {
   }
   return new Promise((resolve, reject) => {
     const script = path.join(ROOT_DIR, "electron", "print_pdf.cjs");
-    const footerMeta = Buffer.from(
-      JSON.stringify({
-        date: reportDate(data.generated_at),
-        companyAbbreviation: branding.companyAbbreviation,
-        companyNameColor: branding.companyNameColor,
-        lineColor: branding.lineColor,
-        bodyFontStack: branding.bodyFontStack,
-        website: branding.website,
-        footerContact,
-        footerPhone,
-        preparedBy: data.prepared_by || "Eng. Yasser",
-      }),
+    const encodedFooter = Buffer.from(
+      JSON.stringify(footerMeta),
       "utf8",
     ).toString("base64url");
     const electronExecutable =
       typeof electronRuntime === "string" ? electronRuntime : process.execPath;
     const child = spawn(
       electronExecutable,
-      [script, htmlPath, outputPath, footerMeta],
+      [script, htmlPath, outputPath, encodedFooter],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
     ACTIVE_REPORT_CHILDREN.add(child);
@@ -8697,7 +8733,7 @@ async function createServer(options = {}) {
     next();
   });
 
-  registerCertificateRoutes(app, database, dataDir);
+  registerCertificateRoutes(app, database, dataDir, { branding: () => reportBranding(database), appVersion: APP_VERSION });
   void resumeCertificateRenders(database).catch((error) =>
     console.warn("Could not resume certificate renders:", error.message));
 
@@ -9613,6 +9649,21 @@ async function createServer(options = {}) {
     });
   });
 
+  app.get("/api/commercial-projects", (req, res) => {
+    const partyId = Number(req.query.party_id);
+    const customer = normalizeText(req.query.customer);
+    if (!(Number.isSafeInteger(partyId) && partyId > 0) && !customer)
+      return res.json({projects:[], can_post:false});
+    const access = commercialAccess(database, req);
+    const projects = commercialProjects(database, access, {
+      party_id:partyId > 0 ? partyId : "", customer:partyId > 0 ? "" : customer,
+      category:req.query.category, exact:true,
+    });
+    const canPost = Boolean(access?.capabilities.includes("manage_collections") && access.capabilities.includes("view_collections") &&
+      (hasManagerRole(access.user) || access.user.can_create_payments));
+    res.json({projects, can_post:canPost});
+  });
+
   app.get("/api/customer-overview", (req, res) => {
     const id = Number(req.query.party_id || 0);
     const name = normalizeText(req.query.name);
@@ -10164,7 +10215,8 @@ async function createServer(options = {}) {
        LIMIT ?`,
       [...params, limit],
     );
-    res.json({ rows });
+    const linked = projectPaymentRows(database, commercialAccess(database, req), req.query);
+    res.json({ rows:[...rows, ...linked].sort((left, right) => String(right.entry_date || "").localeCompare(String(left.entry_date || ""))).slice(0, limit) });
   });
 
   app.get("/api/productive-quantities", (req, res) => {
@@ -10201,6 +10253,30 @@ async function createServer(options = {}) {
   });
 
   app.post("/api/payments", (req, res) => {
+    if (Object.hasOwn(req.body, "certificate_project_id")) {
+      try {
+        const projectId = Number(req.body.certificate_project_id);
+        if (!Number.isSafeInteger(projectId) || projectId <= 0 || req.body.party_role === "contractor")
+          return res.status(400).json({error:"Select a customer certificate project"});
+        const access = authorizeCertificate(database, req, "manage_collections", projectId);
+        authorizeCertificate(database, req, "view_collections", projectId);
+        if (!hasManagerRole(access.user) && !access.user.can_create_payments)
+          return res.status(403).json({error:"Payment entry permission is required"});
+        const project = getCertificateProject(database, projectId);
+        const locationId = Number(req.body.certificate_location_id);
+        if (locationId && !certificateLocations(database, projectId).some((location) => location.id === locationId))
+          return res.status(400).json({error:"Select a location in this project"});
+        const kind = req.body.kind === "advance" ? "advance" : "receipt";
+        const saved = database.transaction(() => addCertificateReceipt(database, project, {
+          kind, amount:req.body.amount, received_at:req.body.entry_date,
+          reference:req.body.note, command_key:req.body.command_key,
+          allocations:locationId ? [{location_id:locationId, amount:req.body.amount}] : [],
+        }, access.user));
+        return res.status(201).json(saved);
+      } catch (error) {
+        return res.status(error.status || 500).json({error:error.status ? error.message : "Could not post project payment"});
+      }
+    }
     const amount = numberOrZero(req.body.amount || req.body.collection_amount);
     if (amount <= 0)
       return res
@@ -11714,7 +11790,7 @@ async function createServer(options = {}) {
     const type = req.params.type.replace(/-([a-z])/g, (_, letter) =>
       letter.toUpperCase(),
     );
-    res.json(buildReportData(database, req.query, type));
+    res.json(buildReportData(database, req.query, type, commercialAccess(database, req)));
   });
 
   app.get("/api/documents/:type/html", (req, res) => {
@@ -11722,7 +11798,7 @@ async function createServer(options = {}) {
       const type = req.params.type.replace(/-([a-z])/g, (_, letter) =>
         letter.toUpperCase(),
       );
-      const data = buildReportData(database, req.query, type);
+      const data = buildReportData(database, req.query, type, commercialAccess(database, req));
       res.set("Content-Type", "text/html; charset=utf-8").send(renderReportHtmlV2(data));
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -11734,7 +11810,7 @@ async function createServer(options = {}) {
       const type = req.params.type.replace(/-([a-z])/g, (_, letter) =>
         letter.toUpperCase(),
       );
-      const data = buildReportData(database, req.query, type);
+      const data = buildReportData(database, req.query, type, commercialAccess(database, req));
       const fileName = reportFileName(data, "xlsx");
       const outputPath = tempReportPath(dataDir, data, "xlsx");
       await writeCleanXlsx(data, outputPath);
@@ -11748,7 +11824,7 @@ async function createServer(options = {}) {
     const type = req.params.type.replace(/-([a-z])/g, (_, letter) =>
       letter.toUpperCase(),
     );
-    const data = buildReportData(database, req.query, type);
+    const data = buildReportData(database, req.query, type, commercialAccess(database, req));
     const fileName = reportFileName(data, "xml");
     res.setHeader("Content-Type", "application/vnd.ms-excel; charset=utf-8");
     res.setHeader(
@@ -11767,7 +11843,7 @@ async function createServer(options = {}) {
       const type = req.params.type.replace(/-([a-z])/g, (_, letter) =>
         letter.toUpperCase(),
       );
-      const data = buildReportData(database, req.query, type);
+      const data = buildReportData(database, req.query, type, commercialAccess(database, req));
       const fileName = reportFileName(data, "pdf");
       const outputPath = tempReportPath(dataDir, data, "pdf");
       await writePdf(renderReportHtmlV2(data), outputPath, data);
@@ -11789,7 +11865,7 @@ async function createServer(options = {}) {
             ? "xml"
             : "xlsx";
       const query = req.body.query || {};
-      const data = buildReportData(database, query, type);
+      const data = buildReportData(database, query, type, commercialAccess(database, req));
       const exportsDir = reportOutputDir(type, dataDir);
       const outputPath = path.join(exportsDir, reportFileName(data, format));
       if (format === "pdf") {

@@ -153,6 +153,7 @@ export default function CertificateImport({ certificate, request, t, locale, onC
       <Field label={t("المصدر", "Source")}><select value={source} onChange={(event) => { setSource(event.target.value); setSourceId(""); }}>
         {canImport && <option value="measurements">{t("قياسات من ملف أو الحافظة", "Measurements from file or clipboard")}</option>}
         <option value="certificates">{t("بنود مستخلص سابق", "Prior certificate work")}</option><option value="quotations">{t("عرض سعر أو جدول كميات", "Quotation or bill of quantities")}</option>
+        <option value="invoices">{t("بنود فاتورة", "Invoice work")}</option>
       </select></Field>
       {source !== "measurements" ? <>
         <Field label={t("السجل المصدر", "Source record")}><select value={sourceId} required onChange={(event) => setSourceId(event.target.value)}>

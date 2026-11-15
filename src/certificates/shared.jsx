@@ -83,7 +83,7 @@ export function Money({ value, locale, currency }) {
   if (value === null || value === undefined || value === "") return <span aria-hidden="true">—</span>;
   const options = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
   if (/^[A-Z]{3}$/.test(currency || "")) Object.assign(options, { style: "currency", currency });
-  const formatted = new Intl.NumberFormat(locale === "ar" ? "ar-EG" : "en-GB", options).format(Number(value));
+  const formatted = new Intl.NumberFormat(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", options).format(Number(value));
   return <bdi className="pc-money">{formatted}</bdi>;
 }
 
@@ -92,7 +92,7 @@ export function Status({ value, t }) {
     draft: ["مسودة", "Draft"], in_review: ["قيد المراجعة", "In review"],
     submitted: ["قيد المراجعة", "In review"], review: ["قيد المراجعة", "In review"],
     approved: ["معتمد", "Approved"], issued: ["صادر", "Issued"],
-    legacy: ["سجل سابق", "Legacy record"], historical: ["سجل سابق", "Historical"], imported: ["مستورد", "Imported"],
+    legacy: ["صادر", "Issued"], historical: ["صادر", "Issued"], imported: ["صادر", "Issued"],
     void: ["ملغى", "Void"], voided: ["ملغى", "Voided"],
     superseded: ["مستبدل", "Superseded"], ready: ["جاهز", "Ready"],
     processing: ["جارٍ الإنشاء", "Processing"], failed: ["فشل الإنشاء", "Rendering failed"],

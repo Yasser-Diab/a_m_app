@@ -17,6 +17,8 @@ function normalizeHeader(input = {}, project, profile, originalType) {
     title: str(input.title), notes: str(input.notes, 3000),
     paper_size: input.paper_size === "Letter" ? "Letter" : "A4",
     output_mode: ["auto", "cover", "detail"].includes(input.output_mode) ? input.output_mode : profile.settings.output_mode,
+    group_work_types: input.group_work_types ?? profile.settings.group_work_types ?? false,
+    show_group_subtotals: input.show_group_subtotals ?? profile.settings.show_group_subtotals ?? false,
     optional_fields: {},
   };
   if (input.optional_fields && typeof input.optional_fields === "object") {
@@ -87,6 +89,13 @@ function replaceLines(database, id, lines) {
 }
 
 function scopeBaseline(database, row, header) {
+  if (row.revises_id) {
+    const parent = getRevision(database, row.revises_id);
+    if (parent.status === "historical") {
+      const snapshot = parse(parent.snapshot_json);
+      return {...snapshot, lines: snapshot.lines.map((line) => ({...line, location_id:line.location_id ?? null}))};
+    }
+  }
   const prior = database.get(`
     SELECT snapshot_json FROM cert_revisions WHERE project_id=? AND series_key=? AND location_id IS ?
       AND id<>? AND status='issued' AND work_to<=?
@@ -96,7 +105,23 @@ function scopeBaseline(database, row, header) {
 }
 
 function certificateDocumentInput(database, row, lines = null) {
-  if (row.snapshot_json) return {...parse(row.snapshot_json), version:row.version, pdf_status:row.pdf_status};
+  if (row.snapshot_json) {
+    const snapshot = parse(row.snapshot_json);
+    if (row.status === "historical") {
+      snapshot.lines = (snapshot.lines || []).map((line) => {
+        const progress = line.progress == null || line.progress === "" ? 100 : Number(line.progress);
+        return {...line, progress: Number.isFinite(progress) ? (progress >= 0 && progress <= 1 ? progress * 100 : progress) : 100};
+      });
+      const cutoff = snapshot.header.collection_cutoff || snapshot.header.work_to;
+      if (cutoff) {
+        const ledger = allocationLedger(database, row.project_id, getProfile(database, row.project_id, cutoff), cutoff);
+        snapshot.receipts = recognizedReceipts(ledger);
+        snapshot.totals.ordinary_collections = money(ledger.ordinary_minor);
+        snapshot.totals.advance_receipts = money(ledger.advance_principal_minor);
+      }
+    }
+    return {...snapshot, version:row.version, pdf_status:row.pdf_status};
+  }
   const header = parse(row.header_json);
   const project = getProject(database, row.project_id);
   const customer = getCustomer(database, project.customer_id);
@@ -109,8 +134,6 @@ function certificateDocumentInput(database, row, lines = null) {
   const validation = [...calculated.errors];
   if (!calculated.lines.some((line) => !line.carried_forward) && row.type !== "reopen")
     validation.push({field:"lines", message:"Enter at least one work row"});
-  if (calculated.lines.some((line) => !line.work_type))
-    validation.push({field:"work_type", message:"Assign every row a work type before submitting"});
   if (baseline?.header?.collection_cutoff > header.collection_cutoff)
     validation.push({field:"collection_cutoff", message:"Collections cutoff precedes the prior issued cutoff"});
   const incompatible = database.get(`SELECT 1 FROM cert_revisions WHERE project_id=? AND series_key=?
@@ -119,11 +142,7 @@ function certificateDocumentInput(database, row, lines = null) {
   const newer = database.get(`SELECT 1 FROM cert_revisions WHERE project_id=? AND series_key=?
     AND location_id IS ? AND status='issued' AND work_to>? LIMIT 1`, [project.id, row.series_key, header.location_id, header.work_to]);
   if (newer) validation.push({field:"work_to", message:"Work cutoff precedes a later issued certificate in this scope"});
-  const receipts = ledger.entries
-    .filter((entry) => ledger.recognizedAmounts.has(entry.id))
-    .map((entry) => ({id:entry.id,kind:entry.kind,date:entry.received_at,received_at:entry.received_at,
-      cleared_at:entry.cleared_at,status:entry.status,amount:money(ledger.recognizedAmounts.get(entry.id)),
-      method:entry.method,reference:entry.reference}));
+  const receipts = recognizedReceipts(ledger);
   const actualLocation = projectLocations(database, project.id).find((entry) => entry.id === header.location_id);
   const issuerProfile = parse(setting(database, "company_profile", "{}"), {});
   const branding = parse(setting(database,"report_branding","{}"), {});
@@ -142,8 +161,15 @@ function certificateDocumentInput(database, row, lines = null) {
   };
 }
 
+function recognizedReceipts(ledger) {
+  return ledger.entries.filter((entry) => ledger.recognizedAmounts.has(entry.id))
+    .map((entry) => ({id:entry.id,kind:entry.kind,date:entry.received_at,received_at:entry.received_at,
+      cleared_at:entry.cleared_at,status:entry.status,amount:money(ledger.recognizedAmounts.get(entry.id)),
+      method:entry.method,reference:entry.reference}));
+}
+
 function createDraft(database, project, body, user, revision = {}) {
-  if (project.historical_only) fail(409, "This workbook placeholder is available for historical review only");
+  if (project.historical_only && !revision.revisesId) fail(409, "Add the missing project details before creating a new certificate");
   const supplied = body.header || {};
   const profile = getProfile(database, project.id, date(supplied.work_to, true) || today());
   const header = normalizeHeader(supplied, project, profile, revision.type);
@@ -207,7 +233,7 @@ function validateReview(input) {
 }
 
 function makeRevision(database, row, action, reason, user) {
-  if (row.status !== "issued") fail(409, "Only issued certificates can be revised");
+  if (!["issued","historical"].includes(row.status)) fail(409, "Only issued certificates can be revised");
   if (!reason) fail(400, "A reason is required for this request");
   const source = parse(row.snapshot_json);
   const project = getProject(database, row.project_id);
@@ -223,8 +249,8 @@ function makeRevision(database, row, action, reason, user) {
   const collectionCutoff = workTo > source.header.collection_cutoff ? workTo : source.header.collection_cutoff;
   const header = {...source.header, type, work_from:null, work_to:workTo, collection_cutoff:collectionCutoff,
     rule_override:null, override_reason:null};
-  const lines = type === "void" ? source.lines.filter((line) => line.current).map((line) =>
-    ({...line, mode:"adjustment", adjustment_amount:-line.current, recognition:"incremental", reason})) : [];
+  const lines = type === "void" || row.status === "historical" ? source.lines.map((line) =>
+    ({...line, mode:"adjustment", adjustment_amount:type === "void" ? -line.current : 0, recognition:"incremental", reason})) : [];
   return createDraft(database, project, {header, lines}, user, {type,rootId:root,revisesId:row.id,number:row.revision+1,reason});
 }
 
@@ -268,11 +294,17 @@ function runAction(database, row, body, user, enqueueRender) {
       const series = database.get("SELECT * FROM cert_series WHERE project_id=? AND reference=?", [row.project_id,row.series_key]);
       if (series.final_revision_id && !row.revises_id) fail(409, "The series has been finalized");
       if (row.type === "reopen" && series.final_revision_id !== row.revises_id) fail(409, "The final certificate changed");
-      const number = row.revises_id ? getRevision(database, row.revises_id).official_number : series.next_number;
+      const previous = row.revises_id ? getRevision(database, row.revises_id) : null;
+      const legacyMax = database.get(`SELECT MAX(CAST(legacy_number AS INTEGER)) AS number FROM cert_revisions
+        WHERE project_id=? AND series_key=? AND legacy_number <> '' AND legacy_number NOT GLOB '*[^0-9]*'`,
+      [row.project_id,row.series_key]).number;
+      const nextAvailable = Math.max(series.next_number, Number(legacyMax || 0) + 1);
+      const previousNumber = previous?.official_number ?? Number(previous?.legacy_number);
+      const number = Number.isSafeInteger(previousNumber) && previousNumber > 0 ? previousNumber : nextAvailable;
       const timestamp = now();
       const frozen = {...model, official_number:number, issued_at:timestamp, status:"issued",pdf_status:"pending",version:row.version+1};
       database.run(`UPDATE cert_series SET next_number=?,final_revision_id=? WHERE project_id=? AND reference=?`,
-        [series.next_number + (row.revises_id ? 0 : 1), row.type === "final" ? row.id : row.type === "reopen" ? null : series.final_revision_id,
+        [number === nextAvailable ? number + 1 : series.next_number, row.type === "final" ? row.id : row.type === "reopen" ? null : series.final_revision_id,
           row.project_id,row.series_key]);
       database.run(`UPDATE cert_revisions SET status='issued',official_number=?,issued_at=?,pdf_status='pending',
         snapshot_json=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`, [number,timestamp,encode(frozen),row.id]);
@@ -319,4 +351,4 @@ function forAccess(database, row, access) {
 }
 
 module.exports = {getRevision, getLines, replaceLines, scopeBaseline, certificateDocumentInput,
-  createDraft, requireVersion, saveDraft, runAction, forAccess};
+  createDraft, requireVersion, saveDraft, runAction, forAccess, recognizedReceipts};

@@ -38,8 +38,8 @@ function fullIdentity(model) {
   return `<header class="full-identity">
     <div class="issuer">
       ${issuer.logo ? `<img src="${escapeHtml(issuer.logo)}" alt="">` : ''}
-      <div><strong><bdi dir="auto">${escapeHtml(issuer.name)}</bdi></strong>
-      ${issuer.details.length ? `<div class="issuer-details">${issuer.details.map((detail) => `<bdi dir="auto">${escapeHtml(detail)}</bdi>`).join(' <span aria-hidden="true">·</span> ')}</div>` : ''}</div>
+      <div>${issuer.name ? `<strong><bdi dir="auto">${escapeHtml(issuer.name)}</bdi></strong>` : ''}
+      ${issuer.alternate ? `<div class="issuer-details"><bdi dir="auto">${escapeHtml(issuer.alternate)}</bdi></div>` : ''}</div>
       ${watermark ? `<span class="draft">${escapeHtml(watermark)}</span>` : ''}
     </div>
     <div class="identities" style="--groups:${Math.max(1, fieldGroups.length)}">
@@ -57,8 +57,17 @@ function compactIdentity(model) {
 function pageTemplate(id, title, table, model) {
   return `<template id="${id}"><article class="sheet">${fullIdentity(model)}${compactIdentity(model)}
     <main class="page-content">${title ? `<h1>${escapeHtml(title)}</h1>` : ''}${table || ''}</main>
-    <footer><span><bdi dir="ltr">${escapeHtml(model.officialNumber)}</bdi>${model.officialNumber && model.revision !== '' ? ` · ${escapeHtml(model.labels.revision)} <bdi dir="ltr">${escapeHtml(model.revision)}</bdi>` : ''}</span>
-    <span>${escapeHtml(model.labels.page)} <bdi dir="ltr" class="page-number"></bdi> ${escapeHtml(model.labels.of)} <bdi dir="ltr" class="page-total"></bdi></span></footer></article></template>`;
+    <footer><div><div dir="${model.direction}">${escapeHtml(model.labels.page)} <bdi dir="ltr" class="page-number"></bdi> ${escapeHtml(model.labels.of)} <bdi dir="ltr" class="page-total"></bdi></div>
+      ${model.appVersion ? `<small>EasyCommercial ${escapeHtml(model.appVersion)}</small>` : ''}</div>
+    <div class="footer-company"><div><bdi dir="ltr">${escapeHtml(model.issuer.website)}</bdi></div>
+      <div><bdi dir="auto">${escapeHtml(model.issuer.shortName)}</bdi></div></div>
+    <div class="footer-user" dir="${model.direction}">${model.preparedBy ? `${escapeHtml(model.labels.prepared)} <bdi dir="auto">${escapeHtml(model.preparedBy)}</bdi>` : ''}</div></footer></article></template>`;
+}
+
+function signaturesBlock(model) {
+  return `<aside class="signoff"><div class="stamp">${escapeHtml(model.labels.stamp)}</div>
+    <div class="signatories" dir="${model.direction}">${model.signatures.map(({ name, title }) => `<div class="signatory">
+      <bdi dir="auto">${escapeHtml(name)}</bdi>${title ? `<small><bdi dir="auto">${escapeHtml(title)}</bdi></small>` : ''}</div>`).join('')}</div></aside>`;
 }
 
 function financeBlock(model) {
@@ -97,7 +106,7 @@ function splitWideLine(line, columns, landscape) {
 }
 
 function detailRows(model) {
-  const { columns, detailGroups, labels, moneyKeys, workTotals, landscape } = model;
+  const { columns, detailGroups, labels, moneyKeys, workTotals, landscape, showGroupSubtotals } = model;
   if (detailGroups.length === 0) return [`<tr><td class="empty" colspan="${columns.length}">${escapeHtml(labels.no_lines)}</td></tr>`];
   const units = [];
   for (const group of detailGroups) {
@@ -105,10 +114,10 @@ function detailRows(model) {
     rows.forEach((line, index) => {
       const first = index === 0;
       const last = index === rows.length - 1;
-      const merged = `<tr${first ? ' data-keep-next="true" class="group"' : ''}${first ? ' data-group-row="true"' : ''} data-group="${escapeHtml(group.name)}"><th scope="rowgroup" colspan="${columns.length}"><bdi dir="auto">${escapeHtml(group.name)}</bdi></th></tr>`;
-      const row = `<tr data-group="${escapeHtml(group.name)}"${last ? ' data-keep-next="true"' : ''}>${rowCells(line, columns)}</tr>`;
-      units.push(first ? merged : '', row);
-      if (last) units.push(subtotalRow(group.totals, columns, moneyKeys, labels.subtotal));
+      const subtotal = showGroupSubtotals && group.name;
+      if (first && group.name) units.push(`<tr data-keep-next="true" class="group" data-group-row="true" data-group="${escapeHtml(group.name)}"><th scope="rowgroup" colspan="${columns.length}"><bdi dir="auto">${escapeHtml(group.name)}</bdi></th></tr>`);
+      units.push(`<tr data-group="${escapeHtml(group.name)}"${last && subtotal ? ' data-keep-next="true"' : ''}>${rowCells(line, columns)}</tr>`);
+      if (last && subtotal) units.push(subtotalRow(group.totals, columns, moneyKeys, labels.subtotal));
     });
   }
   units.push(subtotalRow(workTotals, columns, moneyKeys, labels.total));
@@ -165,8 +174,15 @@ function buildCertificateHtml(model) {
     .finance tbody th { font-weight: 400; }
     .finance .payable { background: #e5eef1; color: #183148; font-weight: 700; }
     .finance .payable th { font-weight: 700; }
-    footer { border-block-start: 0.7pt solid #adc2c9; padding-block-start: 1.5mm; margin-block-start: 2mm; display: flex; justify-content: space-between; gap: 5mm; color: #3c5266; font-size: 8pt; }
-    footer span:last-child { white-space: nowrap; }
+    footer { direction: ltr; border-block-start: 0.7pt solid #adc2c9; padding-block-start: 1.5mm; margin-block-start: 2mm; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4mm; color: #3c5266; font-size: 8pt; }
+    footer > div:first-child { text-align: left; }
+    .footer-company { text-align: center; }
+    .footer-user { text-align: right; }
+    .signoff { direction: ltr; display: grid; grid-template-columns: 34mm 1fr; gap: 7mm; align-items: end; margin-block-start: 3mm; color: #3c5266; }
+    .stamp { min-height: 16mm; border: 0.6pt solid #adc2c9; padding: 2mm; font-size: 8pt; text-align: center; }
+    .signatories { display: flex; flex-wrap: wrap; justify-content: end; gap: 2mm 5mm; }
+    .signatory { min-width: 23mm; padding-block-start: 4mm; border-block-start: 0.6pt solid #adc2c9; text-align: center; font-size: 8pt; }
+    .signatory small { display: block; }
     </style></head><body>
     ${pageTemplate('cover', labels.cover, tableOpening(coverColumns), model)}
     ${pageTemplate('detail', labels.detail, tableOpening(columns), model)}
@@ -174,6 +190,7 @@ function buildCertificateHtml(model) {
     ${pageTemplate('settlement', '', '', model)}
     ${sourceTemplate('cover-rows', cover)}${sourceTemplate('detail-rows', detailRows(model))}${sourceTemplate('receipts-rows', receiptRows)}
     <template id="settlement-block">${financeBlock(model)}</template>
+    <template id="signatures-block">${signaturesBlock(model)}</template>
     </body></html>`;
 }
 
@@ -244,7 +261,7 @@ async function paginateCertificate({ issued, measured, outputMode, hasReceipts }
 
   const detail = pagesFor('detail');
   const longMeasured = measured && detail.length > 1;
-  const hasCover = outputMode === 'summary_details' || (longMeasured && (issued || outputMode !== 'detail_only'));
+  const hasCover = outputMode === 'summary_details' || (longMeasured && outputMode !== 'detail_only');
   const cover = hasCover ? pagesFor('cover') : [];
   const settlementTemplate = document.getElementById('settlement-block').content.firstElementChild;
   if (settlementTemplate) {
@@ -258,6 +275,15 @@ async function paginateCertificate({ issued, measured, outputMode, hasReceipts }
       page.querySelector('main').append(settlement);
       if (!fits(page)) throw new Error('The certificate settlement is too tall for the chosen paper');
     }
+  }
+
+  const signoff = document.getElementById('signatures-block').content.firstElementChild.cloneNode(true);
+  let lastDetail = detail.at(-1);
+  lastDetail.querySelector('footer').before(signoff);
+  if (!fits(lastDetail)) {
+    lastDetail = makePage('settlement', true);
+    lastDetail.querySelector('footer').before(signoff);
+    detail.push(lastDetail);
   }
 
   const pages = [...cover, ...detail, ...(hasReceipts ? pagesFor('receipts') : [])];

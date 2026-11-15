@@ -13,7 +13,11 @@
 .pc-workspace p, .pc-grants p, .pc-dialog p { margin-block: 0; }
 .pc-tabs { display: flex; align-items: center; gap: 6px; padding: 6px; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--pc-radius); }
 .pc-tabs button { flex: 0 0 auto; justify-content: flex-start; border-color: transparent; background: transparent; min-block-size: 40px; }
-.pc-tabs button[aria-pressed="true"] { color: var(--accent); background: var(--pc-tint); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.pc-tabs button[aria-pressed="true"] { font-weight: 700; }
+.pc-workspace [hidden] { display: none; }
+.pc-name[aria-current="true"] { text-decoration: underline; }
+.pc-output-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.pc-output-actions { justify-content: flex-start; }
 .pc-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--pc-radius); padding: clamp(12px, 1.8vw, 22px); min-inline-size: 0; }
 .pc-toolbar, .pc-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .pc-toolbar { justify-content: flex-start; }

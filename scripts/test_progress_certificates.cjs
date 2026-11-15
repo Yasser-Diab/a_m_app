@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const {createHash} = require("node:crypto");
 const {createServer} = require("../server/index.cjs");
-const {CAPABILITIES} = require("../server/certificates.cjs");
+const {CAPABILITIES, importLegacyCertificates} = require("../server/certificates.cjs");
 
 async function main() {
   const dataDir = fs.mkdtempSync(path.join(process.env.AM_TEST_TEMP || os.tmpdir(),"am-progress-certificate-"));
@@ -179,6 +179,52 @@ async function main() {
     await api(entry,token,"POST",{action:"clear",cleared_at:"2026-10-13"});
     assert.equal((await api(scope + "/collections?cutoff=2026-10-11",token)).allocations.length,0);
     assert.equal((await api(scope + "/collections?cutoff=2026-10-14",token)).allocations.length,1);
+
+    const reportPath = "/documents/statement?" + new URLSearchParams({
+      party_id:customer.id, project:project.name, report_language:"en",
+    });
+    assert.equal((await api(reportPath)).statementRows.length,0);
+    const payment = {certificate_project_id:project.id, certificate_location_id:location.id, kind:"advance",
+      amount:77, entry_date:date, note:"PAY-77", command_key:"payments-advance-77"};
+    await api("/payments",viewToken,"POST",payment,403);
+    const posted = await api("/payments",token,"POST",payment,201);
+    assert.equal((await api("/payments",token,"POST",payment,201)).id,posted.id);
+    await api("/payments",token,"POST",{party_id:customer.id,base_party_name:customer.name || customer.display_name,
+      project:project.name,amount:23,entry_date:date},201);
+    const paymentList = (await api("/payments?party_id=" + customer.id,token)).rows;
+    assert.equal(paymentList.filter((row) => row.collection_amount === 77 && row.kind === "advance").length,1);
+    assert.equal(paymentList.filter((row) => row.collection_amount === 23).length,1);
+    const mergedCollections = await api(scope + "/collections?cutoff=" + date,token);
+    assert.equal(mergedCollections.ordinary_collections,113);
+    assert.ok(mergedCollections.advances.some((row) => row.id === posted.id && row.principal === 77));
+    const statement = await api(reportPath,token);
+    assert.equal(statement.totals.debit,302.5);
+    assert.equal(statement.totals.credit,290);
+    assert.equal(statement.totals.net_total,12.5);
+    assert.equal(statement.statementRows.find((row) => row.document_type === "progress_certificate").description,"Certificate No. 1");
+    assert.equal(statement.statementRows.filter((row) => row.credit === 77).length,1);
+
+    importLegacyCertificates(db,{fingerprint:"b".repeat(64), source_name:"Test.xlsb",
+      customers:[{source_id:"legacy-customer",name:"Legacy Test Customer"}],
+      projects:[{source_id:"legacy-project",customer_source_id:"legacy-customer",name:"Legacy Project"}],
+      certificates:[{source_id:"legacy-certificate",project_source_id:"legacy-project",source_number:"9",work_to:date,
+        lines:[{source_sheet:"old",source_row:1,description:"Legacy work",mode:"direct",quantity:2,unit:"m",rate:100,progress:1,amount:200}]}],
+      receipts:[{source_id:"legacy-receipt",project_source_id:"legacy-project",kind:"advance",date,amount:50}],
+    });
+    const legacy = (await api(cert + "?status=issued&q=Legacy+Project",token)).items[0];
+    assert.equal(legacy.legacy_number,"9");
+    const legacyDetail = await api(cert + "/" + legacy.id,token);
+    assert.equal(legacyDetail.lines[0].progress,100);
+    assert.equal(legacyDetail.totals.advance_receipts,50);
+    const legacyStatement = await api("/documents/statement?customer=Legacy+Test+Customer&report_language=en",token);
+    assert.equal(legacyStatement.totals.debit,200);
+    assert.equal(legacyStatement.totals.credit,50);
+    const correction = await api(cert + "/" + legacy.id + "/action",token,"POST",{
+      action:"revise", reason:"Correct an item", version:legacyDetail.version,
+    });
+    assert.equal(correction.totals.current,0);
+    assert.equal(correction.totals.previous,200);
+    assert.equal(correction.lines[0].description,"Legacy work");
     await api("/auth/logout",viewToken,"POST",{user_id:viewer.id});
     await api(cert + "/access",viewToken,"GET",undefined,401);
     assert.equal(db.get("PRAGMA foreign_key_check"),null);

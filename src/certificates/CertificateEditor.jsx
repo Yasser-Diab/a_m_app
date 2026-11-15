@@ -6,7 +6,7 @@ import { ProjectSettings } from "./CertificateOperations.jsx";
 import CertificatePreview from "./CertificatePreview.jsx";
 import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, queryString, Status, useDebounce, useResource } from "./shared.jsx";
 
-const typeLabels = { progress: ["دوري", "Progress"], final: ["ختامي", "Final"], correction: ["تصحيح", "Correction"], void: ["إلغاء", "Void"], reopen: ["إعادة فتح", "Reopening"], historical: ["سجل سابق", "Historical"] };
+const typeLabels = { progress: ["دوري", "Progress"], final: ["ختامي", "Final"], correction: ["تصحيح", "Correction"], void: ["إلغاء", "Void"], reopen: ["إعادة فتح", "Reopening"] };
 const optionalFields = {
   customer_code: ["رمز العميل", "Customer code"], customer_address: ["عنوان العميل", "Customer address"], customer_tax_no: ["رقم التسجيل الضريبي", "Tax registration"], customer_contact: ["جهة الاتصال", "Customer contact"],
   project_code: ["رمز المشروع", "Project code"], project_address: ["عنوان المشروع", "Project address"], location: ["الموقع", "Location"], contract_ref: ["مرجع العقد", "Contract reference"], contract_date: ["تاريخ العقد", "Contract date"], currency: ["العملة", "Currency"], notes: ["الملاحظات", "Notes"],
@@ -20,7 +20,7 @@ const approvalRequired = new Set(["issue", "return", "revise", "void", "reopen"]
 const needsReason = new Set(["return", "revise", "void", "reopen"]);
 const normalizeSaved = (item) => item?.certificate || item;
 
-export default function CertificateEditor({ initial, request, apiBase, session, access, t, locale, defaultReportLanguage, onChange, onAccessChanged, saveNativeReport, shareNativeReport, dirtyRef }) {
+export default function CertificateEditor({ initial, request, apiBase, session, access, t, locale, defaultReportLanguage, onChange, onAccessChanged, saveNativeReport, shareNativeReport, dirtyRef, onBackToSearch }) {
   const [record, setRecord] = useState(initial || null);
   const [customer, setCustomer] = useState(initial?.customer || (initial?.project?.customer_id ? { id: initial.project.customer_id, display_name: initial.project.customer_name } : null));
   const [project, setProject] = useState(initial?.project || null);
@@ -160,9 +160,9 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const availableActions = record?.status === "draft" ? ["submit"]
     : ["in_review", "submitted", "review"].includes(record?.status) ? ["approve", "return"]
     : record?.status === "approved" ? ["issue", "return"]
-    : record?.status === "issued" ? ["revise", "void", ...(record.type === "final" ? ["reopen"] : [])] : [];
+    : ["issued", "historical"].includes(record?.status) ? ["revise", "void", ...(record.type === "final" ? ["reopen"] : [])] : [];
   const permissionFor = (operation) => ["revise", "void", "reopen"].includes(operation) ? "revise" : operation === "return" ? "approve" : operation;
-  const showDocument = can("export") && (!record || record.status !== "issued" || record.pdf_status === "ready");
+  const showDocument = can("export");
 
   function openDocument() {
     run(async () => {
@@ -178,8 +178,9 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   return <section className="pc-panel pc-editor">
     <div className="pc-toolbar">
       <h2>{record ? (record.official_number || record.legacy_number ? <>{t("مستخلص", "Certificate")} <bdi>{record.official_number || record.legacy_number}</bdi></> : t("مسودة مستخلص", "Certificate draft")) : t("مستخلص جديد", "New certificate")}</h2>
-      {record && <><Status value={record.status} t={t} /><span className="pc-chip">{t("المراجعة", "Revision")} <bdi>&nbsp;{record.revision}</bdi></span></>}
+      {record && <><Status value={record.status} t={t} />{record.revision > 1 && <span className="pc-chip">{t("المراجعة", "Revision")} <bdi>&nbsp;{record.revision}</bdi></span>}</>}
       {record?.pdf_status && <Status value={record.pdf_status} t={t} />}
+      {onBackToSearch && <button type="button" onClick={onBackToSearch}>{t("العودة إلى البحث", "Back to search")}</button>}
       {dirty && <span className="pc-caption" role="status">{t("تعديلات غير محفوظة", "Unsaved changes")}</span>}
     </div>
     <Problem error={error || customers.error || projects.error || context.error} t={t} />
@@ -224,7 +225,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       {canWrite && <button type="button" className="primary" onClick={() => run(() => save())} disabled={busy || !project || record && !dirty}><Save size={17} />{t("حفظ المسودة", "Save draft")}</button>}
       {canWrite && can("edit_draft") && can("import") && <button type="button" onClick={openImport} disabled={!project || busy}><ClipboardList size={17} />{t("استخراج / استيراد", "Extract / import")}</button>}
       {record && <button type="button" onClick={() => setShowReview((current) => !current)} aria-expanded={showReview}>{t("مراجعة الحساب", "Calculation review")}</button>}
-      {showDocument && <button type="button" onClick={openDocument} disabled={busy || !project || !record && !canWrite}><Eye size={17} />{record?.status === "issued" ? t("عرض المستند المؤرشف", "Open archived document") : t("معاينة", "Preview")}</button>}
+      {showDocument && <button type="button" onClick={openDocument} disabled={busy || !project || !record && !canWrite}><Eye size={17} />{t("معاينة وتصدير", "Preview and export")}</button>}
       {record?.pdf_status === "failed" && can("issue") && <button type="button" onClick={() => run(async () => {
         await request(`/${record.id}/render`, { method: "POST", body: {} });
         setRecord(normalizeSaved(await request(`/${record.id}`)));

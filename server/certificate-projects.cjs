@@ -168,6 +168,11 @@ function cleanSettings(input = {}, base = {}) {
     else settings[key] = input[key];
   }
   if (Array.isArray(input.work_types)) settings.work_types = [...new Set(input.work_types.map((value) => str(value)).filter(Boolean))].slice(0, 150);
+  if (Array.isArray(input.signatures)) settings.signatures = input.signatures.slice(0, 6)
+    .map((person) => ({name: str(person?.name, 100), title: str(person?.title, 100)})).filter((person) => person.name);
+  for (const key of ["group_work_types", "show_group_subtotals"]) {
+    if (Object.hasOwn(input, key)) settings[key] = input[key] === true;
+  }
   if (Array.isArray(input.work_items)) settings.work_items = input.work_items.slice(0, 1000).map((item) => ({
     id: str(item.id, 100) || crypto.randomUUID(), work_type: str(item.work_type), description: str(item.description, 2000),
     work_item: str(item.work_item), unit: str(item.unit), rate: str(item.rate, 40),

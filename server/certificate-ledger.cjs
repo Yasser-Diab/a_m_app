@@ -1,14 +1,23 @@
-const {audit, date, encode, fail, idOf, parse, str, today} = require("./certificate-access.cjs");
+const {audit, date, fail, idOf, lookup, str, today} = require("./certificate-access.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
 const {checkedLocation} = require("./certificate-projects.cjs");
+const {customerReceipts} = require("./commercial-ledger.cjs");
 
 const DATE_FLOOR = "0001-01-01";
 
 function allocationLedger(database, projectId, profile, cutoff, options = {}) {
   const {workCutoff = cutoff,previousCutoff = DATE_FLOOR,locationId = null,revisionId = null,seriesKey = null} = options;
   const clearance = profile.settings.collections_basis === "cleared";
-  const entries = database.all("SELECT * FROM cert_receipts WHERE project_id=? AND received_at<=? ORDER BY received_at,id", [projectId, cutoff]);
-  const ids = new Set(entries.map(({id}) => id));
+  const project = database.get("SELECT * FROM cert_projects WHERE id=?", [projectId]);
+  const {active, prior, imported} = customerReceipts(database, project);
+  const location = locationId === null ? null : database.get(
+    "SELECT name, code FROM cert_locations WHERE project_id=? AND id=?", [projectId,locationId]);
+  const locationNames = new Set([lookup(location?.name), lookup(location?.code)].filter(Boolean));
+  const external = [...prior, ...imported].filter((row) => row.received_at && row.received_at <= cutoff &&
+    (locationId === null || locationNames.has(lookup(row.location))));
+  const entries = [...active, ...external].filter((row) => row.received_at <= cutoff)
+    .sort((left, right) => left.received_at.localeCompare(right.received_at));
+  const ids = new Set(active.map(({id}) => id));
   const allocations = database.all(`SELECT a.*,r.location_id AS certificate_location_id,r.series_key AS certificate_series
     FROM cert_receipt_allocations a LEFT JOIN cert_revisions r ON r.id=a.certificate_id
     WHERE a.project_id=? AND (a.allocated_at IS NULL OR a.allocated_at<=?) ORDER BY a.id`, [projectId,cutoff])
@@ -38,6 +47,7 @@ function allocationLedger(database, projectId, profile, cutoff, options = {}) {
   let unapplied = 0;
   let released = 0;
   let periodReleased = 0;
+  let advancePrincipal = 0;
   const advances = [];
   const recognizedAmounts = new Map();
   for (const row of entries) {
@@ -50,16 +60,19 @@ function allocationLedger(database, projectId, profile, cutoff, options = {}) {
       return (!seriesKey || !entry.certificate_id || seriesKey === entry.certificate_series) &&
         (locationId === null || allocationLocation === locationId || (entry.certificate_id && entry.certificate_id === revisionId));
     };
-    const amount = (locationId === null ? unappliedAmount : 0) +
+    const amount = (locationId === null || row.source ? unappliedAmount : 0) +
       links.filter(eligibleLocation).reduce((sum, link) => sum + link.amount_minor, 0);
     if (amount > 0) {
       recognizedAmounts.set(row.id,amount);
       if (reversal) recognizedAmounts.set(reversal.id,-amount);
     }
     if (row.kind === "advance") {
-      if (!reversal) advances.push({id: row.id, principal_minor: amount, recovered_minor: recovered.get(row.id) || 0,
-        outstanding_minor: Math.max(0,amount - (recovered.get(row.id) || 0)),
-        available_minor: closedAdvances.has(row.id) ? 0 : Math.max(0,row.amount_minor - (recoveredAll.get(row.id) || 0))});
+      if (!reversal) {
+        advancePrincipal += amount;
+        if (typeof row.id === "number") advances.push({id: row.id, principal_minor: amount, recovered_minor: recovered.get(row.id) || 0,
+          outstanding_minor: Math.max(0,amount - (recovered.get(row.id) || 0)),
+          available_minor: closedAdvances.has(row.id) ? 0 : Math.max(0,row.amount_minor - (recoveredAll.get(row.id) || 0))});
+      }
       else {
         const releasedAmount = recovered.get(row.id) || 0;
         released += releasedAmount;
@@ -73,7 +86,8 @@ function allocationLedger(database, projectId, profile, cutoff, options = {}) {
     if (reversal && eligibleAt(reversal) > previousCutoff) period -= amount;
   }
   return {ordinary_minor: ordinary, period_ordinary_minor: period, unapplied_minor: unapplied,
-    advances, released_recovery_minor: released, period_released_recovery_minor: periodReleased, entries, allocations, recognizedAmounts};
+    advances, advance_principal_minor:advancePrincipal, released_recovery_minor: released,
+    period_released_recovery_minor: periodReleased, entries, allocations, recognizedAmounts};
 }
 
 function publicReceipt(row) {
@@ -175,11 +189,6 @@ function updateReceipt(database, project, receiptId, input, user) {
 }
 
 function collectionResponse(database, project, ledger, cutoff) {
-  const legacyReceipts = database.all(`
-    SELECT amount_minor,data_json FROM cert_legacy_records
-    WHERE project_id=? AND record_type='receipt' ORDER BY source_key`, [project.id])
-    .map((item) => ({...parse(item.data_json), amount:money(item.amount_minor), historical:true}))
-    .filter((row) => !row.date || row.date <= cutoff);
   return {
     cutoff, project_id: project.id,
     ordinary_collections: money(ledger.ordinary_minor), unapplied: money(ledger.unapplied_minor),
@@ -187,7 +196,6 @@ function collectionResponse(database, project, ledger, cutoff) {
     allocations: ledger.allocations.map((row) => ({...row,amount:money(row.amount_minor)})),
     advances: ledger.advances.map((row) => ({...row,principal:money(row.principal_minor),
       recovered:money(row.recovered_minor),outstanding:money(row.outstanding_minor)})),
-    legacy_receipts: legacyReceipts,
   };
 }
 

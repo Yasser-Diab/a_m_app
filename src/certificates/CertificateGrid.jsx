@@ -7,7 +7,7 @@ export const GRID_COLUMNS = [
   { key: "location_id", label: ["الموقع", "Location"], kind: "location", width: 175 },
   { key: "work_type", label: ["نوع الأعمال", "Work type"], width: 145 },
   { key: "work_item", label: ["البند / الرمز", "Item / code"], width: 125 },
-  { key: "description", label: ["الوصف", "Description"], width: 220 },
+  { key: "description", label: ["الأعمال", "Works"], width: 275 },
   { key: "mode", label: ["طريقة الإدخال", "Entry mode"], kind: "mode", width: 145 },
   { key: "width", label: ["العرض / الطول", "Width / length"], kind: "number", modes: ["area", "linear"] },
   { key: "height", label: ["الارتفاع", "Height"], kind: "number", modes: ["area"] },
@@ -18,7 +18,7 @@ export const GRID_COLUMNS = [
   { key: "rate", label: ["السعر", "Rate"], kind: "number", modes: ["area", "linear", "count", "direct", "adjustment"] },
   { key: "agreed_amount", label: ["المبلغ المتفق عليه", "Agreed amount"], kind: "number", modes: ["lump"], width: 130 },
   { key: "recognition", label: ["أساس التقييم", "Recognition"], kind: "recognition", modes: ["area", "linear", "count", "direct", "lump"], width: 130 },
-  { key: "progress", label: ["نسبة الإنجاز %", "Progress %"], kind: "number", modes: ["lump"] },
+  { key: "progress", label: ["نسبة الإنجاز %", "Progress %"], kind: "number", modes: ["area", "linear", "count", "direct", "lump"] },
   { key: "claim_amount", label: ["المبلغ المطالب به", "Claim amount"], kind: "number", modes: ["lump"], width: 135 },
   { key: "adjustment_amount", label: ["قيمة التسوية", "Adjustment amount"], kind: "number", modes: ["adjustment"], width: 130 },
   { key: "reason", label: ["سبب التسوية", "Adjustment reason"], modes: ["adjustment"], width: 150 },
@@ -60,12 +60,15 @@ const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, loc
     <th scope="row" className="pc-grid-index"><button type="button" onClick={() => onMenu(row._gridId)} disabled={readOnly} aria-label={`${t("خيارات البند", "Row actions")} ${rowIndex + 1}`}>{rowIndex + 1}</button></th>
     {columns.map((column) => {
       const { key, kind } = column;
-      const applicable = applies(row, column);
+      const applicable = applies(row, column) || (readOnly && key === "quantity" && row.billed_quantity != null);
+      const value = readOnly && key === "quantity" ? row.billed_quantity ?? row.quantity : row[key];
       const label = `${t(...column.label)} · ${rowIndex + 1}`;
       const coord = { "data-row-id": row._gridId, "data-column": key, "aria-label": label };
       let content = null;
       if (kind === "money") content = <Money value={row[key]} locale={locale} />;
-      else if (applicable && readOnly) content = <bdi>{kind === "mode" && modes[row[key]] ? t(...modes[row[key]]) : kind === "location" ? optionLabel(locations.get(String(row[key]))) || row.location || row.location_name || "—" : row[key] ?? ""}</bdi>;
+      else if (applicable && readOnly) content = <bdi>{kind === "mode" && modes[value] ? t(...modes[value]) :
+        kind === "location" ? optionLabel(locations.get(String(value))) || row.location || row.location_name || "—" :
+          key === "progress" ? `${numberText(value ?? 100)}%` : kind === "number" ? numberText(value ?? "") : value ?? ""}</bdi>;
       else if (applicable && kind === "location") content = <button className="pc-grid-location" type="button" {...coord} onClick={() => onLocation(row._gridId)}>
         {optionLabel(locations.get(String(row.location_id))) || row.location_name || t("على مستوى المشروع", "Project-wide")}
       </button>;
@@ -79,7 +82,9 @@ const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, loc
         <option value="">—</option><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option>
       </select>;
       else if (applicable) content = <input {...coord} autoComplete="off" inputMode={kind === "number" ? "decimal" : undefined}
-        list={key === "work_type" ? workTypeList : undefined} dir={kind === "number" ? "ltr" : "auto"} value={row[key] ?? ""} onChange={(event) => onEdit(row._gridId, key, event.target.value)} />;
+        list={key === "work_type" ? workTypeList : undefined} dir={kind === "number" ? "ltr" : "auto"} value={row[key] ?? ""}
+        placeholder={key === "progress" && (row.mode !== "lump" || !row.claim_amount) ? "100" : undefined}
+        onChange={(event) => onEdit(row._gridId, key, event.target.value)} />;
       return <td key={key} className={`${applicable ? "" : "pc-grid-off"} ${selected?.includes(key) ? "pc-grid-selected" : ""}`}>{content}</td>;
     })}
   </tr>;
@@ -100,6 +105,13 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   const [locationRow, setLocationRow] = useState(null);
   const [sortBy, setSortBy] = useState("");
   const [sortedView, setSortedView] = useState(false);
+  const [fullReadView, setFullReadView] = useState(false);
+  const readColumns = useMemo(() => GRID_COLUMNS.filter(({ key }) =>
+    ["description", "quantity", "unit", "rate", "progress", "current"].includes(key) ||
+    (["previous", "cumulative"].includes(key) ? rows.some((row) => Number(row.previous) !== 0 && row.previous != null) :
+      !["mode", "recognition", "dimension_unit"].includes(key) &&
+      rows.some((row) => row[key] != null && row[key] !== ""))), [rows]);
+  const columns = readOnly && !fullReadView ? readColumns : GRID_COLUMNS;
   const locationMap = useMemo(() => new Map(locations.map((location) => [String(location.id), location])), [locations]);
   const locationByName = useMemo(() => {
     const result = new Map();
@@ -266,6 +278,9 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     {workTypes.length > 0 && <datalist id={workTypeList}>{workTypes.map((name, index) => <option key={index} value={typeof name === "string" ? name : optionLabel(name)} />)}</datalist>}
     <div className="pc-toolbar pc-grid-toolbar">
       <h3>{t("بنود الأعمال", "Work rows")}</h3>
+      {readOnly && <button type="button" aria-pressed={fullReadView} onClick={() => setFullReadView(!fullReadView)}>
+        {fullReadView ? t("عرض مختصر", "Compact view") : t("جميع الأعمدة", "All columns")}
+      </button>}
       {!readOnly && <>
         <button type="button" onClick={addRow}><Plus size={16} />{t("بند", "Add row")}</button>
         <button type="button" title={t("تراجع", "Undo")} aria-label={t("تراجع", "Undo")} disabled={!editable || !history.current.past.length} onClick={() => historyMove("past")}><Undo2 size={17} /></button>
@@ -285,13 +300,13 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
       onFocus={(event) => { const { rowId, column } = event.target.dataset; if (rowId && column && !nextFocus.current && !event.nativeEvent.sourceCapabilities) select({ rowId, columnKey: column }, false); }}
       onPaste={(event) => { const { rowId, column } = event.target.dataset; const value = event.clipboardData.getData("text/plain"); if (editable && /[\t\r\n]/.test(value) && paste(value, { rowId, columnKey: column })) event.preventDefault(); }}>
       <table className="pc-grid" aria-rowcount={rows.length + 1}>
-        <colgroup><col style={{ width: 47 }} />{GRID_COLUMNS.map(({ key, width }) => <col key={key} style={{ width: width || 105 }} />)}</colgroup>
-        <thead><tr><th scope="col" className="pc-grid-index">#</th>{GRID_COLUMNS.map(({ key, label }) => <th scope="col" key={key}>{t(...label)}</th>)}</tr></thead>
+        <colgroup><col style={{ width: 47 }} />{columns.map(({ key, width }) => <col key={key} style={{ width: width || 105 }} />)}</colgroup>
+        <thead><tr><th scope="col" className="pc-grid-index">#</th>{columns.map(({ key, label }) => <th scope="col" key={key}>{t(...label)}</th>)}</tr></thead>
         <tbody>{visible.map((row, index) => {
           const absolute = start + index;
           const selected = !sortedView && selectedRange && absolute >= selectedRange.rowStart && absolute <= selectedRange.rowEnd
             ? gridKeys.slice(selectedRange.colStart, selectedRange.colEnd + 1) : null;
-          return <WorkRow key={row._gridId} row={row} rowIndex={absolute} columns={GRID_COLUMNS} t={t} readOnly={!editable || row.carried_forward} locations={locationMap}
+          return <WorkRow key={row._gridId} row={row} rowIndex={absolute} columns={columns} t={t} readOnly={!editable || row.carried_forward} locations={locationMap}
             onEdit={edit} onLocation={setLocationRow} onMenu={setRowMenu} selected={selected} error={errors.has(String(row.id)) || errors.has(String(row.identity))} locale={locale} workTypeList={workTypeList} />;
         })}</tbody>
       </table>

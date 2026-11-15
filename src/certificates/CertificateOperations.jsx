@@ -43,6 +43,7 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
   const [draft, setDraft] = useState(settings);
   const [ruleDraft, setRuleDraft] = useState(() => (profile.rules || []).map((rule) => ({ ...rule, key: newKey() })));
   const [types, setTypes] = useState(() => (settings.work_types || project.work_types || []).map((type) => typeof type === "string" ? type : optionLabel(type)).filter(Boolean).join("\n"));
+  const [signatures, setSignatures] = useState(() => (settings.signatures || []).map((person) => ({...person, key: newKey()})));
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState(null);
@@ -61,7 +62,9 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
         reason, effective_at: effectiveAt,
         rules: ruleDraft.map(({ key, ...rule }) => ({ ...rule, rate: numberText(rule.rate), amount: numberText(rule.amount), cap: numberText(rule.cap) })),
         work_types: workTypes,
-        settings: { ...draft, minimum_area: draft.minimum_area === "" || draft.minimum_area == null ? "inherit" : numberText(draft.minimum_area), quantity_precision: draft.quantity_precision === "" ? "inherit" : draft.quantity_precision, count_precision: draft.count_precision === "" ? "inherit" : draft.count_precision, work_types: workTypes },
+        settings: { ...draft, minimum_area: draft.minimum_area === "" || draft.minimum_area == null ? "inherit" : numberText(draft.minimum_area), quantity_precision: draft.quantity_precision === "" ? "inherit" : draft.quantity_precision, count_precision: draft.count_precision === "" ? "inherit" : draft.count_precision, work_types: workTypes,
+          signatures: signatures.map(({ name, title }) => ({ name, title })),
+        },
       } });
       await onSaved();
     } catch (cause) { setError(cause); } finally { setBusy(false); }
@@ -79,7 +82,18 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
         <Field label={t("أساس احتساب التحصيلات", "Collection basis")}><select value={draft.collections_basis ?? ""} onChange={(event) => update("collections_basis", event.target.value)}><option value="">{t("موروث", "Inherit")}</option><option value="received">{t("تاريخ الاستلام", "Receipt date")}</option><option value="cleared">{t("تاريخ التحصيل", "Clearance date")}</option></select></Field>
         <Field label={t("الإخراج الافتراضي", "Default output")}><select value={draft.output_mode ?? ""} onChange={(event) => update("output_mode", event.target.value)}><option value="">{t("موروث", "Inherit")}</option><option value="auto">{t("تلقائي", "Automatic")}</option><option value="cover">{t("ملخص وتفاصيل", "Summary and details")}</option><option value="detail">{t("التفاصيل فقط", "Details only")}</option></select></Field>
         <Field label={t("أنواع الأعمال بالترتيب، نوع في كل سطر", "Work types in order, one per line")} className="pc-span"><textarea rows={3} value={types} onChange={(event) => setTypes(event.target.value)} /></Field>
+        <label className="pc-check"><input type="checkbox" checked={Boolean(draft.group_work_types)} onChange={(event) => update("group_work_types", event.target.checked)} />{t("تجميع الأعمال حسب النوع", "Group works by type")}</label>
+        <label className="pc-check"><input type="checkbox" disabled={!draft.group_work_types} checked={Boolean(draft.show_group_subtotals)} onChange={(event) => update("show_group_subtotals", event.target.checked)} />{t("عرض إجمالي كل نوع", "Show subtotals by type")}</label>
       </div>
+    </fieldset>
+    <fieldset disabled={!canManage || busy}>
+      <legend>{t("توقيعات المستخلص", "Certificate signatures")}</legend>
+      {signatures.map((person) => <div className="pc-toolbar" key={person.key}>
+        <Field label={t("اسم الموقّع", "Signatory name")}><input dir="auto" value={person.name} onChange={(event) => setSignatures((rows) => rows.map((row) => row.key === person.key ? {...row, name: event.target.value} : row))} /></Field>
+        <Field label={t("المسمى", "Title")}><input dir="auto" value={person.title} onChange={(event) => setSignatures((rows) => rows.map((row) => row.key === person.key ? {...row, title: event.target.value} : row))} /></Field>
+        {canManage && <button type="button" onClick={() => setSignatures((rows) => rows.filter((row) => row.key !== person.key))}>{t("إزالة", "Remove")}</button>}
+      </div>)}
+      {canManage && signatures.length < 6 && <button type="button" onClick={() => setSignatures((rows) => [...rows, { key: newKey(), name: "", title: "" }])}>{t("إضافة موقّع", "Add signatory")}</button>}
     </fieldset>
     <fieldset disabled={!canManage || busy}>
       <legend>{t("الضرائب والاستقطاعات", "Taxes and deductions")}</legend>
@@ -163,8 +177,8 @@ function LedgerTable({ data, canEdit, t, locale, currency, locations, onReverse,
       <tbody>{(data.receipts || []).map((receipt) => <tr key={receipt.id}>
         <td><bdi>{receipt.received_at}</bdi></td><td>{kinds[receipt.kind] ? t(...kinds[receipt.kind]) : receipt.kind}</td><td><bdi>{receipt.reference || "—"}</bdi></td><td><Status t={t} value={receipt.status} /></td>
         <td><Money value={receipt.amount} locale={locale} currency={receipt.currency || currency} /></td><td><div className="pc-toolbar">
-          {canEdit && !reversed.has(receipt.id) && receipt.status !== "cleared" && <button type="button" onClick={() => onFollowup("clear", receipt)}>{t("تأكيد التحصيل", "Mark cleared")}</button>}
-          {canEdit && receipt.kind !== "reversal" && !reversed.has(receipt.id) && <>
+          {canEdit && !receipt.source && !reversed.has(receipt.id) && receipt.status !== "cleared" && <button type="button" onClick={() => onFollowup("clear", receipt)}>{t("تأكيد التحصيل", "Mark cleared")}</button>}
+          {canEdit && !receipt.source && receipt.kind !== "reversal" && !reversed.has(receipt.id) && <>
             {receipt.amount_minor > (allocated.get(receipt.id) || 0) && <button type="button" onClick={() => onFollowup("allocate", receipt)}>{t("توزيع", "Allocate")}</button>}
             <button type="button" onClick={() => onReverse(receipt)}>{t("عكس", "Reverse")}</button>
           </>}
@@ -175,9 +189,6 @@ function LedgerTable({ data, canEdit, t, locale, currency, locations, onReverse,
     </tr>)}</tbody></table></div></details>}
     {data.advances?.length > 0 && <details><summary>{t("الدفعات المقدمة", "Contract advances")}</summary><div className="pc-table-scroll"><table className="pc-table"><thead><tr><th>{t("التحصيل", "Receipt")}</th><th>{t("أصل الدفعة", "Principal")}</th><th>{t("المسترد", "Recovered")}</th><th>{t("المتبقي", "Outstanding")}</th></tr></thead><tbody>{data.advances.map((row) => <tr key={row.id || row.receipt_id}>
       <td><bdi>{row.reference || row.receipt_id}</bdi></td><td><Money value={row.principal || row.amount} currency={currency} locale={locale} /></td><td><Money value={row.recovered} currency={currency} locale={locale} /></td><td><Money value={row.outstanding} currency={currency} locale={locale} /></td>
-    </tr>)}</tbody></table></div></details>}
-    {data.legacy_receipts?.length > 0 && <details><summary>{t("تحصيلات تاريخية من المصنف", "Historical workbook collections")} ({data.legacy_receipts.length})</summary><div className="pc-table-scroll"><table className="pc-table"><thead><tr><th>{t("التاريخ", "Date")}</th><th>{t("المرجع", "Reference")}</th><th>{t("المبلغ المسجل", "Recorded value")}</th></tr></thead><tbody>{data.legacy_receipts.map((row, index) => <tr key={row.id || index}>
-      <td><bdi>{row.received_at || row.date || "—"}</bdi></td><td><bdi>{row.reference || row.description || row.source_sheet || "—"}</bdi></td><td><Money value={row.amount} locale={locale} currency={row.currency || currency} /></td>
     </tr>)}</tbody></table></div></details>}
   </>;
 }
@@ -262,11 +273,11 @@ export function Reports({ request, t, locale, onOpen }) {
       <div><span>{t("التحصيلات المحتسبة", "Recognized collections")}</span><strong><Money value={totals.ordinary_collections ?? totals.collections} locale={locale} currency={currency} /></strong></div>
       <div className="pc-payable"><span>{t("الرصيد المستحق", "Outstanding balance")}</span><strong><Money value={totals.current_payable ?? totals.payable ?? totals.balance ?? totals.cumulative_payable} locale={locale} currency={currency} /></strong></div>
     </div>)}
-    {report.data && <div className="pc-table-scroll"><table className="pc-table"><thead><tr><th>{t("المشروع", "Project")}</th><th>{t("الأعمال المعتمدة", "Certified work")}</th><th>{t("التحصيلات المحتسبة", "Recognized collections")}</th><th>{t("الرصيد المستحق", "Outstanding balance")}</th><th>{t("أعمال تاريخية", "Historical work")}</th></tr></thead>
+    {report.data && <div className="pc-table-scroll"><table className="pc-table"><thead><tr><th>{t("المشروع", "Project")}</th><th>{t("الأعمال المعتمدة", "Certified work")}</th><th>{t("التحصيلات المحتسبة", "Recognized collections")}</th><th>{t("الرصيد المستحق", "Outstanding balance")}</th></tr></thead>
       <tbody>{(report.data.items || []).map((item) => <tr key={item.project_id}>
         <th scope="row"><button type="button" className="pc-name" onClick={() => onOpen({ id: item.project_id, name: item.project_name, currency: item.currency })}><bdi>{item.project_name}</bdi></button></th>
         <td><Money value={item.cumulative} locale={locale} currency={item.currency} /></td><td><Money value={item.ordinary_collections} locale={locale} currency={item.currency} /></td>
-        <td><Money value={item.cumulative_payable} locale={locale} currency={item.currency} /></td><td><Money value={item.historical_work} locale={locale} currency={item.currency} /></td>
+        <td><Money value={item.cumulative_payable} locale={locale} currency={item.currency} /></td>
       </tr>)}</tbody></table>{!report.data.items?.length && <p className="pc-empty">{t("لا توجد نتائج لهذا النطاق.", "No results for this scope.")}</p>}</div>}
   </section>;
 }

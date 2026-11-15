@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('priceOfferDesktop', {
   showNotification: (payload) => ipcRenderer.invoke('show-desktop-notification', payload || {}),
   restoreInputFocus: () => ipcRenderer.invoke('restore-input-focus'),
   saveReportFile: (payload) => ipcRenderer.invoke('save-report-file', payload || {}),
+  openReportPreview: (payload) => ipcRenderer.invoke('open-report-preview', payload || {}),
   getInstalledVersion: () => ipcRenderer.invoke('app-version:get'),
   getUpdateState: () => ipcRenderer.invoke('app-update:get-state'),
   checkForUpdates: () => ipcRenderer.invoke('app-update:check'),

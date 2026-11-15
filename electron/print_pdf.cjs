@@ -56,26 +56,25 @@ async function main() {
   const footerContact = safe(
     footer.footerContact || footer.website || "https://hgad-eg.com",
   );
-  const footerPhone = safe(footer.footerPhone || companyAbbreviation);
+  const arabic = footer.locale === "ar";
   const pdf = await win.webContents.printToPDF({
     landscape: false,
     printBackground: true,
     displayHeaderFooter: true,
     headerTemplate: "<div></div>",
     footerTemplate: `
-      <div style="width:100%;font-size:9.5px;color:${footerColor};padding:4px 28px 0;font-family:${fontStack};background:white;">
+      <div style="width:100%;font-size:9.5px;color:${footerColor};padding:4px 28px 0;font-family:${fontStack};background:white;direction:ltr;">
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;width:100%;min-height:42px;border-top:1px solid ${lineColor};">
           <div style="display:grid;place-content:center start;text-align:left;line-height:1.45;min-width:0;min-height:42px;">
-            <div>${safe(footer.date || "")}</div>
-            <div>${footerPhone}</div>
+            <bdi dir="${arabic ? "rtl" : "ltr"}">${arabic ? "صفحة" : "Page"} <span class="pageNumber"></span> ${arabic ? "من" : "of"} <span class="totalPages"></span></bdi>
+            <div>EasyCommercial ${safe(footer.appVersion)}</div>
           </div>
           <div style="display:grid;place-content:center;text-align:center;line-height:1.45;min-width:0;min-height:42px;">
-            <div>${companyAbbreviation}</div>
             <div>${footerContact}</div>
+            <div>${companyAbbreviation}</div>
           </div>
           <div style="display:grid;place-content:center end;text-align:right;line-height:1.45;min-width:0;min-height:42px;">
-            <div>Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>
-            <div>By ${safe(footer.preparedBy || "Eng. Yasser")}</div>
+            <bdi>${arabic ? "إعداد" : "By"} ${safe(footer.preparedBy || "Eng. Yasser")}</bdi>
           </div>
         </div>
       </div>`,

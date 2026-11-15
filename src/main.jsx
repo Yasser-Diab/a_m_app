@@ -95,9 +95,9 @@ import {
 import "./styles.css";
 import "./workspace-theme.css";
 
-const APP_NAME = "Easy Commercial";
+const APP_NAME = "EasyCommercial";
 const APP_SLOGAN = "Quotes · Invoices · Accounts · Payments";
-const LEGACY_APP_NAMES = ["Accounting Management", APP_NAME];
+const LEGACY_APP_NAMES = ["Accounting Management", "Easy Commercial", APP_NAME];
 const APP_VERSION =
   window.priceOfferDesktop?.installedVersion ||
   import.meta.env.VITE_APP_VERSION ||
@@ -7927,6 +7927,7 @@ function ReportWorkspace({
   );
   const [parties, setParties] = useState([]);
   const [documents, setDocuments] = useState(context.documents || []);
+  const [commercialStatementProjects, setCommercialStatementProjects] = useState([]);
   const [partyId, setPartyId] = useState(context.partyId || "");
   const [documentId, setDocumentId] = useState(context.documentId || "");
   const [projectFilter, setProjectFilter] = useState(
@@ -8159,9 +8160,22 @@ function ReportWorkspace({
           String(value || "").includes(documentSearchId),
         )),
   );
+  useEffect(() => {
+    if (!isStatementWorkflow || !partyId) {
+      setCommercialStatementProjects([]);
+      return;
+    }
+    let active = true;
+    api.request(`/api/commercial-projects?${new URLSearchParams({ party_id: partyId })}`)
+      .then((data) => { if (active) setCommercialStatementProjects(data.projects || []); })
+      .catch(() => { if (active) setCommercialStatementProjects([]); });
+    return () => { active = false; };
+  }, [api, isStatementWorkflow, partyId, refreshKey]);
+
   const rawProjectOptions = [
     ...documents.map((doc) => doc.project),
     ...contractorRows.map((row) => row.project),
+    ...commercialStatementProjects.map((project) => project.name),
   ];
   const hasUnassignedProjects = rawProjectOptions.some(
     (project) => !cleanProjectName(project),
@@ -8646,6 +8660,7 @@ function ReportWorkspace({
           apiBase,
           `/api/documents/${workflow.reportType}/${extension}?${exportQuery.toString()}`,
         ),
+        { headers: currentUser?.certificate_session ? { Authorization: `Bearer ${currentUser.certificate_session}` } : {} },
       );
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
@@ -9596,6 +9611,12 @@ function PaymentsView({
   const [paymentCustomers, setPaymentCustomers] = useState([]);
   const [reviewCustomer, setReviewCustomer] = useState("");
   const [related, setRelated] = useState({ projects: [], buildings: [] });
+  const [linkedProjects, setLinkedProjects] = useState({ projects: [], can_post: false });
+  const [linkedProjectId, setLinkedProjectId] = useState("");
+  const [linkedLocations, setLinkedLocations] = useState([]);
+  const [linkedLocationId, setLinkedLocationId] = useState("");
+  const [paymentKind, setPaymentKind] = useState("receipt");
+  const linkedCommand = useRef(null);
   const [editingPayment, setEditingPayment] = useState(null);
   const [appliedFocusKey, setAppliedFocusKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -9614,6 +9635,10 @@ function PaymentsView({
     paymentCustomers.map((row) => row.base_name || row.display_name),
   );
   const selectedCustomerKey = normalizeArabic(form.base_party_name);
+  const matchingLinkedProjects = linkedProjects.projects.filter((project) => normalizeArabic(project.name) === normalizeArabic(form.project));
+  const linkedProject = !editingPayment && linkedProjects.can_post &&
+    (matchingLinkedProjects.find((project) => String(project.id) === linkedProjectId) ||
+      (matchingLinkedProjects.length === 1 ? matchingLinkedProjects[0] : null));
   const selectedReviewCustomerKey = normalizeArabic(reviewCustomer);
   const paymentRowName = (row) =>
     String(
@@ -9630,6 +9655,7 @@ function PaymentsView({
   });
   const projectOptions = uniqueValues([
     ...(related.projects || []),
+    ...linkedProjects.projects.map((project) => project.name),
     ...relatedRecent.map((row) => row.project),
   ]);
   const buildingOptions = uniqueValues([
@@ -9766,12 +9792,48 @@ function PaymentsView({
     };
   }, [api, form.base_party_name, form.party_category, form.project, isContractorMode]);
 
+  useEffect(() => {
+    if (isContractorMode || !form.base_party_name.trim()) {
+      setLinkedProjects({ projects: [], can_post: false });
+      return;
+    }
+    const query = new URLSearchParams({ customer: form.base_party_name.trim() });
+    if (form.party_category !== "unselected") query.set("category", form.party_category);
+    let active = true;
+    const timer = setTimeout(() => {
+      api.request(`/api/commercial-projects?${query}`).then((result) => {
+        if (active) setLinkedProjects(result);
+      }).catch(() => {
+        if (active) setLinkedProjects({ projects: [], can_post: false });
+      });
+    }, 150);
+    return () => { active = false; clearTimeout(timer); };
+  }, [api, form.base_party_name, form.party_category, isContractorMode, refreshKey]);
+
+  useEffect(() => {
+    setLinkedLocations([]);
+    setLinkedLocationId("");
+    if (!linkedProject?.id) return;
+    let active = true;
+    api.request(`/api/certificates/projects/${linkedProject.id}`)
+      .then((result) => { if (active) setLinkedLocations(result.locations || []); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [api, linkedProject?.id]);
+
   function update(key, value) {
+    if (key === "party_category") {
+      setLinkedProjects({ projects: [], can_post: false });
+      setLinkedProjectId("");
+    }
     setForm((current) => ({ ...current, [key]: value }));
   }
 
   function updateCustomer(value) {
     setEditingPayment(null);
+    setLinkedProjects({ projects: [], can_post: false });
+    setLinkedProjectId("");
+    setPaymentKind("receipt");
     setForm((current) => ({
       ...current,
       base_party_name: value,
@@ -9782,6 +9844,8 @@ function PaymentsView({
 
   function resetPaymentForm({ keepCustomer = true } = {}) {
     setEditingPayment(null);
+    setPaymentKind("receipt");
+    linkedCommand.current = null;
     setForm((current) => ({
       payment_type: isContractorMode ? "out" : "income",
       party_category: keepCustomer ? current.party_category : "retail",
@@ -9858,6 +9922,33 @@ function PaymentsView({
     setBusy(true);
     try {
       const isOut = isContractorMode;
+      if (paymentKind === "advance" && !linkedProject && !editingPayment) {
+        throw new Error(t("اختر مشروع مستخلصات لتسجيل دفعة مقدمة.", "Select a certificate project for this advance."));
+      }
+      if (!isOut && !editingPayment && linkedProjects.can_post && matchingLinkedProjects.length > 1 && !linkedProject) {
+        throw new Error(t("اختر المشروع والعقد من قائمة مشاريع المستخلصات.", "Select the project and contract from the certificate project list."));
+      }
+      if (!isOut && linkedProject) {
+        const payload = {
+          certificate_project_id: linkedProject.id,
+          certificate_location_id: linkedLocationId,
+          amount: form.amount,
+          entry_date: form.entry_date,
+          note: form.note,
+          kind: paymentKind,
+        };
+        const fingerprint = JSON.stringify(payload);
+        if (linkedCommand.current?.fingerprint !== fingerprint)
+          linkedCommand.current = { fingerprint, key: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}` };
+        await api.request("/api/payments", {
+          method: "POST",
+          body: JSON.stringify({ ...payload, command_key: linkedCommand.current.key }),
+        });
+        setMessage(t("تم تسجيل الدفعة للمشروع.", "Project payment recorded."));
+        resetPaymentForm();
+        await refreshAll();
+        return;
+      }
       const paymentLabel = isOut ? "\u062e\u0635\u0645" : "\u062a\u062d\u0635\u064a\u0644";
       const paymentPayload = {
         ...(editingPayment || {}),
@@ -9966,8 +10057,34 @@ function PaymentsView({
             label={t("المشروع", "Project")}
             value={form.project}
             options={projectOptions}
-            onChange={(value) => update("project", value)}
+            onChange={(value) => { setLinkedProjectId(""); update("project", value); }}
           />
+          {!isContractorMode && !editingPayment && linkedProjects.can_post && linkedProjects.projects.length > 0 && <>
+            <Field label={t("مشروع المستخلصات", "Certificate Project")}>
+              <select value={linkedProject?.id || ""} onChange={(event) => {
+                const project = linkedProjects.projects.find((item) => String(item.id) === event.target.value);
+                setLinkedProjectId(event.target.value);
+                update("project", project?.name || "");
+              }}>
+                <option value="">{t("اختر مشروعًا", "Select a project")}</option>
+                {linkedProjects.projects.map((project) => <option key={project.id} value={project.id}>
+                  {[project.name, project.contract_ref, project.code].filter(Boolean).join(" · ")}
+                </option>)}
+              </select>
+            </Field>
+            {linkedProject && <Field label={t("نوع الدفعة", "Payment Type")}>
+              <select value={paymentKind} onChange={(event) => setPaymentKind(event.target.value)}>
+                <option value="receipt">{t("تحصيل", "Collection")}</option>
+                <option value="advance">{t("دفعة مقدمة", "Advance Payment")}</option>
+              </select>
+            </Field>}
+          </>}
+          {linkedProject ? <Field label={t("الموقع", "Location")}>
+            <select value={linkedLocationId} onChange={(event) => setLinkedLocationId(event.target.value)}>
+              <option value="">{t("المشروع بالكامل", "Project-wide")}</option>
+              {linkedLocations.map((location) => <option key={location.id} value={location.id}>{location.label || location.name}</option>)}
+            </select>
+          </Field> : <>
           <ComboField
             label={t("المبنى / الوحدة", "Building / Unit")}
             value={form.building_unit}
@@ -9980,6 +10097,7 @@ function PaymentsView({
             options={paymentWorkTypeOptions}
             onChange={(value) => update("work_type", value)}
           />
+          </>}
           <Field label={t("قيمة الدفعة", "Payment Amount")}>
             <input
               type="text"
@@ -10059,7 +10177,10 @@ function PaymentsView({
                   <td>{text(row.entry_date)}</td>
                   <td>
                     <span className={`status-badge ${row.party_role === "contractor" ? "status-closed" : "status-approved"}`}>
-                      {row.party_role === "contractor" ? t("خصم", "Deduction") : t("تحصيل", "Collection")}
+                      {row.party_role === "contractor" ? t("خصم", "Deduction") :
+                        row.kind === "advance" ? t("دفعة مقدمة", "Advance Payment") :
+                        row.kind === "reversal" ? t("عكس دفعة", "Payment Reversal") :
+                        row.status === "pending" ? t("قيد التحصيل", "Pending") : t("تحصيل", "Collection")}
                     </span>
                   </td>
                   <td>
@@ -10068,9 +10189,9 @@ function PaymentsView({
                   <td>{text(row.project)}</td>
                   <td>{text(row.building_unit)}</td>
                   <td>{text(row.work_type)}</td>
-                  <td>{money(Math.abs(Number(row.collection_amount || 0)))}</td>
+                  <td>{money(row.source === "certificate_receipt" ? Number(row.collection_amount || 0) : Math.abs(Number(row.collection_amount || 0)))}</td>
                   <td>{text(row.collection_note)}</td>
-                  <td className="row-actions">
+                  <td className="row-actions">{row.source !== "certificate_receipt" && <>
                     <button
                       type="button"
                       className="icon-button"
@@ -10087,7 +10208,7 @@ function PaymentsView({
                     >
                       <Trash2 size={16} />
                     </button>
-                  </td>
+                  </>}</td>
                 </tr>
               ))}
               {!visiblePayments.length && (
@@ -10745,7 +10866,9 @@ function completionFactor(value) {
 }
 
 function formatCompletionPercent(row = {}) {
-  return `${money(completionPercent(row.completion_percent ?? row.completion_ratio))}%`;
+  const percent = row.completion_percent === "" || row.completion_percent == null
+    ? completionPercent(row.completion_ratio) : num(row.completion_percent);
+  return `${money(percent)}%`;
 }
 
 const USER_PERMISSION_FIELDS = [
@@ -16802,10 +16925,7 @@ function DocumentPreview({
     ["invoice", "taxInvoice", "nonTaxInvoice", "contractor"].includes(
       data.type,
     ) ||
-    statementRows.some(
-      (row) =>
-        !row.is_payment && (row.completion_percent || row.completion_ratio),
-    );
+    statementRows.some((row) => !row.is_payment);
   const showVatInclusiveRate =
     ["offer", "price_offer"].includes(data.type) &&
     (!!data.vat_enabled || rows.some((row) => !!row.vat_enabled));

@@ -1,8 +1,8 @@
-const MODEL_VERSION = 1;
+const MODEL_VERSION = 2;
 
 const labels = {
   en: {
-    draft: 'Draft - for review', historical: 'Historical import', customer: 'Customer', project: 'Project', location: 'Location',
+    draft: 'Draft - for review', customer: 'Customer', project: 'Project', location: 'Location',
     customer_code: 'Customer code', project_code: 'Project code', address: 'Address',
     site: 'Site address', tax_no: 'Tax registration', registration: 'Commercial registration',
     attention: 'Attention', contract_ref: 'Contract / PO', contract_date: 'Contract date',
@@ -11,7 +11,7 @@ const labels = {
     revision: 'Revision', issue_date: 'Issue date',
     work_from: 'Period start', work_to: 'Work cutoff', collection_cutoff: 'Collections cutoff',
     currency: 'Currency', title: 'Reference', notes: 'Certificate note', work_type: 'Work type', work_item: 'Item',
-    description: 'Work description', width: 'Width', length: 'Length', height: 'Height',
+    description: 'Works', width: 'Width', length: 'Length', height: 'Height',
     dimension_unit: 'Measure unit', count: 'Count', billed_quantity: 'Quantity', unit: 'Unit',
     rate: 'Rate', agreed_amount: 'Agreed amount', progress: 'Progress', note: 'Note',
     last_current: 'Last certificate current', previous: 'Previously certified', current: 'Current certificate',
@@ -20,22 +20,21 @@ const labels = {
     current_payable: 'Current net payable', cumulative_payable: 'Net payable to date',
     current_credit: 'Current credit', cumulative_credit: 'Credit to date',
     ordinary_collections: 'Ordinary collections', advance_recovery: 'Advance recovery',
-    settled_work: 'Certified work', receipts: 'Receipt details (internal)',
-    historical_amount: 'Imported work amount', source_name: 'Source workbook',
+    settled_work: 'Certified work', receipts: 'Payment details', advance_receipts: 'Advance payments received',
     collection_received: 'Receipt date', collection_cleared: 'Clearance date',
     received_date: 'Received', method: 'Method', reference: 'Reference', amount: 'Amount',
-    receipt_type: 'Type', status: 'Status', allocation: 'Allocated',
-    page: 'Page', of: 'of', other: 'Other work', no_lines: 'No work rows',
+    receipt_type: 'Type', status: 'Status', payment_details_through: 'Payment details through',
+    page: 'Page', of: 'of', no_lines: 'No work rows',
     vat: 'VAT', retention: 'Retention', contractor_withholding: 'Contractor withholding',
     reversed_advance_recovery: 'Advance recovery released', works_insurance: 'Works insurance',
     engineering_stamp: 'Engineering stamp', social_insurance: 'Social insurance',
-    adjustment: 'Adjustment', ordinary: 'Ordinary receipt', advance: 'Advance',
+    adjustment: 'Adjustment', ordinary: 'Ordinary receipt', receipt: 'Payment', advance: 'Advance',
     reversal: 'Reversal', cleared: 'Cleared', received: 'Received', reversed: 'Reversed',
     pending: 'Pending', current_work: 'Current work', cumulative_work: 'Cumulative work',
     previous_work: 'Previous work', fixed: 'Fixed amount', running: 'Running net', gross: 'Current work', other_rule: 'Other adjustment',
   },
   ar: {
-    draft: 'مسودة - للمراجعة', historical: 'مستخلص سابق مستورد', customer: 'العميل', project: 'المشروع', location: 'الموقع',
+    draft: 'مسودة - للمراجعة', customer: 'العميل', project: 'المشروع', location: 'الموقع',
     customer_code: 'كود العميل', project_code: 'كود المشروع', address: 'العنوان',
     site: 'عنوان الموقع', tax_no: 'التسجيل الضريبي', registration: 'السجل التجاري',
     attention: 'عناية', contract_ref: 'العقد / أمر الشراء', contract_date: 'تاريخ العقد',
@@ -44,7 +43,7 @@ const labels = {
     revision: 'المراجعة', issue_date: 'تاريخ الإصدار',
     work_from: 'بداية الفترة', work_to: 'نهاية الأعمال', collection_cutoff: 'نهاية فترة التحصيلات',
     currency: 'العملة', title: 'المرجع', notes: 'ملاحظة المستخلص', work_type: 'نوع العمل', work_item: 'البند',
-    description: 'وصف العمل', width: 'العرض', length: 'الطول', height: 'الارتفاع',
+    description: 'الأعمال', width: 'العرض', length: 'الطول', height: 'الارتفاع',
     dimension_unit: 'وحدة القياس', count: 'العدد', billed_quantity: 'الكمية', unit: 'الوحدة',
     rate: 'سعر الوحدة', agreed_amount: 'القيمة المتفق عليها', progress: 'نسبة الإنجاز', note: 'ملاحظة',
     last_current: 'جاري المستخلص السابق', previous: 'الأعمال السابقة المعتمدة', current: 'جاري المستخلص',
@@ -53,16 +52,15 @@ const labels = {
     current_payable: 'صافي المستحق للفترة', cumulative_payable: 'صافي المستحق حتى تاريخه',
     current_credit: 'رصيد دائن للفترة', cumulative_credit: 'رصيد دائن حتى تاريخه',
     ordinary_collections: 'التحصيلات العادية', advance_recovery: 'استرداد الدفعة المقدمة',
-    settled_work: 'الأعمال المعتمدة', receipts: 'تفاصيل التحصيلات (داخلي)',
-    historical_amount: 'قيمة الأعمال المستوردة', source_name: 'المصنف المصدر',
+    settled_work: 'الأعمال المعتمدة', receipts: 'تفاصيل الدفعات', advance_receipts: 'الدفعات المقدمة المستلمة',
     collection_received: 'تاريخ الاستلام', collection_cleared: 'تاريخ التسوية',
     received_date: 'تاريخ الاستلام', method: 'طريقة التحصيل', reference: 'المرجع', amount: 'المبلغ',
-    receipt_type: 'النوع', status: 'الحالة', allocation: 'المبلغ المخصص',
-    page: 'صفحة', of: 'من', other: 'أعمال أخرى', no_lines: 'لا توجد بنود أعمال',
+    receipt_type: 'النوع', status: 'الحالة', payment_details_through: 'تفاصيل الدفعات حتى',
+    page: 'صفحة', of: 'من', no_lines: 'لا توجد بنود أعمال',
     vat: 'ضريبة القيمة المضافة', retention: 'احتجاز الضمان', contractor_withholding: 'الخصم تحت حساب الضريبة',
     reversed_advance_recovery: 'رد استرداد الدفعة المقدمة', works_insurance: 'تأمين الأعمال',
     engineering_stamp: 'الدمغة الهندسية', social_insurance: 'التأمينات الاجتماعية',
-    adjustment: 'تسوية', ordinary: 'تحصيل عادي', advance: 'دفعة مقدمة',
+    adjustment: 'تسوية', ordinary: 'تحصيل عادي', receipt: 'تحصيل', advance: 'دفعة مقدمة',
     reversal: 'عكس تحصيل', cleared: 'تمت التسوية', received: 'تم الاستلام', reversed: 'معكوس',
     pending: 'معلق', current_work: 'الأعمال الجارية', cumulative_work: 'إجمالي الأعمال',
     previous_work: 'الأعمال السابقة', fixed: 'مبلغ ثابت', running: 'صافي القيمة المرحلية', gross: 'الأعمال الجارية', other_rule: 'تسوية أخرى',
@@ -70,12 +68,13 @@ const labels = {
 };
 
 function text(value) {
-  return ['string', 'number', 'bigint'].includes(typeof value) ? String(value).trim() : '';
+  return ['string', 'number', 'bigint'].includes(typeof value) ? String(value).trim().replace(/[٠-٩۰-۹]/g, (digit) =>
+    String(digit.charCodeAt(0) - (digit.charCodeAt(0) <= 0x669 ? 0x660 : 0x6f0))) : '';
 }
 
 function number(value) {
   if (value == null || text(value) === '') return null;
-  const parsed = Number(value);
+  const parsed = Number(text(value).replace(/٫/g, '.').replace(/٬/g, ''));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -148,16 +147,20 @@ function detailColumns(lines, moneyKeys, sharedLocation, translations) {
 function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const header = input.header || {};
   const locale = (header.locale || input.locale) === 'ar' ? 'ar' : 'en';
-  const issued = input.status === 'issued' || Boolean(input.official_number);
-  const historical = !issued && input.status === 'historical';
-  const t = historical ? { ...labels[locale], current: labels[locale].historical_amount } : labels[locale];
+  const historical = input.status === 'historical';
+  const issued = historical || input.status === 'issued' || Boolean(input.official_number);
+  const t = { ...labels[locale],
+    stamp: locale === 'ar' ? 'ختم الشركة' : 'Company stamp', prepared: locale === 'ar' ? 'أعد التقرير' : 'Prepared by' };
   const project = input.project || {};
   const customer = input.customer || {};
   const issuer = input.issuer || input.branding || {};
-  const issuerName = nameForPrint(issuer, locale) || text(issuer[locale === 'ar' ? 'companyNameAr' : 'companyNameEn'] || issuer.companyName || issuer.company_name) || 'Easy Commercial';
+  const issuerEn = text(issuer.companyNameEn || issuer.name_en);
+  const issuerAr = text(issuer.companyNameAr || issuer.name_ar);
+  const issuerName = issuerEn || nameForPrint(issuer, 'en') || issuerAr || text(issuer.companyName || issuer.company_name);
+  const issuerAlternate = issuerAr;
   const choices = header.optional_fields;
   const officialNumber = text(input.official_number ?? (historical ? input.legacy_number : ''));
-  const watermark = issued ? '' : historical ? t.historical : t.draft;
+  const watermark = issued ? '' : variant === 'customer' ? (locale === 'ar' ? 'مسودة' : 'Draft') : t.draft;
   const certificateType = t[`${header.type || 'progress'}_type`] || t.progress_type;
   const currency = /^[A-Z]{3}$/.test(text(header.currency)) ? text(header.currency) : 'EGP';
   const totals = input.totals || {};
@@ -169,14 +172,14 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const lines = (input.lines || []).map((line) => {
     const measured = line.mode === 'area' || line.mode === 'linear';
     return {
-      id: text(line.id), mode: text(line.mode), work_type: text(line.work_type) || t.other,
+      id: text(line.id), mode: text(line.mode), work_type: text(line.work_type),
       work_item: text(line.work_item), location: text(line.location), description: text(line.description),
       width: measured ? number(line.width) : null,
       height: line.mode === 'area' ? number(line.height) : null,
       dimension_unit: measured ? text(line.dimension_unit) : '',
       count: measured ? number(line.count) : null,
       billed_quantity: number(line.billed_quantity ?? line.quantity), unit: text(line.unit),
-      rate: number(line.rate), agreed_amount: number(line.agreed_amount), progress: number(line.progress),
+      rate: number(line.rate), agreed_amount: number(line.agreed_amount), progress: number(line.progress) ?? 100,
       note: text(line.note), last_current: comparable ? money(line.last_current) : null,
       previous: money(line.previous), current: money(line.current), cumulative: money(line.cumulative),
     };
@@ -190,15 +193,25 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   for (const line of lines) {
     if (!groups.has(line.work_type)) groups.set(line.work_type, []);
     groups.get(line.work_type).push(line);
+    const name = header.group_work_types ? line.work_type : '';
     let group = detailGroups.at(-1);
-    if (group?.name !== line.work_type) {
-      group = { name: line.work_type, lines: [] };
+    if (group?.name !== name) {
+      group = { name, lines: [] };
       detailGroups.push(group);
     }
     group.lines.push(line);
   }
   const components = totals.components || [];
-  const financeRows = historical ? [] : [
+  const recordedCollections = [
+    ...(totals.advance_receipts ? [{key:'advance_receipts', cumulative:money(totals.advance_receipts)}] : []),
+    ...(totals.ordinary_collections == null || (historical && !totals.ordinary_collections) ? [] : [{
+      key:'ordinary_collections',
+      basis:text(t['collection_' + input.rule_settings?.collections_basis]),
+      current:totals.current_collections == null ? null : -money(totals.current_collections),
+      cumulative:-money(totals.ordinary_collections),
+    }]),
+  ];
+  const financeRows = (historical ? recordedCollections : [
     { key: 'settled_work', previous: money(totals.previous), current: money(totals.current), cumulative: money(totals.cumulative) },
     ...components.filter((entry) => (entry.category || entry.kind) !== 'advance_recovery').map((entry) => ({
       label: text(entry.label || entry.name || t[entry.category || entry.kind] || t.other_rule),
@@ -219,12 +232,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       current: number(totals.current_reversed_advance_recovery),
       cumulative: number(totals.reversed_advance_recovery),
     }] : []),
-    ...(totals.ordinary_collections == null ? [] : [{
-      key: 'ordinary_collections',
-      basis: text(t['collection_' + input.rule_settings?.collections_basis]),
-      current: totals.current_collections == null ? null : -money(totals.current_collections),
-      cumulative: -money(totals.ordinary_collections),
-    }]),
+    ...recordedCollections,
     {
       key: money(totals.current_payable) < 0 ? 'current_credit' : 'current_payable',
       current: Math.abs(money(totals.current_payable)), emphasis: true,
@@ -233,15 +241,16 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       key: money(totals.cumulative_payable) < 0 ? 'cumulative_credit' : 'cumulative_payable',
       cumulative: Math.abs(money(totals.cumulative_payable)), emphasis: true,
     },
-  ].map((entry) => ({ ...entry, label: entry.label || t[entry.key] }));
+  ]).map((entry) => ({ ...entry, label: entry.label || t[entry.key] }));
 
   const receiptColumns = [
-    column('received_date', 11), column('receipt_type', 10), column('method', 10),
-    column('reference', 20), column('status', 10), column('amount', 11, 'money'), column('allocation', 11, 'money'),
+    column('received_date', 11), column('receipt_type', 10),
+    ...(variant === 'internal' ? [column('method', 10), column('reference', 20), column('status', 10)] : []),
+    column('amount', 11, 'money'),
   ].map((entry) => ({ ...entry, label: t[entry.key] }));
-  const receipts = variant === 'internal' ? (input.receipts || []).map((receipt) => ({
+  const receipts = (input.include_receipts ?? variant === 'internal') ? (input.receipts || []).map((receipt) => ({
     received_date: text(receipt.received_date || receipt.received_at || receipt.date).slice(0, 10),
-    method: text(t[receipt.method] || receipt.method), reference: text(receipt.reference),
+    ...(variant === 'internal' ? {method:text(t[receipt.method] || receipt.method), reference:text(receipt.reference)} : {}),
     amount: money(receipt.amount), receipt_type: text(t[receipt.kind || receipt.type] || receipt.kind || receipt.type),
     status: text(t[receipt.status] || receipt.status),
     allocation: number(receipt.allocated_amount ?? receipt.allocation),
@@ -261,14 +270,14 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       metadata('contract_ref', header.contract_ref || project.contract_ref, { isolated: true }),
       metadata('contract_date', header.contract_date || project.contract_date, { isolated: true })],
     [metadata('certificate', [certificateType, officialNumber].filter(Boolean).join(' · '), { required: true, wide: true }),
-      metadata('revision', input.revision, { required: Boolean(officialNumber), isolated: true }),
+      metadata('revision', variant === 'internal' ? input.revision : '', { isolated: true }),
       metadata('issue_date', text(input.issued_at || header.issue_date).slice(0, 10), { isolated: true }),
       metadata('work_from', header.work_from, { isolated: true }),
       metadata('work_to', header.work_to, { isolated: true }),
-      metadata('collection_cutoff', header.collection_cutoff, { isolated: true }),
+      metadata('collection_cutoff', header.collection_cutoff || (historical && receipts.length ? header.work_to : ''), { isolated: true }),
+      metadata('payment_details_through', receipts.length ? input.payment_details_through : '', {isolated:true}),
       metadata('currency', currency, { isolated: true }),
       metadata('title', header.title),
-      metadata('source_name', historical ? input.source_name || header.source_name : '', { wide: true, required: historical }),
       metadata('notes', choices?.notes === true || choices?.includes?.('notes') ? header.notes : '', { wide: true })],
   ].map((group) => visibleMetadata(group, choices, t)).filter((group) => group.length);
   const outputAliases = { automatic: 'auto', summary: 'summary_details', 'summary+details': 'summary_details',
@@ -278,28 +287,33 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
 
   return {
     modelVersion: MODEL_VERSION, locale, direction: locale === 'ar' ? 'rtl' : 'ltr', labels: t,
-    variant, issued, historical, watermark, certificateType, officialNumber, revision: input.revision ?? '',
+    variant, issued, historical, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',
     currency, outputMode, measured, paper: header.paper_size === 'Letter' ? 'Letter' : 'A4',
     landscape: measured || columns.length > 9,
     issuer: {
       name: issuerName,
-      details: [issuer.address || issuer.companyAddress, issuer.phone || issuer.companyPhone,
-        issuer.website, issuer.email, issuer.tax_no || issuer.taxRegistration].map(text).filter(Boolean),
+      alternate: issuerAlternate !== issuerName ? issuerAlternate : '',
+      website: text(issuer.website),
+      shortName: text(issuer.companyAbbreviation || issuer.abbreviation),
       logo: /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/i.test(issuer.logo_data_url || issuer.logoDataUrl || issuer.logoDataUri || '')
         ? (issuer.logo_data_url || issuer.logoDataUrl || issuer.logoDataUri) : '',
     },
+    preparedBy: text(input.prepared_by), appVersion: text(input.app_version),
+    signatures: (input.rule_settings?.signatures || []).map((person) => ({ name: text(person.name), title: text(person.title) })).filter((person) => person.name),
+    showGroupSubtotals: Boolean(header.group_work_types && header.show_group_subtotals),
     identities: { customer: nameForPrint(customer, locale), project: nameForPrint(project, locale) },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
     detailGroups: detailGroups.map(({ name, lines: groupLines }) => ({
       name, lines: groupLines, totals: financialRollup(groupLines, moneyKeys),
     })),
-    coverRows: [...groups].map(([name, groupLines]) => ({ name, ...financialRollup(groupLines, moneyKeys) })),
+    coverRows: header.group_work_types ? [...groups].filter(([name]) => name)
+      .map(([name, groupLines]) => ({ name, ...financialRollup(groupLines, moneyKeys) })) : [],
     workTotals: financialRollup(lines, moneyKeys), financeRows,
   };
 }
 
 function documentFilename(model, extension) {
-  const name = [model.issued || model.historical ? model.officialNumber || 'Historical' : 'Draft', model.identities.project,
+  const name = [model.issued ? model.officialNumber || 'Certificate' : 'Draft', model.identities.project,
     model.revision === '' ? '' : `R${model.revision}`, model.variant === 'internal' ? 'Internal' : '']
     .map(text).filter(Boolean).join(' - ').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 145).toWellFormed();
   return `${name || 'Certificate'}.${extension}`;

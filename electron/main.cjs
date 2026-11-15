@@ -1428,6 +1428,28 @@ function safeReportFileName(value = 'report.pdf') {
   return String(value || 'report.pdf').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'report.pdf';
 }
 
+ipcMain.handle('open-report-preview', async (_event, payload = {}) => {
+  const bytes = Buffer.from(payload.bytes || []);
+  if (bytes.length > 50 * 1024 * 1024 || bytes.subarray(0, 5).toString() !== '%PDF-') {
+    throw new Error('The preview requires a valid PDF report.');
+  }
+  const directory = fs.mkdtempSync(path.join(app.getPath('temp'), 'easycommercial-report-'));
+  const title = safeReportFileName(payload.fileName);
+  const file = path.join(directory, 'report.pdf');
+  fs.writeFileSync(file, bytes);
+  const viewer = new BrowserWindow({ title, width: 1024, height: 820,
+    webPreferences: { plugins: true, sandbox: true, contextIsolation: true, nodeIntegration: false },
+  });
+  viewer.setMenuBarVisibility(false);
+  viewer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  viewer.on('closed', () => {
+    fs.unlink(file, () => fs.rmdir(directory, () => {}));
+  });
+  try { await viewer.loadFile(file); }
+  catch (error) { viewer.destroy(); throw error; }
+  return { ok: true };
+});
+
 ipcMain.handle('save-report-file', async (_event, payload = {}) => {
   const settings = readDesktopSettings();
   const fileName = safeReportFileName(payload.fileName);
