@@ -71,11 +71,30 @@ async function main() {
     assert.equal(grants[manager.id].inherited_from_role,true);
 
     const customer = await api(cert + "/customers",token,"POST",{name:"مقاولات تجريبية",category:"corporate"},201);
+    assert.match(customer.code,/^CL\d+$/);
     assert.equal((await api(cert + "/customers",token,"POST",{name:"مقاولات تجريبية"})).id,customer.id);
+    const directory = await api("/parties?q=" + customer.code,token);
+    assert.equal(directory.find(({id}) => id === customer.id).code,customer.code);
+    const shared = await api("/parties",token,"POST",{base_name:"Shared customer",requester_user_id:manager.id},201);
+    assert.match(shared.code,/^CL\d+$/);
+    assert.notEqual(shared.code,customer.code);
+    await api("/parties/" + shared.id,token,"DELETE",{requester_user_id:manager.id});
+    const newCustomer = await api(cert + "/customers",token,"POST",{name:"Replacement customer"},201);
+    assert.notEqual(newCustomer.code,shared.code);
+    await api(cert + "/customers",token,"POST",{name:"Conflicting customer",code:customer.code.toLowerCase()},409);
     const project = await api(cert + "/projects",token,"POST",
       {customer_id:customer.id,name:"Project 200",contract_ref:"M-1"},201);
     const other = await api(cert + "/projects",token,"POST",{customer_id:customer.id,name:"Second project"},201);
     const scope = cert + "/projects/" + project.id;
+    assert.match(project.code,/^PRJ\d+$/);
+    assert.notEqual(other.code,project.code);
+    await api(cert + "/projects",token,"POST",{customer_id:newCustomer.id,name:"Conflicting project",code:project.code.toLowerCase()},409);
+    const master = await api(scope,token,"PATCH",{name:"Renamed Project",address:"20 Project Street",contract_date:"2026-01-02"});
+    assert.equal(master.code,project.code);
+    assert.equal(master.address,"20 Project Street");
+    assert.equal(master.contract_date,"2026-01-02");
+    assert.equal((await api(cert + "/projects?q=Project+200",token))[0].id,project.id);
+    assert.equal((await api(cert + "/projects?q=20+Project+Street",token))[0].id,project.id);
     const location = await api(scope + "/locations",token,"POST",{name:"Building 2"},201);
     const foreign = await api(cert + "/projects/" + other.id + "/locations",token,"POST",{name:"Building 10"},201);
     const viewerGrant = {capabilities:["view"],project_ids:[project.id]};
@@ -109,10 +128,13 @@ async function main() {
     assert.equal((await api(cert + "/projects",viewToken)).length,1);
     await api(cert + "/projects/" + other.id,viewToken,"GET",undefined,404);
     await api(scope + "/collections",viewToken,"GET",undefined,403);
+    await api(scope,viewToken,"PATCH",{address:"Outside permissions"},403);
     await api("/users/" + viewer.id,"","PUT",{requester_user_id:manager.id,password:"changed"},403);
 
-    await api(scope + "/settings",token,"PUT",{expected_version:0,effective_at:"2026-01-01",
-      settings:{minimum_area:1.25},rules:[{category:"vat",rate:10},{category:"advance_recovery",rate:10}]});
+    const signatures = [{name:"",title:"Project Manager"},{name:"Site Engineer",title:""}];
+    const savedSettings = await api(scope + "/settings",token,"PUT",{expected_version:0,effective_at:"2026-01-01",
+      settings:{minimum_area:1.25,signatures:[...signatures,{}]},rules:[{category:"vat",rate:10},{category:"advance_recovery",rate:10}]});
+    assert.deepEqual(savedSettings.settings.signatures,signatures);
     const date = "2026-10-10";
     await api(scope + "/collections",token,"POST",{kind:"receipt",amount:50,received_at:date},201);
     await api(scope + "/collections",token,"POST",{kind:"advance",amount:100,received_at:date},201);
@@ -210,6 +232,10 @@ async function main() {
     assert.equal(statement.totals.net_total,12.5);
     assert.equal(statement.statementRows.find((row) => row.document_type === "progress_certificate").description,"Certificate No. 1");
     assert.equal(statement.statementRows.filter((row) => row.credit === 77).length,1);
+    const updatedNameStatement = await api("/documents/statement?" + new URLSearchParams({
+      party_id:customer.id,project:master.name,report_language:"en",
+    }),token);
+    assert.deepEqual(updatedNameStatement.totals,statement.totals);
     const advanceRoute = scope + "/collections/" + posted.id;
     await api(advanceRoute,viewToken,"PATCH",{amount:78},403);
     await api(advanceRoute,token,"PATCH",{amount:78,reference:"PAY-78"});

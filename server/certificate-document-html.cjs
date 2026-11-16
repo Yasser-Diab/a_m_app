@@ -114,7 +114,7 @@ function pageTemplate(id, title, table, model) {
 function signaturesBlock(model) {
   return `<aside class="signoff"><div class="stamp">${escapeHtml(model.labels.stamp)}</div>
     <div class="signatories" dir="${model.direction}" style="--signatures:${Math.max(1,model.signatures.length)}">${model.signatures.map(({ name, title }) => `<div class="signatory">
-      <bdi dir="auto">${escapeHtml(name)}</bdi>${title ? `<small><bdi dir="auto">${escapeHtml(title)}</bdi></small>` : ''}</div>`).join('')}</div></aside>`;
+      <bdi dir="auto">${escapeHtml(name || title)}</bdi>${name && title ? `<small><bdi dir="auto">${escapeHtml(title)}</bdi></small>` : ''}</div>`).join('')}</div></aside>`;
 }
 
 function financeBlock(model) {

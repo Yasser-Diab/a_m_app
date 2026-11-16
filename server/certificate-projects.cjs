@@ -2,16 +2,78 @@ const crypto = require("node:crypto");
 const {displayPartyName, stripPartyPrefix} = require("./domain.cjs");
 const {decimal} = require("./certificate-valuation.cjs");
 const {certificateLocationFields} = require("./document-locations.cjs");
-const {audit, currency, date, encode, fail, idOf, lookup, parse, setting, str, today} = require("./certificate-access.cjs");
+const {audit, currency, date, encode, fail, idOf, lookup, parse, setting, setSetting, str, today} = require("./certificate-access.cjs");
 const RULE_CATEGORIES = ["vat", "retention", "contractor_withholding", "engineering_stamp",
   "social_insurance", "works_insurance", "other", "advance_recovery"];
 const DEFAULT_SETTINGS = {minimum_area: 0, quantity_precision: 4, count_precision: 0,
   collections_basis: "received", work_types: [], work_items: [], output_mode: "auto"};
 
+const codeCounter = (prefix) => `certificates_${prefix.toLowerCase()}_code_counter`;
+
+function nextCode(table, prefix) {
+  const suffix = `SUBSTR(TRIM(code),${prefix.length+1})`;
+  return `(WITH RECURSIVE candidate(number) AS (
+    SELECT MAX(COALESCE(MAX(CAST(${suffix} AS INTEGER)),0),
+      COALESCE((SELECT CAST(value AS INTEGER) FROM app_settings WHERE key='${codeCounter(prefix)}'),0))+1 FROM ${table}
+      WHERE UPPER(TRIM(code)) GLOB '${prefix}[0-9]*' AND ${suffix} NOT GLOB '*[^0-9]*' AND LENGTH(${suffix})<13
+    UNION ALL
+    SELECT number+1 FROM candidate WHERE EXISTS (
+      SELECT 1 FROM ${table} WHERE TRIM(code) <> '' AND UPPER(TRIM(code)) = '${prefix}' || candidate.number)
+  ) SELECT MAX(number) FROM candidate)`;
+}
+
+function initializeMasterCodes(database) {
+  const customerNext = nextCode("cert_customer_profiles", "CL");
+  const projectNext = nextCode("cert_projects", "PRJ");
+  const reserve = (prefix, next) => `INSERT INTO app_settings(key,value) VALUES ('${codeCounter(prefix)}',${next})
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value;`;
+  function fillCodes(rows, prefix, next, save) {
+    let number = database.get(`SELECT ${next} AS next`).next;
+    const codeKey = (row) => String(row.code ?? "").trim().toUpperCase();
+    const occupied = new Set(rows.map(codeKey));
+    const used = new Set();
+    for (const row of rows) {
+      const key = codeKey(row);
+      if (key && !used.has(key)) {
+        used.add(key);
+      } else {
+        let code;
+        do { code = prefix + number++; } while (occupied.has(code));
+        save(row.id, code);
+        used.add(code);
+      }
+    }
+    const counter = String(number - 1);
+    if (setting(database,codeCounter(prefix)) !== counter) setSetting(database,codeCounter(prefix),counter);
+  }
+  fillCodes(database.all(`SELECT p.id,c.code FROM parties p LEFT JOIN cert_customer_profiles c ON c.customer_id=p.id
+    WHERE p.role='customer' OR c.code IS NOT NULL ORDER BY p.id`), "CL", customerNext, (id, code) =>
+    database.run(`INSERT INTO cert_customer_profiles(customer_id,code) VALUES (?,?)
+      ON CONFLICT(customer_id) DO UPDATE SET code=excluded.code`, [id,code]));
+  fillCodes(database.all("SELECT id,code FROM cert_projects ORDER BY id"), "PRJ", projectNext, (id,code) =>
+    database.run("UPDATE cert_projects SET code=? WHERE id=?", [code,id]));
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cert_customer_code ON cert_customer_profiles(UPPER(TRIM(code))) WHERE TRIM(code) <> '';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cert_project_code ON cert_projects(UPPER(TRIM(code))) WHERE TRIM(code) <> '';
+    CREATE TRIGGER IF NOT EXISTS cert_assign_customer_code AFTER INSERT ON parties WHEN NEW.role='customer'
+    BEGIN
+      ${reserve("CL",customerNext)}
+      INSERT INTO cert_customer_profiles(customer_id,code)
+        SELECT NEW.id,'CL' || value FROM app_settings WHERE key='${codeCounter("CL")}';
+    END;
+    CREATE TRIGGER IF NOT EXISTS cert_assign_project_code AFTER INSERT ON cert_projects WHEN COALESCE(TRIM(NEW.code),'')=''
+    BEGIN
+      ${reserve("PRJ",projectNext)}
+      UPDATE cert_projects SET code='PRJ' || (SELECT value FROM app_settings WHERE key='${codeCounter("PRJ")}') WHERE id=NEW.id;
+    END;
+  `);
+}
+
 function getProject(database, id) {
   const project = database.get(`
     SELECT cp.id,cp.customer_id,cp.name,cp.alternate_name,cp.code,cp.address,cp.contract_ref,
-           cp.contract_date,cp.currency,cp.created_at,COALESCE(json_extract(cp.raw_json,'$.workbook_project_missing'),0) AS historical_only,p.display_name AS customer_name
+           cp.contract_date,cp.currency,cp.created_at,json_extract(cp.raw_json,'$.name_history') AS name_history,
+           COALESCE(json_extract(cp.raw_json,'$.workbook_project_missing'),0) AS historical_only,p.display_name AS customer_name
     FROM cert_projects cp JOIN parties p ON p.id=cp.customer_id WHERE cp.id=?
   `, [id]);
   if (!project) fail(404, "Project not found");
@@ -50,7 +112,16 @@ function createCustomer(database, input) {
   return {id: saved.lastInsertRowid, created: true};
 }
 
-function saveCustomerProfile(database, customerId, input) {
+function requestedCode(database, table, ownerColumn, owner, input, fromWorkbook) {
+  const code = str(input);
+  const collision = code && database.get(`SELECT 1 FROM ${table}
+    WHERE TRIM(code) <> '' AND UPPER(TRIM(code))=UPPER(?) AND ${ownerColumn} IS NOT ?`, [code,owner]);
+  if (collision && !fromWorkbook) fail(409, "This code is already assigned");
+  return collision ? "" : code;
+}
+
+function saveCustomerProfile(database, customerId, input, {fromWorkbook = false} = {}) {
+  const code = requestedCode(database,"cert_customer_profiles","customer_id",customerId,input.code,fromWorkbook);
   database.run(`
     INSERT INTO cert_customer_profiles (customer_id,code,alternate_name,print_contact,raw_json)
     VALUES (?,?,?,?,?) ON CONFLICT(customer_id) DO UPDATE SET
@@ -58,30 +129,58 @@ function saveCustomerProfile(database, customerId, input) {
     alternate_name=COALESCE(NULLIF(excluded.alternate_name,''),cert_customer_profiles.alternate_name),
     print_contact=COALESCE(NULLIF(excluded.print_contact,''),cert_customer_profiles.print_contact),
     raw_json=COALESCE(cert_customer_profiles.raw_json,excluded.raw_json)
-  `, [customerId, str(input.code), str(input.alternate_name), str(input.print_contact),
+  `, [customerId, code, str(input.alternate_name), str(input.print_contact),
     input.raw ? encode(input.raw) : null]);
 }
 
-function createProject(database, input, userId = null) {
+function createProject(database, input, userId = null, {fromWorkbook = false} = {}) {
   const customer = getCustomer(database, idOf(input.customer_id));
   const name = str(input.name);
   const searchName = lookup(name);
   if (!searchName) fail(400, "Project name is required");
   const contract = str(input.contract_ref);
   const address = str(input.address);
-  const code = str(input.code);
-  const existing = database.get(`SELECT id FROM cert_projects
-    WHERE customer_id=? AND search_name=? AND contract_ref=? AND address=?`,
-  [customer.id, searchName, contract, address]);
+  const existing = matchingProject(database, customer.id, searchName, contract, address);
   if (existing) return {id: existing.id, created: false};
-  if (code && database.get("SELECT 1 FROM cert_projects WHERE customer_id=? AND code=?", [customer.id, code]))
-    fail(409, "A project already uses that code for this customer");
+  const code = requestedCode(database,"cert_projects","id",null,input.code,fromWorkbook);
   const record = database.run(`
     INSERT INTO cert_projects (customer_id,name,search_name,alternate_name,code,address,contract_ref,contract_date,currency,raw_json,created_by)
     VALUES (?,?,?,?,?,?,?,?,?,?,?)
   `, [customer.id, name, searchName, str(input.alternate_name), code, address, contract,
     date(input.contract_date, true), currency(input.currency), input.raw ? encode(input.raw) : null, userId]);
   return {id: record.lastInsertRowid, created: true};
+}
+
+function matchingProject(database, customerId, searchName, contract, address, excludeId = null) {
+  return database.all(`SELECT id,search_name,json_extract(raw_json,'$.name_history') AS name_history FROM cert_projects
+    WHERE customer_id=? AND id IS NOT ? AND COALESCE(contract_ref,'')=? AND COALESCE(address,'')=?`,
+  [customerId,excludeId,contract,address]).find((row) =>
+    row.search_name === searchName || parse(row.name_history,[]).some((name) => lookup(name) === searchName));
+}
+
+function projectLookupKeys(project) {
+  return new Set([project.name,project.alternate_name,project.code,...parse(project.name_history,[])].map(lookup).filter(Boolean));
+}
+
+function updateProject(database, project, body) {
+  const name = str(body.name ?? project.name);
+  const searchName = lookup(name);
+  if (!searchName) fail(400, "Project name is required");
+  const alternateName = str(body.alternate_name ?? project.alternate_name);
+  const address = str(body.address ?? project.address);
+  const contract = str(body.contract_ref ?? project.contract_ref);
+  const contractDate = date(body.contract_date ?? project.contract_date, true);
+  if (matchingProject(database, project.customer_id, searchName, contract, address, project.id))
+    fail(409, "A project already uses that name, address and contract for this customer");
+  const current = database.get("SELECT raw_json FROM cert_projects WHERE id=?", [project.id]);
+  const raw = parse(current.raw_json) ?? {};
+  const currentNames = new Set([searchName,lookup(alternateName),""]);
+  const previousNames = [...parse(project.name_history,[]),project.name,project.alternate_name];
+  raw.name_history = [...new Set(previousNames.filter((previous) => !currentNames.has(lookup(previous))))];
+  if (project.historical_only && (address || searchName !== lookup(project.name))) delete raw.workbook_project_missing;
+  database.run(`UPDATE cert_projects SET name=?,search_name=?,alternate_name=?,address=?,contract_ref=?,contract_date=?,raw_json=? WHERE id=?`,
+    [name,searchName,alternateName,address,contract,contractDate,encode(raw),project.id]);
+  return getProject(database,project.id);
 }
 
 function projectLocations(database, projectId) {
@@ -93,7 +192,7 @@ function projectLocations(database, projectId) {
 }
 
 function projectEntrySuggestions(database, project) {
-  const names = new Set([project.name,project.alternate_name,project.code].map(lookup).filter(Boolean));
+  const names = projectLookupKeys(project);
   const rows = database.all(`SELECT DISTINCT COALESCE(NULLIF(wi.project,''),d.project) AS project,
     wi.building_unit,wi.floor_apartment,wi.work_type,wi.description,wi.unit
     FROM documents d JOIN work_items wi ON wi.document_id=d.id
@@ -183,7 +282,7 @@ function cleanSettings(input = {}, base = {}) {
   }
   if (Array.isArray(input.work_types)) settings.work_types = [...new Set(input.work_types.map((value) => str(value)).filter(Boolean))].slice(0, 150);
   if (Array.isArray(input.signatures)) settings.signatures = input.signatures.slice(0, 6)
-    .map((person) => ({name: str(person?.name, 100), title: str(person?.title, 100)})).filter((person) => person.name);
+    .map((person) => ({name: str(person?.name, 100), title: str(person?.title, 100)})).filter(({name,title}) => name || title);
   for (const key of ["group_work_types", "show_group_subtotals", "show_building_subtotals", "show_unit_subtotals", "show_work_type_subtotals"]) {
     if (Object.hasOwn(input, key)) settings[key] = input[key] === true;
   }
@@ -221,5 +320,6 @@ function checkedLocation(database, projectId, locationId) {
   return locationId;
 }
 
-module.exports = {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, projectLocations, projectEntrySuggestions,
+module.exports = {initializeMasterCodes, getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, updateProject,
+  projectLookupKeys, projectLocations, projectEntrySuggestions,
   createLocation, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation};

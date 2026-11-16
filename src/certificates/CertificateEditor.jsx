@@ -4,7 +4,7 @@ import CertificateGrid, { hydrateLines, stripGridFields } from "./CertificateGri
 import CertificateImport from "./CertificateImport.jsx";
 import { ProjectSettings } from "./CertificateOperations.jsx";
 import CertificatePreview from "./CertificatePreview.jsx";
-import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, queryString, Status, useDebounce, useResource } from "./shared.jsx";
+import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, ProjectDetailsFields, queryString, Status, useDebounce, useResource } from "./shared.jsx";
 
 const typeLabels = { progress: ["دوري", "Progress"], final: ["ختامي", "Final"], correction: ["تصحيح", "Correction"], void: ["إلغاء", "Void"], reopen: ["إعادة فتح", "Reopening"] };
 const optionalFields = {
@@ -289,7 +289,13 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
         <button type="button" className="primary" onClick={() => applyScope(pendingScope.customer, pendingScope.project)}>{t("تأكيد تغيير النطاق", "Confirm scope change")}</button></div>
     </Dialog>}
     {settingsOpen && <Dialog title={t("إعدادات المستخلص للمشروع", "Project certificate settings")} onClose={() => setSettingsOpen(false)} t={t} wide>
-      <ProjectSettings request={request} project={project} canManage={can("manage_settings")} t={t} onSaved={() => {
+      <ProjectSettings request={request} project={project} canManage={can("manage_settings")} t={t} onProjectSaved={(saved) => {
+        if (saved.id === project?.id) {
+          setProject((current) => ({...current,...saved}));
+          refreshContext();
+          onChange?.();
+        }
+      }} onSaved={() => {
         refreshContext();
         if (canWrite && !historical) { refreshRules.current = true; setDirty(true); }
       }} />
@@ -340,7 +346,8 @@ function MasterEditor({ master, project, customer, locations, t, request, onClos
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const types = { customer: ["إضافة عميل", "Add customer"], project: ["إضافة مشروع", "Add project"], location: ["إضافة مبنى أو وحدة", "Add building or unit"] };
-  const input = (key, label, props = {}) => <Field label={label}><input dir="auto" {...props} value={draft[key] || ""} onChange={(event) => setDraft((value) => ({ ...value, [key]: event.target.value }))} /></Field>;
+  const change = (key,value) => setDraft((current) => ({...current,[key]:value}));
+  const input = (key, label, props = {}) => <Field label={label}><input dir="auto" {...props} value={draft[key] || ""} onChange={(event) => change(key,event.target.value)} /></Field>;
   async function save(event) {
     event.preventDefault(); setBusy(true); setError(null);
     const next = event.nativeEvent.submitter?.value === "project";
@@ -352,20 +359,16 @@ function MasterEditor({ master, project, customer, locations, t, request, onClos
   }
   return <Dialog title={t(...types[master.type])} onClose={() => { if (!busy) onClose(); }} t={t}>
     <form className="pc-stack" onSubmit={save}>
-      <div className="pc-form">
+      {master.type === "project" ? <ProjectDetailsFields draft={draft} onChange={change} t={t} creating /> : <div className="pc-form">
         {input("name", t("الاسم الرسمي", "Official name"), { required: true, autoFocus: true })}
         {master.type !== "location" && input("alternate_name", t("الاسم باللغة الأخرى", "Name in other language"))}
-        {input("code", t("الرمز", "Code"))}
+        {master.type === "customer" ? input("code", t("رمز العميل", "Customer code"), {dir:"ltr",placeholder:t("يُعيّن تلقائيًا", "Assigned automatically")})
+          : input("code", t("الرمز", "Code"))}
         {master.type !== "location" && input("address", t("العنوان", "Address"))}
         {master.type === "customer" && <>
           <Field label={t("نوع العميل", "Customer type")}><select value={draft.category} onChange={(event) => setDraft((value) => ({ ...value, category: event.target.value }))}><option value="corporate">{t("شركة", "Company")}</option><option value="retail">{t("فرد", "Individual")}</option></select></Field>
           {input("tax_no", t("رقم التسجيل الضريبي", "Tax registration number"))}
           {input("print_contact", t("جهة الاتصال على المستند", "Contact for printing"))}
-        </>}
-        {master.type === "project" && <>
-          {input("contract_ref", t("مرجع العقد / أمر الشراء", "Contract / PO reference"))}
-          {input("contract_date", t("تاريخ العقد", "Contract date"), { type: "date", dir: "ltr" })}
-          {input("currency", t("رمز العملة", "Currency code"), { dir: "ltr", minLength: 3, maxLength: 3, pattern: "[A-Za-z]{3}", required: true })}
         </>}
         {master.type === "location" && <>
           <Field label={t("نوع الموقع", "Location kind")}><select value={draft.kind} onChange={(event) => setDraft((value) => ({ ...value, kind: event.target.value }))}>
@@ -373,7 +376,7 @@ function MasterEditor({ master, project, customer, locations, t, request, onClos
           </select></Field>
           <Field label={t("الموقع الأعلى", "Parent location")}><select value={draft.parent_id || ""} onChange={(event) => setDraft((value) => ({ ...value, parent_id: event.target.value }))}><option value="">—</option>{locations.map((location) => <option key={location.id} value={location.id}>{optionLabel(location)}</option>)}</select></Field>
         </>}
-      </div>
+      </div>}
       <Problem error={error} t={t} />
       <div className="pc-toolbar"><button type="submit" className="primary" disabled={busy}>{t("حفظ واستخدام", "Save and use")}</button>
         {master.type === "customer" && canCreateProject && <button type="submit" value="project" disabled={busy}>{t("حفظ وإضافة مشروع", "Save and add project")}</button>}</div>

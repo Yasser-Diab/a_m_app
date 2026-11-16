@@ -6,8 +6,8 @@ const {
   featureEnabled, getGrant, getUserGrant, hasManagerRole, idOf, inScope, initializeSessionSecret, issueCertificateSession,
   certificateSessionUser, revokeCertificateSession, lookup, parse, scopeSql, setGrant, setting, setSetting, str, today,
 } = require("./certificate-access.cjs");
-const {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, createLocation,
-  projectLocations, projectEntrySuggestions, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
+const {initializeMasterCodes, getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, updateProject, createLocation,
+  projectLookupKeys, projectLocations, projectEntrySuggestions, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, addReceipt, updateReceipt, changeReceipt, collectionResponse} = require("./certificate-ledger.cjs");
 const {getRevision, certificateDocumentInput, certificateNumber, createDraft, saveDraft, runAction, forAccess, recognizedReceipts} = require("./certificate-revisions.cjs");
 const {importLegacyCertificates} = require("./certificate-legacy.cjs");
@@ -29,6 +29,7 @@ function initializeCertificates(database) {
       database.run("ALTER TABLE cert_receipt_allocations ADD COLUMN allocated_at TEXT");
     initializeSessionSecret(database);
     initializeCertificateArtifacts(database);
+    initializeMasterCodes(database);
     if (!setting(database,"certificates_shared_projects_seeded")) {
       const rows = database.all(`
         SELECT DISTINCT d.party_id,d.project FROM documents d JOIN parties p ON p.id=d.party_id
@@ -70,12 +71,15 @@ function projectsResponse(database, req, access) {
   const customerId = idOf(req.query.customer_id);
   const matches = lookup(req.query.q);
   const rows = database.all(`
-    SELECT id,name,alternate_name,customer_id,code,address,contract_ref,contract_date,currency FROM cert_projects
+    SELECT id,name,alternate_name,customer_id,code,address,contract_ref,contract_date,currency,
+      json_extract(raw_json,'$.name_history') AS name_history FROM cert_projects
     WHERE ${scope.clause} AND (? IS NULL OR customer_id=?)
-      AND (? = '' OR search_name LIKE ? OR alternate_name LIKE ? OR code LIKE ? OR contract_ref LIKE ?)
+      AND (? = '' OR search_name LIKE ? OR alternate_name LIKE ? OR code LIKE ? OR contract_ref LIKE ? OR address LIKE ?
+        OR EXISTS (SELECT 1 FROM json_each(cert_projects.raw_json,'$.name_history') WHERE value LIKE ?))
     ORDER BY name LIMIT 200
-  `, [...scope.params,customerId,customerId,matches,`%${matches}%`,`%${str(req.query.q)}%`,`%${matches}%`,`%${str(req.query.q)}%`]);
-  return rows;
+  `, [...scope.params,customerId,customerId,matches,`%${matches}%`,`%${str(req.query.q)}%`,`%${matches}%`,`%${str(req.query.q)}%`,
+    `%${str(req.query.q)}%`,`%${str(req.query.q)}%`]);
+  return rows.map(({name_history,...row}) => ({...row,search_aliases:parse(name_history,[])}));
 }
 
 function certificateList(database, req, access) {
@@ -126,7 +130,7 @@ function sourceList(database, project) {
       ({identity,location_id,...certificateLocationFields({...fields,location}),work_type,work_item,description,mode,width,height,dimension_unit,count,quantity,
         unit,rate,agreed_amount,prior_certified:true})),
   }));
-  const projectKeys = new Set([project.name, project.alternate_name, project.code].map(lookup).filter(Boolean));
+  const projectKeys = projectLookupKeys(project);
   const documents = database.all(`SELECT id,operation_no,project,title,entry_date,document_type FROM documents
     WHERE party_id=? AND deleted_at IS NULL AND document_type IN ('price_offer','invoice') AND status='approved' ORDER BY id DESC`,
   [project.customer_id]).filter((document) => projectKeys.has(lookup(document.project)));
@@ -262,7 +266,10 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     const paymentDetails = cutoff ? allocationLedger(database, model.project_id, getProfile(database, model.project_id, cutoff), cutoff, {
       locationId:header.location_id || null,
     }) : null;
-    return {...model, header, report_options:reportOptions, issuer: {...model.issuer, ...branding()}, prepared_by: user?.display_name || "",
+    const project = model.project?.code ? model.project : {...model.project,code:getProject(database,model.project_id).code};
+    const customerId = model.customer?.id || project.customer_id || getProject(database,model.project_id).customer_id;
+    const customer = model.customer?.code ? model.customer : {...model.customer,code:getCustomer(database,customerId).code};
+    return {...model, header, project, customer, report_options:reportOptions, issuer: {...model.issuer, ...branding()}, prepared_by: user?.display_name || "",
       prepared_at:new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Cairo", dateStyle:"short", timeStyle:"short"}).format(new Date()),
       show_status_watermark: options.watermark !== "0",
       include_receipts: options.receipts == null ? undefined : options.receipts === "1",
@@ -385,7 +392,7 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
       [linkedCustomer,access.user.id,linkedCustomer,access.user.id]);
     if (!canLink) fail(404,"Customer not found");
     const saved = database.transaction(() => {
-      const result = createProject(database,req.body,access.user.id);
+      const result = createProject(database,{...req.body,raw:null},access.user.id);
       if (!result.created && !inScope(access,result.id)) fail(409,"A matching project exists. Request access from the administrator");
       if (result.created) {
         if (!access.all_projects) database.run("INSERT INTO cert_project_grants VALUES (?,?)",[access.user.id,result.id]);
@@ -403,6 +410,14 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     res.json({...row,customer:getCustomer(database,row.customer_id),locations:projectLocations(database,row.id),
       work_types:profile.settings.work_types,work_items:profile.settings.work_items,
       settings:{...profile, latest_version:latestVersion(database,row.id)},baseline});
+  });
+  router.patch("/projects/:projectId",(req,res) => {
+    const {project:row,access} = project(req,"manage_settings");
+    res.json(database.transaction(() => {
+      const saved = updateProject(database,row,req.body);
+      audit(database,access.user,"project_details_updated",{projectId:row.id});
+      return saved;
+    }));
   });
   router.get("/projects/:projectId/entry-suggestions",(req,res) => {
     const {project:row} = project(req,"view");

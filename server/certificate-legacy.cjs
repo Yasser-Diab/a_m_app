@@ -48,7 +48,7 @@ function importLegacyCertificates(database, batch) {
       if (!key || customerIds.has(key)) fail(400, "Legacy customer identifiers must be unique");
       const link = idOf(record.existing_customer_id);
       const customer = link ? getCustomer(database,link) : createCustomer(database,record);
-      if (customer.created) saveCustomerProfile(database, customer.id, record);
+      if (customer.created) saveCustomerProfile(database, customer.id, record, {fromWorkbook:true});
       customerIds.set(key,customer.id);
       archive(database,fingerprint,"customer",key,{...record,customer_id:customer.id});
       summary.customers++;
@@ -58,7 +58,7 @@ function importLegacyCertificates(database, batch) {
       const key = sourceKey(record);
       const customerId = customerIds.get(str(record.customer_source_id));
       if (!key || projectIds.has(key) || !customerId) fail(400, "Legacy project identifiers must be unique and linked to a known customer");
-      const project = createProject(database,{...record,customer_id:customerId});
+      const project = createProject(database,{...record,customer_id:customerId},null,{fromWorkbook:true});
       projectIds.set(key,project.id);
       archive(database,fingerprint,"project",key,record,project.id);
       for (const location of record.locations || []) {

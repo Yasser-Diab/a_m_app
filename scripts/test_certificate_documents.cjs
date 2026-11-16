@@ -190,8 +190,13 @@ async function main() {
     const arabic = locale === 'ar';
     const unit = arabic ? 'جانبية شمال' : 'North Side';
     const named = buildCertificateDocument({...fixture(locale,[{...lump,building_unit:'12',floor_apartment:unit}],{}),
+      rule_settings:{signatures:[{title:'Project Manager'},{name:'Site Engineer'},{}]},
       report_options:{show_building_subtotals:true,show_unit_subtotals:true}});
+    assert.equal(named.fieldGroups.flat().find(({key}) => key === 'location').value,`12 - ${unit}`);
+    assert.deepEqual(named.signatures,[{name:'',title:'Project Manager'},{name:'Site Engineer',title:''}]);
     const html = buildCertificateHtml(named);
+    assert.ok(html.includes('<bdi dir="auto">Project Manager</bdi>'));
+    assert.ok(html.includes('<bdi dir="auto">Site Engineer</bdi>'));
     const exported = new ExcelJS.Workbook();
     await exported.xlsx.load(await writeCertificateXlsx(named));
     const detail = exported.getWorksheet(named.labels.detail);
@@ -205,6 +210,10 @@ async function main() {
       assert.equal(detail.getRow(rowNumber).getCell(captionColumn).alignment.readingOrder,named.direction);
     }
   }
+  const reportLocation = (lines) => buildCertificateDocument(fixture('en',lines,{})).fieldGroups.flat()
+    .find(({key}) => key === 'location')?.value;
+  assert.equal(reportLocation([{...lump,building_unit:'A',floor_apartment:'1'}, {...lump,building_unit:'A',floor_apartment:'2'}]),'A');
+  assert.equal(reportLocation([{...lump,building_unit:'A',floor_apartment:'1'}, {...lump,building_unit:'B',floor_apartment:'1'}]),undefined);
 
   const quantityLines = [
     {...lump,id:'area',mode:'area',count:3,billed_quantity:9.5,unit:'m²',width:1,height:3,dimension_unit:'m'},

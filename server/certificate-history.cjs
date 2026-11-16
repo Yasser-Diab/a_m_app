@@ -1,7 +1,7 @@
 const {lookup, parse} = require("./certificate-access.cjs");
 const {allocationLedger} = require("./certificate-ledger.cjs");
 const {customerReceipts} = require("./commercial-ledger.cjs");
-const {getProfile, getProject, projectLocations} = require("./certificate-projects.cjs");
+const {getProfile, getProject, getCustomer, projectLocations} = require("./certificate-projects.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
 const {certificateLocationFields} = require("./document-locations.cjs");
 
@@ -37,6 +37,7 @@ function legacyCertificateInput(database, row, {useEdits = true} = {}) {
   const snapshot = legacySnapshot(database, row, useEdits);
   const {header} = snapshot;
   const project = getProject(database, row.project_id);
+  const customer = getCustomer(database, project.customer_id);
   const locations = new Map(projectLocations(database, project.id).map((location) => [lookup(location.name),location]));
   const current = legacyLines(snapshot, locations);
   const number = Number(row.legacy_number);
@@ -86,7 +87,7 @@ function legacyCertificateInput(database, row, {useEdits = true} = {}) {
   totals.groups = [...groups.values()].map(({work_type,...values}) => ({work_type,
     ...Object.fromEntries(Object.entries(values).map(([key,value]) => [key,money(value)]))}));
   const cutoff = header.collection_cutoff || header.work_to;
-  if (!cutoff) return {...snapshot,lines,totals,legacy:true};
+  if (!cutoff) return {...snapshot,project,customer,lines,totals,legacy:true};
 
   const linkedNumber = (payment) => /^\d+$/.test(payment.certificate_number ?? "") ? Number(payment.certificate_number) : null;
   const {imported} = customerReceipts(database, project);
@@ -125,7 +126,7 @@ function legacyCertificateInput(database, row, {useEdits = true} = {}) {
     id:entry.id, kind:entry.kind, received_at:entry.received_at, status:entry.status,
     amount:money(ledger.recognizedAmounts.get(entry.id)), method:entry.method, reference:entry.reference,
   }));
-  return {...snapshot, project, header:{...header, collection_cutoff:effectiveCutoff},
+  return {...snapshot, project, customer, header:{...header, collection_cutoff:effectiveCutoff},
     status:snapshot.approval_at ? "approved" : "unapproved", legacy:true, lines, totals, receipts,
     rule_settings:profile.settings, baseline:latest ? {id:latest.id, official_number:latest.legacy_number, work_to:latest.work_to} : null};
 }

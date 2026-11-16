@@ -94,6 +94,22 @@ export function Field({ label, children, className = "" }) {
   </div>;
 }
 
+export function ProjectDetailsFields({ draft, onChange, t, creating = false }) {
+  return <div className="pc-form">
+    {[
+      ["name", t("الاسم الرسمي", "Official name"), {required:true,autoFocus:creating}],
+      ["alternate_name", t("الاسم باللغة الأخرى", "Name in other language")],
+      ["code", t("رمز المشروع", "Project code"), {dir:"ltr",readOnly:!creating,placeholder:t("يُعيّن تلقائيًا", "Assigned automatically")}],
+      ["address", t("عنوان المشروع", "Project address")],
+      ["contract_ref", t("مرجع العقد / أمر الشراء", "Contract / PO reference")],
+      ["contract_date", t("تاريخ العقد", "Contract date"), {type:"date",dir:"ltr"}],
+      ["currency", t("رمز العملة", "Currency code"), {dir:"ltr",minLength:3,maxLength:3,pattern:"[A-Za-z]{3}",required:true,readOnly:!creating}],
+    ].map(([key,label,props]) => <Field key={key} label={label}>
+      <input dir="auto" {...props} value={draft[key] ?? ""} onChange={(event) => onChange(key,event.target.value)} />
+    </Field>)}
+  </div>;
+}
+
 export function Money({ value, locale, currency }) {
   if (value === null || value === undefined || value === "") return <span aria-hidden="true">—</span>;
   const options = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
@@ -119,9 +135,12 @@ export function Status({ value, t }) {
 
 export function Problem({ error, t }) {
   if (!error) return null;
+  const conflict = error.message === "This code is already assigned" ? t("هذا الرمز مستخدم بالفعل.", "This code is already assigned.")
+    : error.message === "A project already uses that name, address and contract for this customer"
+      ? t("يوجد مشروع بهذا الاسم والعنوان والعقد لهذا العميل.", "A project already uses that name, address and contract for this customer.") : null;
   const text = error.status === 401 ? t("انتهت جلسة المستخلصات. سجّل الدخول مجددًا.", "Your certificate session ended. Sign in again.")
     : error.status === 403 ? t("الصلاحية المطلوبة غير متوفرة لهذا السجل.", "Your access does not allow this action for the selected record.")
-    : error.status === 409 ? t("تغير السجل أو الإعدادات أثناء العمل. راجع آخر نسخة قبل المتابعة.", "The record or settings changed. Review the latest version before continuing.")
+    : error.status === 409 ? conflict || t("تغير السجل أو الإعدادات أثناء العمل. راجع آخر نسخة قبل المتابعة.", "The record or settings changed. Review the latest version before continuing.")
     : error.message || String(error);
   return <div className="pc-problem" role="alert">{text}</div>;
 }
@@ -139,7 +158,9 @@ export function Combobox({ label, selected, options, onSelect, onSearch, onAdd, 
     setOpen(false);
   }, [selectedId, selectedLabel, resetKey]);
   const normalized = searchText(value);
-  const matches = options.filter((option) => !normalized || [optionLabel(option), option.alternate_name, option.code, option.contract_ref, option.address].some((part) => searchText(part).includes(normalized))).slice(0, 30);
+  const matches = options.filter((option) => !normalized ||
+    [optionLabel(option),option.alternate_name,option.code,option.contract_ref,option.address,...(option.search_aliases || [])]
+      .some((part) => searchText(part).includes(normalized))).slice(0, 30);
   const canAdd = onAdd && value.trim() && !matches.some((option) => searchText(optionLabel(option)) === normalized);
   const choices = matches.length + (canAdd ? 1 : 0);
   const shown = !disabled && isOpen && choices > 0;

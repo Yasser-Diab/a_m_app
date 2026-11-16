@@ -2,7 +2,7 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 12;
+const MODEL_VERSION = 13;
 const reportColors = {text:'#183148', muted:'#3c5266', header:'#e5eef1', headerLine:'#b5cbd1', group:'#f3f7f8', groupText:'#26525a',
   subtotal:'#edf4f5', building:'#98c3e0', unit:'#acd3ac', workType:'#a2cbc6'};
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
@@ -275,7 +275,6 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const comparable = totals.last_current != null && (input.baseline != null || input.status === 'issued');
   const commonLocation = text(header.location || header.location_name);
   const choiceAllowsLocation = Array.isArray(choices) ? choices.includes('location') : choices?.location !== false;
-  const sharedLocation = choiceAllowsLocation ? commonLocation : '';
   const dimensionUnits = new Set((input.lines || []).filter((line) => ['area','linear'].includes(line.mode))
     .map((line) => Object.hasOwn(dimensionFactors,line.dimension_unit) ? line.dimension_unit : 'cm'));
   const dimensionUnit = dimensionUnits.size === 1 ? [...dimensionUnits][0] : 'm';
@@ -284,7 +283,8 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     const measured = line.mode === 'area' || line.mode === 'linear';
     const factor = (dimensionFactors[line.dimension_unit] || dimensionFactors.cm) / dimensionFactors[dimensionUnit];
     const dimension = (value) => number(value) == null ? null : number(value) * factor;
-    const names = certificateLocationFields(line);
+    const location = certificateLocationFields(line);
+    const names = location.building_unit || location.floor_apartment ? location : certificateLocationFields({location:line.location});
     return {
       id: text(line.id), mode: text(line.mode), work_type: text(line.work_type),
       work_item: text(line.work_item), description: text(line.description),
@@ -302,6 +302,16 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       previous: money(line.previous), current: money(line.current), cumulative: money(line.cumulative),
     };
   });
+  const buildings = new Map();
+  const units = new Map();
+  for (const {building_unit:building, floor_apartment:unit} of lines) {
+    if (building) buildings.set(building.toLowerCase(), building);
+    if (unit) units.set(JSON.stringify([building.toLowerCase(), unit.toLowerCase()]), unit);
+  }
+  const only = (locations) => locations.size === 1 ? locations.values().next().value : '';
+  const sharedLocation = buildings.size || units.size
+    ? [only(buildings), only(units)].filter(Boolean).join(' - ')
+    : Object.values(certificateLocationFields({location:commonLocation})).filter(Boolean).join(' - ');
   const moneyKeys = comparable ? ['last_current', 'previous', 'current', 'cumulative'] : ['previous', 'current', 'cumulative'];
   const columns = detailColumns(lines, moneyKeys, t, dimensionLabel);
   const workTotals = workRollup(lines, moneyKeys);
@@ -398,7 +408,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     [metadata('project', nameForPrint(project, locale), { required: true, wide: true }),
       metadata('project_code', project.code, { isolated: true }),
       metadata('site', project.site_address || project.address, { wide: true }),
-      metadata('location', sharedLocation, { wide: true }),
+      metadata('location', choiceAllowsLocation ? sharedLocation : '', { wide: true }),
       metadata('contract_ref', header.contract_ref || project.contract_ref, { isolated: true }),
       metadata('contract_date', header.contract_date || project.contract_date, { isolated: true })],
     [metadata('certificate', [certificateType, officialNumber].filter(Boolean).join(' · '), { required: true, wide: true }),
@@ -450,7 +460,8 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     style: {...palette, headingFont:font(issuer.headingFontStack), bodyFont:font(issuer.bodyFontStack)},
     qr: certificateQr({issuer:issuerName,shortName,issuedOn:issueDate,quantity,due:totals.cumulative_payable,currency,
       customer:customerName,project:projectName}),
-    signatures: (input.rule_settings?.signatures || []).map((person) => ({ name: text(person.name), title: text(person.title) })).filter((person) => person.name),
+    signatures: (input.rule_settings?.signatures || []).map((person) => ({ name: text(person.name), title: text(person.title) }))
+      .filter(({name,title}) => name || title),
     showGroupSubtotals,
     groupLabel: t[({building:'building_unit',unit:'floor_apartment'})[coverKind || groupBy] || 'work_type'],
     identities: { customer:customerName, project:projectName },

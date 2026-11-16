@@ -603,15 +603,22 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
         <thead><tr><th scope="col" className="pc-grid-index">#</th>{columns.map(({key,label,width}) => <th scope="col" key={key}>{t(...label)}
           <button type="button" className="pc-grid-resizer" aria-label={`${t("تغيير عرض العمود","Resize column")} ${t(...label)}`}
             onPointerDown={(event) => {
-              event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);
-              resizing.current = {x:event.clientX,width:widths[key] || width || 105};
+              if (event.button !== 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              resizing.current = {key,pointerId:event.pointerId,x:event.clientX,width:widths[key] || width || 105};
             }}
             onPointerMove={(event) => {
-              if (!resizing.current) return;
-              const change = (event.clientX-resizing.current.x)*(locale === "ar" ? -1 : 1);
-              setWidths((current) => ({...current,[key]:Math.max(68,Math.min(650,resizing.current.width+change))}));
+              const drag = resizing.current;
+              if (!drag || drag.pointerId !== event.pointerId || drag.key !== key) return;
+              const change = (event.clientX-drag.x)*(locale === "ar" ? -1 : 1);
+              const next = Math.max(68,Math.min(650,drag.width+change));
+              setWidths((current) => ({...current,[key]:next}));
             }}
-            onLostPointerCapture={() => { resizing.current = null; }}
+            onLostPointerCapture={(event) => {
+              if (resizing.current?.pointerId === event.pointerId) resizing.current = null;
+            }}
             onKeyDown={(event) => {
               if (!["ArrowLeft","ArrowRight"].includes(event.key)) return;
               event.preventDefault();

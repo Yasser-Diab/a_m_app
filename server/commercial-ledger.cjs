@@ -1,4 +1,5 @@
 const {certificateSessionUser, accessFor, lookup, parse, scopeSql} = require("./certificate-access.cjs");
+const {projectLookupKeys} = require("./certificate-projects.cjs");
 
 function commercialAccess(database, req) {
   if (!certificateSessionUser(database, req)) return null;
@@ -12,7 +13,8 @@ function commercialProjects(database, access, filters = {}) {
   const name = lookup(filters.customer);
   const projectName = lookup(filters.project);
   return database.all(`SELECT cp.id, cp.customer_id, cp.name, cp.search_name, cp.alternate_name, cp.code,
-    cp.contract_ref, cp.currency, p.display_name AS customer_name, p.base_name AS base_party_name,
+    cp.contract_ref, cp.currency, json_extract(cp.raw_json,'$.name_history') AS name_history,
+    p.display_name AS customer_name, p.base_name AS base_party_name,
     p.category AS party_category
     FROM cert_projects cp JOIN parties p ON p.id=cp.customer_id
     WHERE ${scope.clause} AND (? = '' OR cp.customer_id = ?) AND (? = '' OR cp.currency = ?)
@@ -23,15 +25,16 @@ function commercialProjects(database, access, filters = {}) {
     .filter((project) => (!name || [project.customer_name, project.base_party_name].some((value) => {
       const key = lookup(value);
       return filters.exact ? key === name : key.includes(name);
-    })) && (!projectName || [project.name, project.alternate_name, project.code].some((value) => lookup(value) === projectName))
+    })) && (!projectName || projectLookupKeys(project).has(projectName))
       && (!filters.category || project.party_category === filters.category));
 }
 
 function priorPayments(database, project) {
-  const projectNames = new Set([project.name, project.alternate_name, project.code].map(lookup).filter(Boolean));
-  const related = database.all("SELECT name, alternate_name, code FROM cert_projects WHERE customer_id=?", [project.customer_id]);
+  const projectNames = projectLookupKeys(project);
+  const related = database.all(`SELECT name,alternate_name,code,json_extract(raw_json,'$.name_history') AS name_history
+    FROM cert_projects WHERE customer_id=?`, [project.customer_id]).map(projectLookupKeys);
   for (const name of projectNames) {
-    if (related.filter((entry) => [entry.name, entry.alternate_name, entry.code].some((value) => lookup(value) === name)).length !== 1)
+    if (related.filter((keys) => keys.has(name)).length !== 1)
       projectNames.delete(name);
   }
   if (!projectNames.size || project.currency !== "EGP") return [];

@@ -1,6 +1,6 @@
 const {audit, date, fail, idOf, lookup, parse, setting, setSetting, str, today} = require("./certificate-access.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
-const {checkedLocation} = require("./certificate-projects.cjs");
+const {checkedLocation, getProject} = require("./certificate-projects.cjs");
 const {customerReceipts, workbookReceipt} = require("./commercial-ledger.cjs");
 
 const DATE_FLOOR = "0001-01-01";
@@ -9,7 +9,7 @@ function allocationLedger(database, projectId, profile, cutoff, options = {}) {
   const {workCutoff = cutoff,previousCutoff = DATE_FLOOR,locationId = null,revisionId = null,seriesKey = null,
     includeImported = () => true, includeReceipt = () => true} = options;
   const clearance = profile.settings.collections_basis === "cleared";
-  const project = database.get("SELECT * FROM cert_projects WHERE id=?", [projectId]);
+  const project = getProject(database,projectId);
   const {active, prior, imported} = customerReceipts(database, project);
   const location = locationId === null ? null : database.get(
     "SELECT name, code FROM cert_locations WHERE project_id=? AND id=?", [projectId,locationId]);

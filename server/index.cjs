@@ -2322,8 +2322,17 @@ function accountStatementData(database, query, type, certificateAccess) {
       ? normalizedProject
       : "";
   const projectLike = effectiveProject ? `%${effectiveProject}%` : "";
+  const certificateFilters = {party_id:query.party_id, customer:query.party_id ? "" : query.customer, project:effectiveProject, currency:"EGP"};
+  const certificateProjects = !query.document_id && selectedParty?.role !== "contractor"
+    ? commercialProjects(database, certificateAccess, certificateFilters) : [];
+  const aliases = effectiveProject ? uniqueStrings(certificateProjects.flatMap((project) =>
+    [project.name,project.alternate_name,project.code,...JSON.parse(project.name_history || "[]")]))
+    .filter((name) => name !== effectiveProject) : [];
+  const aliasPlaceholders = aliases.map(() => "?").join(",");
+  const aliasFilter = aliases.length
+    ? ` OR d.project COLLATE NOCASE IN (${aliasPlaceholders}) OR wi.project COLLATE NOCASE IN (${aliasPlaceholders})` : "";
   const projectSql = effectiveProject
-    ? "AND (d.project = ? OR d.project LIKE ? OR wi.project = ? OR wi.project LIKE ? OR d.building_unit = ? OR d.building_unit LIKE ? OR wi.building_unit = ? OR wi.building_unit LIKE ? OR (NULLIF(d.project, '') IS NOT NULL AND ? LIKE '%' || d.project || '%') OR (NULLIF(wi.project, '') IS NOT NULL AND ? LIKE '%' || wi.project || '%') OR (NULLIF(d.building_unit, '') IS NOT NULL AND ? LIKE '%' || d.building_unit || '%') OR (NULLIF(wi.building_unit, '') IS NOT NULL AND ? LIKE '%' || wi.building_unit || '%'))"
+    ? `AND (d.project = ? OR d.project LIKE ? OR wi.project = ? OR wi.project LIKE ? OR d.building_unit = ? OR d.building_unit LIKE ? OR wi.building_unit = ? OR wi.building_unit LIKE ? OR (NULLIF(d.project, '') IS NOT NULL AND ? LIKE '%' || d.project || '%') OR (NULLIF(wi.project, '') IS NOT NULL AND ? LIKE '%' || wi.project || '%') OR (NULLIF(d.building_unit, '') IS NOT NULL AND ? LIKE '%' || d.building_unit || '%') OR (NULLIF(wi.building_unit, '') IS NOT NULL AND ? LIKE '%' || wi.building_unit || '%')${aliasFilter})`
     : "";
   if (effectiveProject)
     params.push(
@@ -2339,6 +2348,8 @@ function accountStatementData(database, query, type, certificateAccess) {
       effectiveProject,
       effectiveProject,
       effectiveProject,
+      ...aliases,
+      ...aliases,
     );
 
   const statementFactorSql = `(CASE
@@ -2505,7 +2516,7 @@ function accountStatementData(database, query, type, certificateAccess) {
   }
   if (effectiveProject) {
     paymentClauses.push(
-      "(wi.project = ? OR wi.project LIKE ? OR d.project = ? OR d.project LIKE ? OR wi.building_unit = ? OR wi.building_unit LIKE ? OR d.building_unit = ? OR d.building_unit LIKE ? OR (NULLIF(wi.project, '') IS NOT NULL AND ? LIKE '%' || wi.project || '%') OR (NULLIF(d.project, '') IS NOT NULL AND ? LIKE '%' || d.project || '%') OR (NULLIF(wi.building_unit, '') IS NOT NULL AND ? LIKE '%' || wi.building_unit || '%') OR (NULLIF(d.building_unit, '') IS NOT NULL AND ? LIKE '%' || d.building_unit || '%'))",
+      `(wi.project = ? OR wi.project LIKE ? OR d.project = ? OR d.project LIKE ? OR wi.building_unit = ? OR wi.building_unit LIKE ? OR d.building_unit = ? OR d.building_unit LIKE ? OR (NULLIF(wi.project, '') IS NOT NULL AND ? LIKE '%' || wi.project || '%') OR (NULLIF(d.project, '') IS NOT NULL AND ? LIKE '%' || d.project || '%') OR (NULLIF(wi.building_unit, '') IS NOT NULL AND ? LIKE '%' || wi.building_unit || '%') OR (NULLIF(d.building_unit, '') IS NOT NULL AND ? LIKE '%' || d.building_unit || '%')${aliasFilter})`,
     );
     paymentParams.push(
       effectiveProject,
@@ -2520,6 +2531,8 @@ function accountStatementData(database, query, type, certificateAccess) {
       effectiveProject,
       effectiveProject,
       effectiveProject,
+      ...aliases,
+      ...aliases,
     );
   }
   const directPayments = database.all(
@@ -2570,8 +2583,7 @@ function accountStatementData(database, query, type, certificateAccess) {
     });
   }
   if (certificateAccess && !query.document_id && selectedParty?.role !== "contractor") {
-    const filters = {party_id:query.party_id, customer:query.party_id ? "" : query.customer, project:effectiveProject, currency:"EGP"};
-    const projects = commercialProjects(database, certificateAccess, filters);
+    const projects = certificateProjects;
     const byId = new Map(projects.map((project) => [project.id, project]));
     for (let start = 0; start < projects.length; start += 500) {
       const ids = projects.slice(start, start + 500).map((project) => project.id);
@@ -2598,7 +2610,7 @@ function accountStatementData(database, query, type, certificateAccess) {
           completion_percent:progress.length ? roundMoney(progress.reduce((sum, value) => sum + value, 0) / progress.length) : 100});
       }
     }
-    for (const row of projectPaymentRows(database, certificateAccess, filters)) {
+    for (const row of projectPaymentRows(database, certificateAccess, certificateFilters)) {
       if (row.status === "pending") continue;
       const label = row.kind === "advance" ? (statementReportLanguage === "en" ? "Advance payment" : "دفعة مقدمة") :
         row.kind === "reversal" ? (statementReportLanguage === "en" ? "Payment reversal" : "عكس دفعة") : statementPaymentLabel(statementReportLanguage);
@@ -9418,7 +9430,7 @@ async function createServer(options = {}) {
 
   app.get("/api/parties", (req, res) => {
     const role = req.query.role || "customer";
-    const partyClauses = ["role = ?"];
+    const partyClauses = ["p.role = ?"];
     const partyParams = [role];
     const joinedClauses = ["p.role = ?"];
     const joinedParams = [role];
@@ -9427,16 +9439,17 @@ async function createServer(options = {}) {
     if (q) {
       const compactQ = rawQ.replace(/^0+(?=\d)/, "");
       partyClauses.push(
-        "(search_name LIKE ? OR display_name LIKE ? OR CAST(id AS TEXT) LIKE ?)",
+        "(p.search_name LIKE ? OR p.display_name LIKE ? OR CAST(p.id AS TEXT) LIKE ? OR cp.code LIKE ?)",
       );
-      partyParams.push(q, `%${rawQ}%`, `%${compactQ || rawQ}%`);
+      partyParams.push(q, `%${rawQ}%`, `%${compactQ || rawQ}%`, `%${rawQ}%`);
       joinedClauses.push(
-        "(p.search_name LIKE ? OR p.display_name LIKE ? OR CAST(p.id AS TEXT) LIKE ? OR d.operation_no LIKE ? OR CAST(d.document_no AS TEXT) LIKE ? OR CAST(d.id AS TEXT) LIKE ?)",
+        "(p.search_name LIKE ? OR p.display_name LIKE ? OR CAST(p.id AS TEXT) LIKE ? OR cp.code LIKE ? OR d.operation_no LIKE ? OR CAST(d.document_no AS TEXT) LIKE ? OR CAST(d.id AS TEXT) LIKE ?)",
       );
       joinedParams.push(
         q,
         `%${rawQ}%`,
         `%${compactQ || rawQ}%`,
+        `%${rawQ}%`,
         `%${rawQ}%`,
         `%${compactQ || rawQ}%`,
         `%${compactQ || rawQ}%`,
@@ -9478,8 +9491,9 @@ async function createServer(options = {}) {
         : "";
       return res.json(
         database.all(
-          `SELECT DISTINCT p.* FROM parties p
+          `SELECT DISTINCT p.*,cp.code FROM parties p
          JOIN documents d ON d.party_id = p.id
+         LEFT JOIN cert_customer_profiles cp ON cp.customer_id=p.id
          WHERE ${joinedClauses.join(" AND ")}${documentFilter}
          ORDER BY p.display_name LIMIT 500`,
           joinedParams,
@@ -9488,7 +9502,8 @@ async function createServer(options = {}) {
     }
     res.json(
       database.all(
-        `SELECT * FROM parties WHERE ${partyClauses.join(" AND ")} ORDER BY display_name LIMIT 500`,
+        `SELECT p.*,cp.code FROM parties p LEFT JOIN cert_customer_profiles cp ON cp.customer_id=p.id
+         WHERE ${partyClauses.join(" AND ")} ORDER BY p.display_name LIMIT 500`,
         partyParams,
       ),
     );
@@ -9524,7 +9539,8 @@ async function createServer(options = {}) {
         ],
       );
       res.status(201).json(
-        database.get("SELECT * FROM parties WHERE id = ?", [result.lastInsertRowid]),
+        database.get(`SELECT p.*,cp.code FROM parties p LEFT JOIN cert_customer_profiles cp ON cp.customer_id=p.id
+          WHERE p.id=?`, [result.lastInsertRowid]),
       );
     } catch (error) {
       res.status(409).json({ error: `Could not add party: ${error.message}` });
@@ -9557,7 +9573,8 @@ async function createServer(options = {}) {
         id,
       ],
     );
-    res.json(database.get("SELECT * FROM parties WHERE id = ?", [id]));
+    res.json(database.get(`SELECT p.*,cp.code FROM parties p LEFT JOIN cert_customer_profiles cp ON cp.customer_id=p.id
+      WHERE p.id=?`, [id]));
   });
 
   app.delete("/api/parties/:id", (req, res) => {

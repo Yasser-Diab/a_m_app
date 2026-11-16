@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
-import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, queryString, ReportGroupingChecks, Status, useDebounce, useResource } from "./shared.jsx";
+import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, ProjectDetailsFields, queryString, ReportGroupingChecks, Status, useDebounce, useResource } from "./shared.jsx";
 import "./certificates.css";
 
 export function ProjectPicker({ value, onSelect, request, t, disabled }) {
@@ -22,20 +22,59 @@ const categoryLabels = {
   advance_recovery: ["استرداد الدفعة المقدمة", "Advance recovery"],
 };
 
-export function ProjectSettings({ request, project: startProject, canManage, t, onSaved }) {
+export function ProjectSettings({ request, project: startProject, canManage, t, onSaved, onProjectSaved }) {
   const [choice, setChoice] = useState(startProject || null);
   const [reload, setReload] = useState(0);
+  const [updatedProject, setUpdatedProject] = useState(null);
   const project = useResource(request, choice?.id ? `/projects/${choice.id}` : null, reload);
+  const details = project.data && updatedProject?.id === project.data.id ? {...project.data,...updatedProject} : project.data;
   return <section className="pc-panel pc-stack">
     <div className="pc-toolbar"><h2>{t("إعدادات المشروع", "Project settings")}</h2></div>
-    <ProjectPicker value={choice} onSelect={setChoice} request={request} t={t} />
+    <ProjectPicker value={choice} onSelect={(next) => {setChoice(next); setUpdatedProject(null);}} request={request} t={t} />
     <Problem error={project.error} t={t} />
     {project.pending && <p role="status">{t("جارٍ تحميل الإعدادات…", "Loading settings…")}</p>}
-    {project.data && <SettingsForm key={`${choice.id}-${reload}`} project={project.data} request={request} canManage={canManage} t={t} onSaved={async () => {
-      setReload((version) => version + 1);
-      await onSaved?.();
-    }} />}
+    {details && <>
+      <ProjectDetailsForm key={details.id} project={details} request={request} canManage={canManage} t={t} onSaved={(saved) => {
+        setChoice(saved);
+        setUpdatedProject(saved);
+        onProjectSaved?.(saved);
+      }} />
+      <SettingsForm key={`${choice.id}-${reload}`} project={details} request={request} canManage={canManage} t={t} onSaved={async () => {
+        setReload((version) => version + 1);
+        await onSaved?.();
+      }} />
+    </>}
   </section>;
+}
+
+function ProjectDetailsForm({ project, request, canManage, t, onSaved }) {
+  const [changes, setChanges] = useState({});
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  async function save(event) {
+    event.preventDefault();
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      const result = await request(`/projects/${project.id}`, {method:"PATCH",body:changes});
+      setChanges({}); setSaved(true);
+      onSaved(result);
+    } catch (cause) { setError(cause); } finally { setBusy(false); }
+  }
+  return <form onSubmit={save}>
+    <fieldset disabled={!canManage || busy}>
+      <legend>{t("بيانات المشروع", "Project details")}</legend>
+      <ProjectDetailsFields t={t} draft={{...project,...changes}} onChange={(key,value) => {
+        setSaved(false);
+        setChanges((current) => ({...current,[key]:value}));
+      }} />
+      <Problem error={error} t={t} />
+      {canManage && <div className="pc-toolbar">
+        <button type="submit" className="primary" disabled={!Object.keys(changes).length}><Save size={16} />{t("حفظ بيانات المشروع", "Save project details")}</button>
+        {saved && <span role="status">{t("تم حفظ بيانات المشروع.", "Project details saved.")}</span>}
+      </div>}
+    </fieldset>
+  </form>;
 }
 
 function SettingsForm({ project, request, canManage, t, onSaved }) {
@@ -111,8 +150,14 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
     <fieldset disabled={!canManage || busy}>
       <legend>{t("توقيعات المستخلص", "Certificate signatures")}</legend>
       {signatures.map((person) => <div className="pc-toolbar" key={person.key}>
-        <Field label={t("اسم الموقّع", "Signatory name")}><input dir="auto" value={person.name} onChange={(event) => setSignatures((rows) => rows.map((row) => row.key === person.key ? {...row, name: event.target.value} : row))} /></Field>
-        <Field label={t("المسمى", "Title")}><input dir="auto" value={person.title} onChange={(event) => setSignatures((rows) => rows.map((row) => row.key === person.key ? {...row, title: event.target.value} : row))} /></Field>
+        <Field label={t("اسم الموقّع", "Signatory name")}><input dir="auto" value={person.name ?? ""} onChange={(event) => {
+          const name = event.target.value;
+          setSignatures((rows) => rows.map((row) => row.key === person.key ? {...row,name} : row));
+        }} /></Field>
+        <Field label={t("المنصب", "Position")}><input dir="auto" value={person.title ?? ""} onChange={(event) => {
+          const title = event.target.value;
+          setSignatures((rows) => rows.map((row) => row.key === person.key ? {...row,title} : row));
+        }} /></Field>
         {canManage && <button type="button" onClick={() => setSignatures((rows) => rows.filter((row) => row.key !== person.key))}>{t("إزالة", "Remove")}</button>}
       </div>)}
       {canManage && signatures.length < 6 && <button type="button" onClick={() => setSignatures((rows) => [...rows, { key: newKey(), name: "", title: "" }])}>{t("إضافة موقّع", "Add signatory")}</button>}
