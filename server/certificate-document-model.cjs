@@ -2,7 +2,7 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 10;
+const MODEL_VERSION = 12;
 const reportColors = {text:'#183148', muted:'#3c5266', header:'#e5eef1', headerLine:'#b5cbd1', group:'#f3f7f8', groupText:'#26525a',
   subtotal:'#edf4f5', building:'#98c3e0', unit:'#acd3ac', workType:'#a2cbc6'};
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });

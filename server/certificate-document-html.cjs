@@ -67,8 +67,18 @@ function fullIdentity(model) {
   const primaryKeys = ['certificate', 'issue_date', 'work_from', 'work_to'];
   const primary = certificate.filter(({ key }) => primaryKeys.includes(key));
   const facts = certificate.filter(({ key }) => !primaryKeys.includes(key));
-  const field = (entry) => `<div${entry.wide ? ' class="wide"' : ''} data-field="${escapeHtml(entry.key)}">` +
-    `<dt>${escapeHtml(entry.label)}</dt><dd>${identityValue(entry)}</dd></div>`;
+  const balanceKeys = ['cumulative_payable', 'cumulative_credit'];
+  const textKeys = ['title', 'notes'];
+  const [customer = [], project = []] = fieldGroups.filter((group) => group !== certificate);
+  const columns = [
+    [customer, facts.filter(({ key }) => key !== 'total_quantity' && !balanceKeys.includes(key) && !textKeys.includes(key))],
+    [project, facts.filter(({ key }) => key === 'total_quantity')],
+    [primary, facts.filter(({ key }) => balanceKeys.includes(key))],
+  ];
+  const notes = facts.filter(({ key }) => textKeys.includes(key));
+  const fieldList = (entries, className) => `<dl class="metadata-list ${className}">${entries.map((entry) =>
+    `<div data-field="${escapeHtml(entry.key)}"><dt>${escapeHtml(entry.label)}</dt><dd>${identityValue(entry)}</dd></div>`
+  ).join('')}</dl>`;
   return `<header class="full-identity">
     <div class="issuer">
       ${issuer.logo ? `<img src="${escapeHtml(issuer.logo)}" alt="">` : ''}
@@ -76,9 +86,10 @@ function fullIdentity(model) {
       ${issuer.alternate ? `<div class="issuer-details"><bdi dir="auto">${escapeHtml(issuer.alternate)}</bdi></div>` : ''}</div>
       ${qr ? `<img class="certificate-qr" src="${escapeHtml(qr)}" alt="Certificate QR code">` : ''}
     </div>
-    <div class="identities" style="--groups:${Math.max(1, fieldGroups.length)}">
-      ${fieldGroups.map((group) => `<dl>${(group === certificate ? primary : group).map(field).join('')}</dl>`).join('')}
-    </div>${facts.length ? `<dl class="certificate-facts">${facts.map(field).join('')}</dl>` : ''}</header>`;
+    <div class="identities">${columns.map(([identity, details]) => `<div class="metadata-column">
+      ${identity.length ? fieldList(identity, 'identity-values') : ''}
+      ${details.length ? fieldList(details, 'identity-details') : ''}</div>`).join('')}</div>
+    ${notes.length ? fieldList(notes, 'certificate-notes') : ''}</header>`;
 }
 
 function compactIdentity(model) {
@@ -102,7 +113,7 @@ function pageTemplate(id, title, table, model) {
 
 function signaturesBlock(model) {
   return `<aside class="signoff"><div class="stamp">${escapeHtml(model.labels.stamp)}</div>
-    <div class="signatories" dir="${model.direction}">${model.signatures.map(({ name, title }) => `<div class="signatory">
+    <div class="signatories" dir="${model.direction}" style="--signatures:${Math.max(1,model.signatures.length)}">${model.signatures.map(({ name, title }) => `<div class="signatory">
       <bdi dir="auto">${escapeHtml(name)}</bdi>${title ? `<small><bdi dir="auto">${escapeHtml(title)}</bdi></small>` : ''}</div>`).join('')}</div></aside>`;
 }
 
@@ -202,15 +213,21 @@ function buildCertificateHtml(model) {
     .issuer-details { font-family:var(--heading-body); color:${reportColors.muted}; margin-block-start:.5mm; }
     .status-watermark { position: absolute; left: 50%; top: 49%; z-index: 3; transform: translate(-50%, -50%) rotate(-25deg); pointer-events: none; white-space: nowrap; font-size: 36pt; font-weight: 700; letter-spacing: 2pt; opacity: .3; color: #934044; }
     .status-watermark[data-approved="true"] { color: #427052; }
-    .identities { display:grid; grid-template-columns:repeat(var(--groups),minmax(0,1fr)); gap:3mm; margin-block:1.4mm; }
-    .identities dl { min-width:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.6mm 1.8mm; align-content:start; border-inline-start:.75pt solid #c7d8dc; padding-inline-start:2mm; margin:0; }
-    .identities .wide { grid-column:1 / -1; }
-    .certificate-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(27mm,1fr)); gap:.6mm 2mm; margin:0 0 1.4mm; }
-    .certificate-facts .wide { grid-column:span 2; }
-    .certificate-facts [data-field="notes"] { grid-column:1 / -1; }
-    .identities dl > div, .certificate-facts > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:0 1.2mm; min-width:0; }
-    .identities dt, .certificate-facts dt { font-size:8pt; font-weight:700; color:var(--brand); }
-    .identities dd, .certificate-facts dd { min-width:0; max-width:100%; margin:0; font-size:9pt; }
+    .identities { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:auto auto;
+      gap:1mm 4mm; margin-block:1.4mm; }
+    .metadata-column { min-width:0; display:grid; grid-row:1 / -1; grid-template-rows:subgrid;
+      grid-template-columns:fit-content(42%) minmax(0,1fr); }
+    .metadata-column:has(dd)::before { content:""; grid-column:2 / 3; grid-row:1 / -1;
+      justify-self:start; border-inline-start:.75pt solid #c7d8dc; pointer-events:none; }
+    .metadata-list { min-width:0; display:grid; grid-template-columns:subgrid; grid-column:1 / -1; row-gap:.45mm;
+      align-content:start; margin:0; line-height:1.24; }
+    .identity-values { grid-row:1; }
+    .identity-details { grid-row:2; }
+    .metadata-list > div { display:grid; grid-template-columns:subgrid; grid-column:1 / -1; align-items:baseline; }
+    .metadata-list dt { padding-inline-end:1.5mm; text-align:end; font-size:8pt; font-weight:700; color:var(--brand); }
+    .metadata-list dd { min-width:0; padding-inline-start:1.5mm; margin:0; font-size:9pt; }
+    .identity-details [data-field^="cumulative_"] dd { overflow-wrap:normal; font-variant-numeric:tabular-nums; }
+    .certificate-notes { grid-template-columns:max-content minmax(0,1fr); margin-block-end:1.4mm; }
     .quantity-list { display:flex; flex-wrap:wrap; gap:0 .4em; }
     .quantity-entry, .quantity-pair { display:inline-flex; align-items:baseline; gap:.32em; white-space:nowrap; }
     .quantity-entry bdi { overflow-wrap:normal; }
@@ -254,11 +271,14 @@ function buildCertificateHtml(model) {
     footer > div:first-child { text-align: left; }
     .footer-company { text-align: center; }
     .footer-user { text-align: right; }
-    .signoff { direction:ltr; display:grid; grid-template-columns:34mm minmax(0,1fr); gap:7mm; align-items:end; margin-block-start:2mm; color:${reportColors.muted}; }
-    .stamp { min-height:15mm; border:0.6pt solid #adc2c9; padding:2mm; font-size:8pt; text-align:center; }
-    .signatories { display: flex; flex-wrap: wrap; justify-content: end; gap: 2mm 5mm; }
-    .signatories[dir="rtl"] { justify-content:start; }
-    .signatory { min-width:23mm; max-width:100%; padding-block-start:4mm; border-block-start:0.6pt solid #adc2c9; text-align:center; font-size:8pt; overflow-wrap:anywhere; }
+    .signoff { direction:ltr; display:grid; grid-template-columns:24mm minmax(0,1fr); gap:7mm; align-items:end; padding-block-start:7mm; color:${reportColors.muted}; }
+    .stamp { inline-size:24mm; block-size:24mm; border:0.6pt solid #adc2c9; border-radius:50%;
+      padding:4mm 2.5mm 0; font-size:8pt; text-align:center; }
+    .signatories { display:grid; grid-template-columns:repeat(var(--signatures),minmax(0,1fr)); gap:4mm; align-items:start; }
+    .signatory { justify-self:center; width:min(100%,34mm); min-width:0; padding-block-start:4mm;
+      border-block-start:0.6pt solid #adc2c9; text-align:center; font-size:8pt; overflow-wrap:anywhere; }
+    .signatory:only-child { justify-self:end; }
+    .signatories[dir="rtl"] .signatory:only-child { justify-self:start; }
     .signatory small { display: block; }
     </style></head><body>
     ${pageTemplate('cover', labels.cover, tableOpening(coverColumns), model)}
@@ -362,19 +382,48 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     return units;
   }
 
-  function pagesFor(id, compactFirst = false) {
+  function makeSignoff(placement) {
+    const block = document.getElementById('signatures-block').content.firstElementChild.cloneNode(true);
+    block.dataset.placement = placement;
+    return block;
+  }
+
+  function appendSummarySignoff(pages) {
+    const block = makeSignoff('opening');
+    const lastPage = pages.at(-1);
+    lastPage.querySelector('main').append(block);
+    if (fits(lastPage)) return;
+    const page = makePage('signoff-page', true);
+    pages.push(page);
+    page.querySelector('main').append(block);
+    if (!fits(page)) throw new Error('The certificate sign-off is too tall for the chosen paper');
+  }
+
+  function pagesFor(id, compactFirst = false, signDetails = false) {
     let page = makePage(id, compactFirst);
     const pages = [page];
     let table = page.querySelector('tbody');
+    const units = rowsFor(id);
+    if (signDetails && units.length > 1) {
+      const total = units.pop();
+      units.at(-1).push(...total);
+    }
     const headers = new Map();
-    for (const units of rowsFor(id)) {
-      const rows = units.map((row) => row.cloneNode(true));
+    for (const [index, unit] of units.entries()) {
+      const rows = unit.map((row) => row.cloneNode(true));
+      const signoff = signDetails && index === units.length - 1 ? makeSignoff('closing') : null;
       for (const row of rows) if (row.dataset.groupRow) headers.set(row.dataset.path,row);
       const hadRows = table.rows.length > 0;
       table.append(...rows);
+      if (signoff) page.querySelector('main').append(signoff);
       if (!fits(page)) {
         rows.forEach((row) => row.remove());
-        if (!hadRows) throw new Error('The certificate heading or a work line is too tall for the chosen paper');
+        signoff?.remove();
+        if (!hadRows) {
+          if (!signoff || compactFirst || pages.length > 1) throw new Error('The certificate heading or a work line is too tall for the chosen paper');
+          page.querySelector('main').replaceChildren();
+          page.classList.remove(id);
+        }
         page = makePage(id, true);
         pages.push(page);
         table = page.querySelector('tbody');
@@ -385,6 +434,7 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
           if (header) table.append(header.cloneNode(true));
         }
         table.append(...rows);
+        if (signoff) page.querySelector('main').append(signoff);
         if (!fits(page)) throw new Error('A certificate work line is too tall for the chosen paper');
       }
     }
@@ -419,26 +469,23 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     }
   }
 
-  let openingPages = outputMode === 'summary_details' ? [] : pagesFor('detail');
-  const hasCover = outputMode === 'summary_details' || (measured && openingPages.length > 1 && outputMode !== 'detail_only');
-  if (hasCover) {
-    openingPages.forEach((page) => page.remove());
-    openingPages = pagesFor('cover');
+  let hasCover = outputMode === 'summary_details';
+  if (!hasCover && measured && outputMode !== 'detail_only') {
+    const detailPages = pagesFor('detail');
+    hasCover = detailPages.length > 1;
+    detailPages.forEach((page) => page.remove());
   }
+  const openingPages = hasCover ? pagesFor('cover') : pagesFor('detail', false, true);
+  const workPageCount = openingPages.length;
   appendTableSection('settlement', openingPages);
   if (hasReceipts) appendTableSection('receipts', openingPages);
-
-  const signoff = document.getElementById('signatures-block').content.firstElementChild.cloneNode(true);
-  let closingPage = openingPages.at(-1);
-  closingPage.querySelector('main').append(signoff);
-  if (!fits(closingPage)) {
-    closingPage = makePage('signoff-page', true);
-    openingPages.push(closingPage);
-    closingPage.querySelector('main').append(signoff);
-    if (!fits(closingPage)) throw new Error('The certificate sign-off is too tall for the chosen paper');
+  if (hasCover) {
+    appendSummarySignoff(openingPages);
+  } else if (openingPages.length === workPageCount) {
+    const content = openingPages.at(-1).querySelector('main');
+    content.append(content.querySelector('.signoff'));
   }
-
-  const pages = hasCover ? [...openingPages,...pagesFor('detail',true)] : openingPages;
+  const pages = hasCover ? [...openingPages,...pagesFor('detail',true,true)] : openingPages;
   for (const [index, page] of pages.entries()) {
     page.querySelector('.page-number').textContent = String(index + 1);
     page.querySelector('.page-total').textContent = String(pages.length);
