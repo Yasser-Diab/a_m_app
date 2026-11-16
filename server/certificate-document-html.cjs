@@ -63,6 +63,12 @@ function identityValue(field) {
 
 function fullIdentity(model) {
   const { issuer, fieldGroups, qr } = model;
+  const certificate = fieldGroups.find((group) => group.some(({ key }) => key === 'certificate')) || [];
+  const primaryKeys = ['certificate', 'issue_date', 'work_from', 'work_to'];
+  const primary = certificate.filter(({ key }) => primaryKeys.includes(key));
+  const facts = certificate.filter(({ key }) => !primaryKeys.includes(key));
+  const field = (entry) => `<div${entry.wide ? ' class="wide"' : ''} data-field="${escapeHtml(entry.key)}">` +
+    `<dt>${escapeHtml(entry.label)}</dt><dd>${identityValue(entry)}</dd></div>`;
   return `<header class="full-identity">
     <div class="issuer">
       ${issuer.logo ? `<img src="${escapeHtml(issuer.logo)}" alt="">` : ''}
@@ -71,8 +77,8 @@ function fullIdentity(model) {
       ${qr ? `<img class="certificate-qr" src="${escapeHtml(qr)}" alt="Certificate QR code">` : ''}
     </div>
     <div class="identities" style="--groups:${Math.max(1, fieldGroups.length)}">
-      ${fieldGroups.map((group) => `<dl>${group.map((field) => `<div${field.wide ? ' class="wide"' : ''}><dt>${escapeHtml(field.label)}</dt><dd>${identityValue(field)}</dd></div>`).join('')}</dl>`).join('')}
-    </div></header>`;
+      ${fieldGroups.map((group) => `<dl>${(group === certificate ? primary : group).map(field).join('')}</dl>`).join('')}
+    </div>${facts.length ? `<dl class="certificate-facts">${facts.map(field).join('')}</dl>` : ''}</header>`;
 }
 
 function compactIdentity(model) {
@@ -183,30 +189,33 @@ function buildCertificateHtml(model) {
     :root[dir="rtl"] { --opposite-x:1px; }
     html, body { margin: 0; padding: 0; background: white; color: ${reportColors.text}; }
     body { font: 10pt/1.36 var(--body-font); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    .sheet { position: relative; isolation: isolate; width: ${width}mm; height: ${height - 0.6}mm; padding: 10mm 13mm 9mm; display: flex; flex-direction: column; }
+    .sheet { position: relative; isolation: isolate; width: ${width}mm; height: ${height - 0.6}mm; padding: 8mm 13mm 9mm; display: flex; flex-direction: column; }
     .sheet + .sheet { break-before: page; }
     header, h1, h2, th, td, footer { overflow-wrap: anywhere; }
-    .issuer { display: flex; align-items: center; gap: 3mm; border-block-end: 1.4pt solid var(--line); padding-block-end: 3mm; }
-    .issuer img { width: 18mm; height: 14mm; object-fit: contain; }
-    .issuer:has(.certificate-qr) { position: relative; min-height: 21mm; padding-left: 23mm; }
-    .issuer img.certificate-qr, .compact-identity img.certificate-qr { width: 20mm; height: 20mm; object-fit: contain; }
-    .issuer img.certificate-qr { position: absolute; left: 0; top: 0; }
+    .issuer { display:flex; align-items:center; gap:3mm; border-block-end:1.4pt solid var(--line); padding-block-end:1.5mm; }
+    .issuer img { width:16mm; height:12mm; object-fit:contain; }
+    .issuer:has(.certificate-qr) { position:relative; min-height:19.5mm; padding-left:21mm; }
+    .issuer img.certificate-qr { position:absolute; left:0; top:0; width:18mm; height:18mm; }
+    .compact-identity img.certificate-qr { width:17mm; height:17mm; object-fit:contain; }
     .issuer strong, .compact-identity strong, h1, h2 { font-family:var(--heading); color:var(--brand); }
-    .issuer strong { display: block; font-size: 19pt; line-height: 1.15; letter-spacing: -0.3pt; }
-    .issuer-details { font-family:var(--heading-body); color:${reportColors.muted}; margin-block-start:1mm; }
+    .issuer strong { display:block; font-size:17pt; line-height:1.15; letter-spacing:-0.3pt; }
+    .issuer-details { font-family:var(--heading-body); color:${reportColors.muted}; margin-block-start:.5mm; }
     .status-watermark { position: absolute; left: 50%; top: 49%; z-index: 3; transform: translate(-50%, -50%) rotate(-25deg); pointer-events: none; white-space: nowrap; font-size: 36pt; font-weight: 700; letter-spacing: 2pt; opacity: .3; color: #934044; }
     .status-watermark[data-approved="true"] { color: #427052; }
-    .identities { display: grid; grid-template-columns: repeat(var(--groups), minmax(0, 1fr)); gap: 3mm; margin-block: 2mm; }
-    .identities dl { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 2mm; align-content: start; border-inline-start: 0.75pt solid #c7d8dc; padding-inline-start: 2.4mm; margin: 0; }
-    .identities dl > div { min-width: 0; margin-block-start: 1mm; }
-    .identities .wide { grid-column: 1 / -1; }
-    .identities dt { font-size: 8pt; font-weight: 700; color: var(--brand); }
-    .identities dd { margin: 0; }
+    .identities { display:grid; grid-template-columns:repeat(var(--groups),minmax(0,1fr)); gap:3mm; margin-block:1.4mm; }
+    .identities dl { min-width:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.6mm 1.8mm; align-content:start; border-inline-start:.75pt solid #c7d8dc; padding-inline-start:2mm; margin:0; }
+    .identities .wide { grid-column:1 / -1; }
+    .certificate-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(27mm,1fr)); gap:.6mm 2mm; margin:0 0 1.4mm; }
+    .certificate-facts .wide { grid-column:span 2; }
+    .certificate-facts [data-field="notes"] { grid-column:1 / -1; }
+    .identities dl > div, .certificate-facts > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:0 1.2mm; min-width:0; }
+    .identities dt, .certificate-facts dt { font-size:8pt; font-weight:700; color:var(--brand); }
+    .identities dd, .certificate-facts dd { min-width:0; max-width:100%; margin:0; font-size:9pt; }
     .quantity-list { display:flex; flex-wrap:wrap; gap:0 .4em; }
     .quantity-entry, .quantity-pair { display:inline-flex; align-items:baseline; gap:.32em; white-space:nowrap; }
     .quantity-entry bdi { overflow-wrap:normal; }
     .quantity-total .quantity-list { justify-content:flex-end; column-gap:.65em; font-size:var(--value-size,9pt); }
-    .compact-identity { direction:ltr; align-items:center; justify-content:space-between; gap:4mm; padding-block-end:2mm; border-block-end:1pt solid var(--line); }
+    .compact-identity { direction:ltr; align-items:center; justify-content:space-between; gap:4mm; padding-block-end:1mm; border-block-end:1pt solid var(--line); }
     .compact-reference { display:flex; align-items:center; gap:3mm; font-family:var(--heading-body); }
     .compact-identity strong { font-size: 12pt; }
     .compact-identity, .continued .full-identity { display: none; }
@@ -256,6 +265,7 @@ function buildCertificateHtml(model) {
     ${pageTemplate('detail', labels.detail, tableOpening(columns), model)}
     ${pageTemplate('receipts', '', '', model)}
     ${pageTemplate('settlement', '', '', model)}
+    ${pageTemplate('signoff-page', '', '', model)}
     ${sourceTemplate('cover-rows', cover)}${sourceTemplate('detail-rows', detailRows(model))}
     <template id="settlement-block">${financeBlock(model)}</template>
     <template id="receipts-block"><section class="payment-details"><h2>${escapeHtml(labels.receipts)}</h2>${tableOpening(receiptColumns,receiptRows.join(''))}</section></template>
@@ -268,7 +278,7 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
   const rootStyle = getComputedStyle(document.documentElement);
   const font = (key) => rootStyle.getPropertyValue(key).trim();
   await Promise.all([document.fonts.load(`9pt ${font('--body-font')}`, 'العربية English'),
-    document.fonts.load(`bold 19pt ${font('--heading')}`, 'العربية English')]);
+    document.fonts.load(`bold 17pt ${font('--heading')}`, 'العربية English')]);
   await document.fonts.ready;
   const available = parseFloat(font('--report-width')) * 96 / 25.4;
   const context = document.createElement('canvas').getContext('2d');
@@ -326,7 +336,6 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     const table = document.getElementById(`${id}-block`).content.querySelector('table');
     if (table) fitColumns(table,table);
   }
-  const signoff = document.getElementById('signatures-block').content.firstElementChild;
 
   function makePage(id, continued) {
     const sheet = document.getElementById(id).content.firstElementChild.cloneNode(true);
@@ -353,9 +362,8 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     return units;
   }
 
-  function pagesFor(id, compactFirst = false, firstSignoff = false) {
+  function pagesFor(id, compactFirst = false) {
     let page = makePage(id, compactFirst);
-    if (firstSignoff) page.querySelector('main').append(signoff.cloneNode(true));
     const pages = [page];
     let table = page.querySelector('tbody');
     const headers = new Map();
@@ -366,12 +374,7 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
       table.append(...rows);
       if (!fits(page)) {
         rows.forEach((row) => row.remove());
-        if (!hadRows) {
-          if (!firstSignoff || pages.length > 1) throw new Error('The certificate heading or a work line is too tall for the chosen paper');
-          table.closest('table').remove();
-          page.querySelector('main > h1')?.remove();
-          if (!fits(page)) throw new Error('The certificate heading and sign-off are too tall for the chosen paper');
-        }
+        if (!hadRows) throw new Error('The certificate heading or a work line is too tall for the chosen paper');
         page = makePage(id, true);
         pages.push(page);
         table = page.querySelector('tbody');
@@ -396,8 +399,7 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     skeleton.querySelector('tbody').replaceChildren();
     function startSection(page) {
       const section = skeleton.cloneNode(true);
-      const content = page.querySelector('main');
-      content.insertBefore(section,content.querySelector(':scope > .signoff'));
+      page.querySelector('main').append(section);
       return section;
     }
     let page = pages.at(-1);
@@ -417,14 +419,24 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     }
   }
 
-  let openingPages = outputMode === 'summary_details' ? [] : pagesFor('detail',false,true);
+  let openingPages = outputMode === 'summary_details' ? [] : pagesFor('detail');
   const hasCover = outputMode === 'summary_details' || (measured && openingPages.length > 1 && outputMode !== 'detail_only');
   if (hasCover) {
     openingPages.forEach((page) => page.remove());
-    openingPages = pagesFor('cover',false,true);
+    openingPages = pagesFor('cover');
   }
   appendTableSection('settlement', openingPages);
   if (hasReceipts) appendTableSection('receipts', openingPages);
+
+  const signoff = document.getElementById('signatures-block').content.firstElementChild.cloneNode(true);
+  let closingPage = openingPages.at(-1);
+  closingPage.querySelector('main').append(signoff);
+  if (!fits(closingPage)) {
+    closingPage = makePage('signoff-page', true);
+    openingPages.push(closingPage);
+    closingPage.querySelector('main').append(signoff);
+    if (!fits(closingPage)) throw new Error('The certificate sign-off is too tall for the chosen paper');
+  }
 
   const pages = hasCover ? [...openingPages,...pagesFor('detail',true)] : openingPages;
   for (const [index, page] of pages.entries()) {
