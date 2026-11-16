@@ -20,6 +20,7 @@ const {
   initializeCertificateArtifacts, enqueueCertificateRender, processCertificateRender,
   resumeCertificateRenders, registerCertificateDocumentRoutes,
 } = require("./certificate-documents.cjs");
+const {certificateReportOptions} = require("./certificate-document-model.cjs");
 
 function initializeCertificates(database) {
   database.transaction(() => {
@@ -253,11 +254,15 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     else if (options.group != null) header.group_by = options.group === "1" ? "work_type" : "none";
     else header.group_by = header.group_by ?? settings.group_by;
     header.show_group_subtotals = options.subtotals == null ? (header.show_group_subtotals ?? settings.show_group_subtotals) : options.subtotals === "1";
+    const reportOptions = certificateReportOptions(header,settings);
+    for (const key of Object.keys(reportOptions)) {
+      if (options[key] === "1" || options[key] === "0") reportOptions[key] = options[key] === "1";
+    }
     const cutoff = options.receipts !== "0" && options.collections_through ? date(options.collections_through) : null;
     const paymentDetails = cutoff ? allocationLedger(database, model.project_id, getProfile(database, model.project_id, cutoff), cutoff, {
       locationId:header.location_id || null,
     }) : null;
-    return {...model, header, issuer: {...model.issuer, ...branding()}, prepared_by: user?.display_name || "",
+    return {...model, header, report_options:reportOptions, issuer: {...model.issuer, ...branding()}, prepared_by: user?.display_name || "",
       prepared_at:new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Cairo", dateStyle:"short", timeStyle:"short"}).format(new Date()),
       show_status_watermark: options.watermark !== "0",
       include_receipts: options.receipts == null ? undefined : options.receipts === "1",

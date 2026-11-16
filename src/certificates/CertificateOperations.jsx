@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
-import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, queryString, Status, useDebounce, useResource } from "./shared.jsx";
+import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, queryString, ReportGroupingChecks, Status, useDebounce, useResource } from "./shared.jsx";
 import "./certificates.css";
 
 export function ProjectPicker({ value, onSelect, request, t, disabled }) {
@@ -41,7 +41,13 @@ export function ProjectSettings({ request, project: startProject, canManage, t, 
 function SettingsForm({ project, request, canManage, t, onSaved }) {
   const profile = project.settings || {};
   const settings = profile.settings || {};
-  const [draft, setDraft] = useState(settings);
+  const [draft, setDraft] = useState(() => {
+    const oldGroup = settings.group_by ?? (settings.group_work_types ? "work_type" : "none");
+    return {...settings,group_work_types:oldGroup === "work_type",
+      show_building_subtotals:settings.show_building_subtotals ?? (settings.show_group_subtotals && oldGroup === "building"),
+      show_unit_subtotals:settings.show_unit_subtotals ?? (settings.show_group_subtotals && oldGroup === "unit"),
+      show_work_type_subtotals:settings.show_work_type_subtotals ?? (settings.show_group_subtotals && oldGroup === "work_type")};
+  });
   const [ruleDraft, setRuleDraft] = useState(() => (profile.rules || []).map((rule) => ({ ...rule, key: newKey() })));
   const [types, setTypes] = useState(() => (settings.work_types || project.work_types || []).map((type) => typeof type === "string" ? type : optionLabel(type)).filter(Boolean).join("\n"));
   const [signatures, setSignatures] = useState(() => (settings.signatures || []).map((person) => ({...person, key: newKey()})));
@@ -56,7 +62,6 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
   const advanceRule = ruleDraft.find((rule) => rule.category === "advance_recovery");
   const taxRules = ruleDraft.filter((rule) => rule.category !== "advance_recovery" ||
     rule.basis === "running" || rule.amount != null || rule.cap != null);
-  const grouping = draft.group_by ?? (draft.group_work_types ? "work_type" : "none");
 
   function updateAdvanceRate(rate) {
     setRuleDraft((rules) => {
@@ -97,13 +102,10 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
         <Field label={t("أساس احتساب التحصيلات", "Collection basis")}><select value={draft.collections_basis ?? ""} onChange={(event) => update("collections_basis", event.target.value)}><option value="">{t("موروث", "Inherit")}</option><option value="received">{t("تاريخ الاستلام", "Receipt date")}</option><option value="cleared">{t("تاريخ التحصيل", "Clearance date")}</option></select></Field>
         <Field label={t("الإخراج الافتراضي", "Default output")}><select value={draft.output_mode ?? ""} onChange={(event) => update("output_mode", event.target.value)}><option value="">{t("موروث", "Inherit")}</option><option value="auto">{t("تلقائي", "Automatic")}</option><option value="cover">{t("ملخص وتفاصيل", "Summary and details")}</option><option value="detail">{t("التفاصيل فقط", "Details only")}</option></select></Field>
         <Field label={t("أنواع الأعمال بالترتيب، نوع في كل سطر", "Work types in order, one per line")} className="pc-span"><textarea rows={3} value={types} onChange={(event) => setTypes(event.target.value)} /></Field>
-        <div className="pc-choice-grid pc-span">
-          <Field label={t("تجميع التقرير", "Report grouping")}><select value={grouping} onChange={(event) => update("group_by",event.target.value)}>
-            <option value="none">{t("دون تجميع","No grouping")}</option><option value="unit">{t("حسب الوحدة","By unit")}</option>
-            <option value="building">{t("حسب المبنى","By building")}</option><option value="work_type">{t("حسب نوع الأعمال","By work type")}</option>
-          </select></Field>
-          <label className="pc-check"><input type="checkbox" disabled={grouping === "none"} checked={Boolean(draft.show_group_subtotals)} onChange={(event) => update("show_group_subtotals", event.target.checked)} />{t("عرض الإجماليات الفرعية", "Show group subtotals")}</label>
-        </div>
+        <ReportGroupingChecks values={draft} t={t} onChange={(key,checked) => {
+          if (key === "group_work_types") setDraft((current) => ({...current,[key]:checked,group_by:checked ? "work_type" : "none"}));
+          else update(key,checked);
+        }} />
       </div>
     </fieldset>
     <fieldset disabled={!canManage || busy}>

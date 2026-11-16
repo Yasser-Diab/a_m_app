@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, ExternalLink, Printer } from "lucide-react";
-import { certificateApi, Dialog, Field, Problem, queryString } from "./shared.jsx";
+import { certificateApi, Dialog, Field, Problem, queryString, ReportGroupingChecks } from "./shared.jsx";
 
 function outputFileName(response, fallback) {
   const header = response.headers.get("Content-Disposition") || "";
@@ -43,6 +43,7 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [downloaded, setDownloaded] = useState(null);
   const output = loaded?.variant === variant && loaded.options === options ? loaded : null;
+  const grouping = {...certificate.report_options,...Object.fromEntries(Object.entries(options).map(([key,value]) => [key,value === "1"]))};
 
   useEffect(() => {
     const controller = new AbortController();
@@ -123,16 +124,6 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
         setError(null);
         setOptions({ ...options, watermark: event.target.value });
       }}><option value="1">{t("إظهار", "Show")}</option><option value="0">{t("إخفاء", "Hide")}</option></select></Field>
-      <Field label={t("تجميع الأعمال", "Work grouping")}><select value={options.group_by ?? ""} onChange={(event) => {
-        setError(null); setOptions({ ...options, group_by:event.target.value });
-      }}><option value="">{t("الافتراضي", "Default")}</option><option value="none">{t("دون تجميع", "No grouping")}</option>
-        <option value="unit">{t("حسب الوحدة", "By unit")}</option><option value="building">{t("حسب المبنى", "By building")}</option>
-        <option value="work_type">{t("حسب نوع الأعمال", "By work type")}</option>
-      </select></Field>
-      <Field label={t("الإجماليات الفرعية", "Group subtotals")}><select disabled={options.group_by === "none"} value={options.subtotals ?? ""}
-        onChange={(event) => { setError(null); setOptions({ ...options, subtotals:event.target.value }); }}>
-        <option value="">{t("الافتراضي", "Default")}</option><option value="1">{t("إظهار", "Show")}</option><option value="0">{t("إخفاء", "Hide")}</option>
-      </select></Field>
       {canInternal && <Field label={t("تفاصيل الدفعات", "Payment details")}><select value={options.receipts ?? ""} onChange={(event) => {
         setError(null);
         setOptions({ ...options, receipts: event.target.value, collections_through: "" });
@@ -140,6 +131,9 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
       {(options.receipts === "1" || (options.receipts !== "0" && variant === "internal")) &&
         <Field label={t("تفاصيل الدفعات حتى", "Payment details through")}><input type="date" lang="en-GB" value={options.collections_through || ""}
           onChange={(event) => { setError(null); setOptions({ ...options, collections_through: event.target.value }); }} /></Field>}
+      <ReportGroupingChecks values={grouping} t={t} onChange={(key,checked) => {
+        setError(null); setOptions((current) => ({...current,[key]:checked ? "1" : "0"}));
+      }} />
     </div>
     <div className="pc-toolbar pc-output-actions">
       {output?.pages && <span className="pc-chip">{t("الصفحات", "Pages")} <bdi>&nbsp;{output.pages}</bdi></span>}

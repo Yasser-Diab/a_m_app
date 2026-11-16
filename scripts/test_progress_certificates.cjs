@@ -285,8 +285,10 @@ async function main() {
 
     const secondProject = cert + "/projects/" + other.id;
     const rule = await api(secondProject + "/settings",token,"PUT",{expected_version:0,effective_at:"2026-01-01",
-      settings:{group_by:"unit",show_group_subtotals:true},rules:[{category:"advance_recovery",rate:25}]});
+      settings:{group_by:"unit",show_group_subtotals:true,show_building_subtotals:true,show_unit_subtotals:true},rules:[{category:"advance_recovery",rate:25}]});
     assert.equal(rule.settings.group_by,"unit");
+    assert.equal(rule.settings.show_building_subtotals,true);
+    assert.equal(rule.settings.show_unit_subtotals,true);
     const recoverable = await api(secondProject + "/collections",token,"POST",{kind:"advance",amount:100,received_at:date},201);
     db.run("INSERT INTO cert_series (project_id,reference,next_number) VALUES (?,'',4)",[other.id]);
     const multiPlace = await api(cert,token,"POST",{header,project_id:other.id,lines:[
@@ -299,6 +301,8 @@ async function main() {
     assert.equal(multiPlace.totals.advance_recovery,100);
     assert.equal(multiPlace.totals.advance_remaining,0);
     assert.equal(multiPlace.header.group_by,"unit");
+    assert.equal(multiPlace.report_options.show_building_subtotals,true);
+    assert.equal(multiPlace.report_options.show_unit_subtotals,true);
     assert.deepEqual(multiPlace.lines.map((line) => [line.building_unit,line.floor_apartment]),[
       ["Tower 1","Apartment 3"],["Tower 1","Apartment 4"],["Tower 2","Apartment 3"],
     ]);

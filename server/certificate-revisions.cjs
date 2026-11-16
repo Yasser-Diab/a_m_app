@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const {certificateReportOptions} = require("./certificate-document-model.cjs");
 const {audit, date, encode, fail, idOf, lookup, nextCertificateId, now, parse, setting, str, today} = require("./certificate-access.cjs");
 const {getProject, getCustomer, getProfile, projectLocations, cleanRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, DATE_FLOOR} = require("./certificate-ledger.cjs");
@@ -25,6 +26,10 @@ function normalizeHeader(input = {}, project, profile, originalType) {
   };
   if (["none","building","unit","work_type"].includes(input.group_by ?? profile.settings.group_by))
     header.group_by = input.group_by ?? profile.settings.group_by;
+  for (const key of ["show_building_subtotals", "show_unit_subtotals", "show_work_type_subtotals"]) {
+    const flag = input[key] ?? profile.settings[key];
+    if (typeof flag === "boolean") header[key] = flag;
+  }
   if (input.optional_fields && typeof input.optional_fields === "object") {
     for (const key of ["customer_code","customer_address","tax_no","customer_tax_no","customer_contact","project_code",
       "project_address","contract_ref","contract_date","location","currency","notes"]) {
@@ -412,7 +417,8 @@ function runAction(database, row, body, user, enqueueRender) {
 
 function forAccess(database, row, access) {
   const raw = certificateDocumentInput(database, row);
-  const result = {...raw, certificate_number:certificateNumber(database,row)};
+  const result = {...raw, certificate_number:certificateNumber(database,row),
+    report_options:certificateReportOptions(raw.header,getProfile(database,row.project_id).settings)};
   if (row.status === "approved" && !row.snapshot_json) result.can_return_legacy_approval = true;
   const collectionAccess = access.capabilities.includes("view_collections");
   const auditAccess = access.capabilities.includes("view_audit");

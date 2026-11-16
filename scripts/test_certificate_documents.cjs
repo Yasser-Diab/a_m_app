@@ -134,7 +134,7 @@ async function main() {
   const columnIndex = works.getRow(1).values.indexOf(unitModel.labels.current);
   assert.equal(works.getRow(2).getCell(1).value,'Tower A');
   assert.equal(works.getRow(3).getCell(1).value,'Apartment 1');
-  assert.equal(works.getRow(3).getCell(1).border.left.style,'medium');
+  assert.equal(works.getRow(3).getCell(1).border.left.style,'thin');
   assert.equal(works.getRow(6).getCell(columnIndex).value,400);
   byUnit.header.group_by = 'building';
   assert.deepEqual(buildCertificateDocument(byUnit).coverRows.map(({name}) => name),['Tower A','Tower B']);
@@ -144,6 +144,15 @@ async function main() {
   assert.equal(noGroupsSubtotal.detailGroups[0].name,'Building works');
   assert.equal(noGroupsSubtotal.showGroupSubtotals,false);
   assert.equal(noGroupsSubtotal.coverRows.length,0);
+
+  for (const building of [false,true]) for (const unit of [false,true]) {
+    const grouped = buildCertificateDocument({...byUnit,report_options:{group_work_types:true,show_building_subtotals:building,show_unit_subtotals:unit}});
+    assert.deepEqual(grouped.detailBands.filter(({kind}) => kind === 'subtotal').map(({path}) => path.at(-1).kind),
+      [unit && 'unit',building && 'building',unit && 'unit',building && 'building'].filter(Boolean));
+    assert.equal(grouped.detailBands.find(({kind}) => kind === 'line').path.length,3);
+    assert.equal(grouped.workTotals.current,600);
+    if (building && unit) assert.deepEqual(grouped.coverRows.map(({name}) => name),['Tower A','Apartment 1','Tower B','Apartment 1']);
+  }
 
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'certificate-document-test-'));
   const schema = path.join(directory, 'schema.sql');

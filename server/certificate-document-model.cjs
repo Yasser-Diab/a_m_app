@@ -2,7 +2,9 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 5;
+const MODEL_VERSION = 6;
+const reportColors = {text:'#183148', muted:'#3c5266', header:'#e5eef1', headerLine:'#b5cbd1', group:'#f3f7f8', groupText:'#26525a',
+  subtotal:'#edf4f5', building:'#98c3e0', unit:'#acd3ac', workType:'#a2cbc6'};
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
 
 const labels = {
@@ -174,11 +176,22 @@ function pricedUnit(value, locale, mode) {
 const dimensionFactors = {mm:0.001,cm:0.01,m:1};
 const dimensionNames = {mm:'مم',cm:'سم',m:'م'};
 
-function detailBands(lines, groupBy, subtotal, moneyKeys) {
+function certificateReportOptions(header = {}, settings = {}) {
+  const groupBy = header.group_by ?? settings.group_by ?? ((header.group_work_types ?? settings.group_work_types) ? 'work_type' : 'none');
+  const subtotal = header.show_group_subtotals ?? settings.show_group_subtotals;
+  return {
+    group_work_types:groupBy === 'work_type',
+    show_building_subtotals:header.show_building_subtotals ?? settings.show_building_subtotals ?? (subtotal === true && groupBy === 'building'),
+    show_unit_subtotals:header.show_unit_subtotals ?? settings.show_unit_subtotals ?? (subtotal === true && groupBy === 'unit'),
+    show_work_type_subtotals:header.show_work_type_subtotals ?? settings.show_work_type_subtotals ?? (subtotal === true && groupBy === 'work_type'),
+  };
+}
+
+function detailBands(lines, options, moneyKeys) {
   const root = {items:[],children:new Map(),lines:[]};
   for (const line of lines) {
     const path = [['building',line.building_unit],['unit',line.floor_apartment],
-      ['work_type',groupBy === 'work_type' ? line.work_type : '']].filter(([,name]) => name);
+      ['work_type',options.group_work_types ? line.work_type : '']].filter(([,name]) => name);
     let parent = root;
     for (const [kind,name] of path) {
       const key = `${kind}:${name.toLocaleLowerCase()}`;
@@ -196,7 +209,7 @@ function detailBands(lines, groupBy, subtotal, moneyKeys) {
     if (node.kind === 'line') return [{...node,path:ancestors}];
     const path = node.kind ? [...ancestors,{kind:node.kind,name:node.name}] : ancestors;
     return [...(node.kind ? [{kind:'group',path}] : []), ...node.items.flatMap((item) => flatten(item,path)),
-      ...(subtotal && node.kind === groupBy ? [{kind:'subtotal',path,totals:financialRollup(node.lines,moneyKeys)}] : [])];
+      ...(node.kind && options[`show_${node.kind}_subtotals`] ? [{kind:'subtotal',path,totals:financialRollup(node.lines,moneyKeys)}] : [])];
   }
   return flatten(root,[]);
 }
@@ -209,7 +222,7 @@ function quantitySummary(lines) {
     totals.set(unit, (totals.get(unit) || 0) + line.billed_quantity);
   }
   const format = new Intl.NumberFormat('en-US',{maximumFractionDigits:6});
-  return [...totals].map(([unit, value]) => `${format.format(value)} ${unit}`).join(' + ');
+  return [...totals].map(([unit, value]) => ({unit, value:format.format(value)}));
 }
 
 function certificateQr({issuer, shortName, issuedOn, quantity, due, currency, customer, project}) {
@@ -240,6 +253,10 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     building_unit: locale === 'ar' ? 'المبنى' : 'Building',
     floor_apartment: locale === 'ar' ? 'الوحدة / الشقة' : 'Unit / apartment',
     subtotal: locale === 'ar' ? 'الإجمالي الفرعي' : 'Subtotal',
+    group: locale === 'ar' ? 'المجموعة' : 'Group',
+    building_subtotal: locale === 'ar' ? 'إجمالي المبنى' : 'Building subtotal',
+    unit_subtotal: locale === 'ar' ? 'إجمالي الوحدة' : 'Unit subtotal',
+    work_type_subtotal: locale === 'ar' ? 'إجمالي نوع الأعمال' : 'Work type subtotal',
     advance_remaining: locale === 'ar' ? 'متبقي الدفعة المقدمة' : 'Advance remaining',
   };
   const project = input.project || {};
@@ -288,7 +305,9 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const moneyKeys = comparable ? ['last_current', 'previous', 'current', 'cumulative'] : ['previous', 'current', 'cumulative'];
   const columns = detailColumns(lines, moneyKeys, t, dimensionLabel);
   const groupBy = header.group_by ?? (header.group_work_types ? 'work_type' : 'none');
-  const showGroupSubtotals = groupBy !== 'none' && Boolean(header.show_group_subtotals);
+  const grouping = input.report_options || certificateReportOptions(header);
+  const bands = detailBands(lines,grouping,moneyKeys);
+  const showGroupSubtotals = bands.some((row) => row.kind === 'subtotal');
   const groups = new Map();
   for (const line of lines) {
     const name = groupBy === 'unit' && line.floor_apartment ? [line.building_unit,line.floor_apartment].filter(Boolean).join(' / ') :
@@ -360,7 +379,8 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   })) : [];
 
   const issueDate = text(input.issued_at || header.issue_date || (historical ? header.work_to : '')).slice(0,10);
-  const quantity = quantitySummary(lines);
+  const quantities = quantitySummary(lines);
+  const quantity = quantities.map(({value,unit}) => `${value} ${unit}`).join(' + ');
   const customerName = nameForPrint(customer, locale);
   const projectName = nameForPrint(project, locale);
   const shortName = text(issuer.companyAbbreviation || issuer.abbreviation);
@@ -385,7 +405,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       metadata('collection_cutoff', header.collection_cutoff || (historical && receipts.length ? header.work_to : ''), { isolated: true }),
       metadata('payment_details_through', receipts.length ? input.payment_details_through : '', {isolated:true}),
       metadata('currency', currency, { isolated: true }),
-      metadata('total_quantity', quantity, { isolated: true }),
+      {...metadata('total_quantity', quantity, { wide: true, isolated: true }), quantities},
       metadata(totals.cumulative_payable < 0 ? 'cumulative_credit' : 'cumulative_payable',
         totals.cumulative_payable == null ? '' : `${currency} ${printMoney.format(Math.abs(totals.cumulative_payable))}`,
         {isolated:true,wide:true,required:true}),
@@ -397,12 +417,20 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const outputMode = outputAliases[header.output_mode] || header.output_mode || 'auto';
   const measured = lines.some((line) => line.mode === 'area' || line.mode === 'linear');
 
-  const palette = {companyNameColor:'#183148',lineColor:'#265e68',tableHeaderBg:'#e5eef1',tableHeaderText:'#183148',
-    tableBodyText:'#183148',tableOddBg:'#ffffff',tableEvenBg:'#f8fafb'};
+  const palette = {companyNameColor:'#183148',lineColor:'#265e68'};
   for (const key of Object.keys(palette)) {
     if (/^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(issuer[key])) palette[key] = issuer[key];
   }
   const font = (value) => /^[a-z0-9 ,"'-]+$/i.test(value || '') ? value : 'Arial,Tahoma,sans-serif';
+  const subtotalKinds = ['building','unit','work_type'].filter((kind) => grouping[`show_${kind}_subtotals`] && (kind !== 'work_type' || grouping.group_work_types));
+  const groupTotals = new Map(bands.filter((row) => row.kind === 'subtotal').map(({path,totals}) => [JSON.stringify(path),totals]));
+  const coverRows = subtotalKinds.length > 1 ? bands.filter((row) => row.kind === 'group' && groupTotals.has(JSON.stringify(row.path)))
+    .map(({path}) => ({name:path.at(-1).name,path,...groupTotals.get(JSON.stringify(path))})) :
+    subtotalKinds.length === 1 && (subtotalKinds[0] !== 'work_type' || groupBy !== 'work_type') ?
+      bands.filter(({kind,path}) => kind === 'subtotal' && path.at(-1).kind === subtotalKinds[0])
+        .map(({path,totals}) => ({name:path.map(({name}) => name).join(' / '),path,...totals})) :
+    showGroupSubtotals || (header.group_by == null && grouping.group_work_types)
+      ? detailGroups.filter(({name}) => name).map(({name,totals}) => ({name,path:[{kind:'work_type',name}],...totals})) : [];
   return {
     modelVersion: MODEL_VERSION, locale, direction: locale === 'ar' ? 'rtl' : 'ltr', labels: t,
     variant, issued, historical, approved, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',
@@ -422,12 +450,10 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       customer:customerName,project:projectName}),
     signatures: (input.rule_settings?.signatures || []).map((person) => ({ name: text(person.name), title: text(person.title) })).filter((person) => person.name),
     showGroupSubtotals,
-    groupLabel: t[groupBy === 'building' ? 'building_unit' : groupBy === 'unit' ? 'floor_apartment' : 'work_type'],
+    groupLabel: subtotalKinds.length > 1 ? t.group : t[({building:'building_unit',unit:'floor_apartment'})[subtotalKinds[0] || groupBy] || 'work_type'],
     identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
-    detailGroups, detailBands:detailBands(lines,groupBy,showGroupSubtotals,moneyKeys),
-    coverRows: showGroupSubtotals || (header.group_by == null && header.group_work_types)
-      ? detailGroups.filter(({name}) => name).map(({name,totals}) => ({name,...totals})) : [],
+    detailGroups, detailBands:bands, coverRows,
     workTotals: financialRollup(lines, moneyKeys), financeRows,
   };
 }
@@ -439,4 +465,4 @@ function documentFilename(model, extension) {
   return `${name || 'Certificate'}.${extension}`;
 }
 
-module.exports = { buildCertificateDocument, documentFilename, MODEL_VERSION };
+module.exports = { buildCertificateDocument, certificateReportOptions, documentFilename, MODEL_VERSION, reportColors };

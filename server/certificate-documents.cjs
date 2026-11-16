@@ -6,7 +6,7 @@ const path = require('node:path');
 const { promisify } = require('node:util');
 const electron = require('electron');
 const ExcelJS = require('exceljs');
-const { buildCertificateDocument, documentFilename } = require('./certificate-document-model.cjs');
+const { buildCertificateDocument, documentFilename, reportColors } = require('./certificate-document-model.cjs');
 const { buildCertificateHtml } = require('./certificate-document-html.cjs');
 
 const execFileAsync = promisify(execFile);
@@ -53,15 +53,14 @@ async function renderCertificatePdf(model) {
   }
 }
 
+function color(value) {
+  const hex = value.slice(1);
+  return { argb:'FF' + (hex.length === 3 ? hex.split('').map((character) => character.repeat(2)).join('') : hex).toUpperCase() };
+}
+
 function addWorksheet(workbook, model, name, columns, rows) {
-  const sheet = workbook.addWorksheet(name, { views: [{ rightToLeft: model.direction === 'rtl', state: 'frozen', ySplit: 1 }] });
-  const color = (value, fallback) => {
-    const hex = (value || fallback).slice(1);
-    return { argb: 'FF' + (hex.length === 3 ? hex.split('').map((character) => character.repeat(2)).join('') : hex).toUpperCase() };
-  };
-  const style = model.style || {};
-  const bodyFont = (style.bodyFont || 'Arial').split(',')[0].replace(/"/g,'');
-  const fill = (value, fallback) => ({ type: 'pattern', pattern: 'solid', fgColor: color(value,fallback) });
+  const sheet = workbook.addWorksheet(name, { views: [{ rightToLeft:model.direction === 'rtl', showGridLines:false, state:'frozen', ySplit:1 }] });
+  const fill = (value) => ({ type:'pattern', pattern:'solid', fgColor:color(value) });
   const border = model.direction === 'rtl' ? 'right' : 'left';
   const formatters = {money:new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
     value:new Intl.NumberFormat('en-US',{maximumFractionDigits:6})};
@@ -78,9 +77,9 @@ function addWorksheet(workbook, model, name, columns, rows) {
   }));
   sheet.getRow(1).height = 32;
   sheet.getRow(1).eachCell((cell) => {
-    cell.font = { name:bodyFont, bold: true, color: color(style.tableHeaderText,'#183148') };
-    cell.fill = fill(style.tableHeaderBg,'#e5eef1');
-    cell.border = {bottom:{style:'thin',color:color(style.lineColor,'#265e68')}};
+    cell.font = { name:'Arial',bold:true,color:color(reportColors.text) };
+    cell.fill = fill(reportColors.header);
+    cell.border = {bottom:{style:'thin',color:color(reportColors.headerLine)}};
     cell.alignment = { wrapText: true, vertical: 'middle' };
   });
   for (const row of rows) {
@@ -88,12 +87,17 @@ function addWorksheet(workbook, model, name, columns, rows) {
     if (row.groupName) sheet.mergeCells(entry.number,1,entry.number,columns.length);
     for (let index = 1; index <= columns.length; index++) {
       const cell = entry.getCell(index);
-      cell.font = { name:bodyFont, color:color(style.tableBodyText,'#183148'), bold:Boolean(row.groupName || row.subtotal) };
-      cell.fill = entry.number % 2 ? fill(style.tableOddBg,'#ffffff') : fill(style.tableEvenBg,'#f8fafb');
-      cell.border = {bottom:{style:'hair', color:color(style.lineColor,'#265e68')}};
+      cell.font = { name:'Arial',color:color(row.groupName ? reportColors.groupText : reportColors.text),bold:Boolean(row.groupName || row.subtotal) };
+      if (row.groupName || row.subtotal) cell.fill = fill(row.groupName ? reportColors.group : reportColors.subtotal);
     }
-    if (row.band) entry.getCell(1).border = { ...entry.getCell(1).border,
-      [border]:{style:row.band === 'unit' ? 'medium' : 'thin',color:color(style.lineColor,'#265e68') } };
+    if (row.band) {
+      const first = entry.getCell(1);
+      first.style = {...first.style,border:{[border]:{style:'thin',color:color(reportColors[row.band])}}};
+    }
+    if (row.workBand) {
+      const last = entry.getCell(columns.length);
+      last.style = {...last.style,border:{[border === 'left' ? 'right' : 'left']:{style:'thin',color:color(reportColors.workType)}}};
+    }
   }
   return sheet;
 }
@@ -102,12 +106,18 @@ async function writeCertificateXlsx(model) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = model.issuer.name;
   workbook.title = model.officialNumber || model.watermark;
-  const identity = workbook.addWorksheet(model.labels.certificate, { views: [{ rightToLeft: model.direction === 'rtl' }] });
+  const rtl = model.direction === 'rtl';
+  const identity = workbook.addWorksheet(model.labels.certificate, { views: [{ rightToLeft:rtl,showGridLines:false }] });
   identity.columns = [{ width: 27 }, { width: 70 }];
-  identity.addRow([model.issuer.name]);
+  const heading = identity.addRow([model.issuer.name]);
+  heading.font = {name:(model.style?.headingFont || 'Arial').split(',')[0].replace(/"/g,''),bold:true,color:color(model.style?.companyNameColor || reportColors.text)};
   if (model.issuer.alternate) identity.addRow([model.issuer.alternate]);
   if (model.watermark) identity.addRow([model.watermark]);
-  for (const group of model.fieldGroups) for (const field of group) identity.addRow([field.label, field.value]);
+  for (const group of model.fieldGroups) for (const field of group) {
+    const value = field.quantities?.length ? field.quantities.map(({value:number,unit}) =>
+      `${rtl ? '\u2067' : '\u2066'}\u2066${number}\u2069 \u2068${unit}\u2069\u2069`).join(' + ') : field.value;
+    identity.addRow([field.label,value]);
+  }
   if (model.preparedBy) identity.addRow([model.labels.prepared, model.preparedBy]);
   if (model.preparedAt) identity.addRow(['',model.preparedAt]);
   if (model.issuer.website) identity.addRow([model.issuer.website, model.issuer.shortName]);
@@ -115,9 +125,10 @@ async function writeCertificateXlsx(model) {
   const type = { key: 'work_type', label: model.labels.work_type, weight: 18, kind: 'text' };
   const detail = model.detailBands?.map(({kind,path,line,totals}) => {
     const band = path.some((group) => group.kind === 'unit') ? 'unit' : path.some((group) => group.kind === 'building') ? 'building' : '';
-    if (kind === 'group') return {groupName:path.at(-1).name,band};
-    if (kind === 'subtotal') return {description:model.labels.subtotal,subtotal:true,...totals,band};
-    return {...line,band};
+    const workBand = path.some((group) => group.kind === 'work_type');
+    if (kind === 'group') return {groupName:path.at(-1).name,band,workBand};
+    if (kind === 'subtotal') return {description:model.labels[`${path.at(-1).kind}_subtotal`] || model.labels.subtotal,subtotal:true,...totals,band,workBand};
+    return {...line,band,workBand};
   }) ?? model.detailGroups?.flatMap((group) => [
     ...group.lines,
     ...(model.showGroupSubtotals && group.name ? [{description:`${model.labels.subtotal} · ${group.name}`,...group.totals}] : []),

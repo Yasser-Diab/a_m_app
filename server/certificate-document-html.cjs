@@ -1,3 +1,5 @@
+const {reportColors} = require('./certificate-document-model.cjs');
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -33,6 +35,14 @@ function subtotalRow(values, columns, moneyKeys, title, attributes = '') {
   return `<tr ${attributes} class="subtotal"><th scope="row" colspan="${firstNumeric}">${escapeHtml(title)}</th>${columns.slice(firstNumeric).map(({ key }) => `<td class="number" data-number="${key}">${amount(values[key])}</td>`).join('')}</tr>`;
 }
 
+function identityValue(field) {
+  if (field.quantities?.length) {
+    return `<span class="quantity-list">${field.quantities.map(({value,unit},index) => `<span class="quantity-entry">
+      ${index ? '<span aria-hidden="true">+</span>' : ''}<span class="quantity-pair"><bdi dir="ltr">${escapeHtml(value)}</bdi><bdi dir="auto">${escapeHtml(unit)}</bdi></span></span>`).join('')}</span>`;
+  }
+  return `<bdi dir="${field.isolated ? 'ltr' : 'auto'}">${escapeHtml(field.value)}</bdi>`;
+}
+
 function fullIdentity(model) {
   const { issuer, fieldGroups, qr } = model;
   return `<header class="full-identity">
@@ -43,7 +53,7 @@ function fullIdentity(model) {
       ${qr ? `<img class="certificate-qr" src="${escapeHtml(qr)}" alt="Certificate QR code">` : ''}
     </div>
     <div class="identities" style="--groups:${Math.max(1, fieldGroups.length)}">
-      ${fieldGroups.map((group) => `<dl>${group.map((field) => `<div${field.wide ? ' class="wide"' : ''}><dt>${escapeHtml(field.label)}</dt><dd><bdi dir="${field.isolated ? 'ltr' : 'auto'}">${escapeHtml(field.value)}</bdi></dd></div>`).join('')}</dl>`).join('')}
+      ${fieldGroups.map((group) => `<dl>${group.map((field) => `<div${field.wide ? ' class="wide"' : ''}><dt>${escapeHtml(field.label)}</dt><dd>${identityValue(field)}</dd></div>`).join('')}</dl>`).join('')}
     </div></header>`;
 }
 
@@ -109,6 +119,10 @@ function splitWideLine(line, columns, landscape) {
   return fragments;
 }
 
+function bandAttributes(path) {
+  return path.map(({kind}) => `data-band-${kind.replace('_','-')}="true"`).join(' ');
+}
+
 function detailRows(model) {
   const { columns, detailGroups, labels, moneyKeys, workTotals, landscape, showGroupSubtotals } = model;
   const bands = model.detailBands ?? detailGroups.flatMap(({name,lines,totals}) => {
@@ -118,10 +132,9 @@ function detailRows(model) {
   });
   if (!bands.length) return [`<tr><td class="empty" colspan="${columns.length}">${escapeHtml(labels.no_lines)}</td></tr>`];
   return [...bands.flatMap(({kind,path,line,totals},index) => {
-    const band = path.some((group) => group.kind === 'unit') ? 'unit' : path.some((group) => group.kind === 'building') ? 'building' : '';
-    const attributes = `data-path="${escapeHtml(JSON.stringify(path))}" data-band="${band}"`;
+    const attributes = `data-path="${escapeHtml(JSON.stringify(path))}" ${bandAttributes(path)}`;
     if (kind === 'group') return [`<tr class="group group-${path.at(-1).kind}" ${attributes} data-group-row="true" data-keep-next="true"><th scope="rowgroup" colspan="${columns.length}"><bdi dir="auto">${escapeHtml(path.at(-1).name)}</bdi></th></tr>`];
-    if (kind === 'subtotal') return [subtotalRow(totals,columns,moneyKeys,labels.subtotal,attributes + (bands[index+1]?.kind === 'subtotal' ? ' data-keep-next="true"' : ''))];
+    if (kind === 'subtotal') return [subtotalRow(totals,columns,moneyKeys,labels[`${path.at(-1).kind}_subtotal`] || labels.subtotal,attributes + (bands[index+1]?.kind === 'subtotal' ? ' data-keep-next="true"' : ''))];
     const fragments = splitWideLine(line,columns,landscape);
     return fragments.map((fragment,i) => `<tr ${attributes}${i === fragments.length-1 && bands[index+1]?.kind === 'subtotal' ? ' data-keep-next="true"' : ''}>${rowCells(fragment,columns)}</tr>`);
   }), subtotalRow(workTotals, columns, moneyKeys, labels.total)];
@@ -134,7 +147,7 @@ function buildCertificateHtml(model) {
   const size = paper === 'Letter' ? [215.9, 279.4] : [210, 297];
   const [width, height] = landscape ? size.toReversed() : size;
   const style = model.style || {};
-  const cover = coverRows.map((row) => `<tr>${rowCells(row, coverColumns)}</tr>`);
+  const cover = coverRows.map((row) => `<tr ${bandAttributes(row.path || [])}>${rowCells(row, coverColumns)}</tr>`);
   cover.push(subtotalRow(workTotals, coverColumns, moneyKeys, labels.total));
   const receiptRows = model.receipts.map((row) => `<tr>${rowCells(row, receiptColumns)}</tr>`);
   return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="utf-8">
@@ -142,11 +155,13 @@ function buildCertificateHtml(model) {
     <title>${escapeHtml(model.officialNumber || model.watermark)}</title><style>
     @page { size: ${width}mm ${height}mm; margin: 0; }
     * { box-sizing: border-box; }
-    :root { --brand:${style.companyNameColor || '#183148'}; --line:${style.lineColor || '#265e68'}; --head-bg:${style.tableHeaderBg || '#e5eef1'};
-      --head-text:${style.tableHeaderText || '#183148'}; --body-text:${style.tableBodyText || '#183148'}; --odd:${style.tableOddBg || '#fff'}; --even:${style.tableEvenBg || '#f8fafb'};
-      --heading:${style.headingFont || 'Arial,Tahoma,sans-serif'}; --body-font:${style.bodyFont || 'Arial,Tahoma,sans-serif'};
-      --report-width:${width - 26}mm; --soft-line:color-mix(in srgb,var(--line) 43%,white); }
-    html, body { margin: 0; padding: 0; background: white; color: var(--body-text); }
+    :root { --brand:${style.companyNameColor || reportColors.text}; --line:${style.lineColor || '#265e68'};
+      --heading:${style.headingFont || 'Arial,Tahoma,sans-serif'}; --heading-body:${style.bodyFont || 'Arial,Tahoma,sans-serif'};
+      --body-font:Arial,Tahoma,sans-serif; --report-width:${width - 26}mm;
+      --building-band:${reportColors.building}; --unit-band:${reportColors.unit};
+      --work-band:color-mix(in srgb,var(--building-band),var(--unit-band)); --opposite-x:-1px; }
+    :root[dir="rtl"] { --opposite-x:1px; }
+    html, body { margin: 0; padding: 0; background: white; color: ${reportColors.text}; }
     body { font: 10pt/1.36 var(--body-font); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     .sheet { position: relative; isolation: isolate; width: ${width}mm; height: ${height - 0.6}mm; padding: 10mm 13mm 9mm; display: flex; flex-direction: column; }
     .sheet + .sheet { break-before: page; }
@@ -158,55 +173,59 @@ function buildCertificateHtml(model) {
     .issuer img.certificate-qr { position: absolute; left: 0; top: 0; }
     .issuer strong, .compact-identity strong, h1, h2 { font-family:var(--heading); color:var(--brand); }
     .issuer strong { display: block; font-size: 19pt; line-height: 1.15; letter-spacing: -0.3pt; }
-    .issuer-details { color: var(--body-text); margin-block-start: 1mm; }
+    .issuer-details { font-family:var(--heading-body); color:${reportColors.muted}; margin-block-start:1mm; }
     .status-watermark { position: absolute; left: 50%; top: 49%; z-index: 3; transform: translate(-50%, -50%) rotate(-25deg); pointer-events: none; white-space: nowrap; font-size: 36pt; font-weight: 700; letter-spacing: 2pt; opacity: .3; color: #934044; }
     .status-watermark[data-approved="true"] { color: #427052; }
     .identities { display: grid; grid-template-columns: repeat(var(--groups), minmax(0, 1fr)); gap: 3mm; margin-block: 2mm; }
-    .identities dl { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 2mm; align-content: start; border-inline-start: 0.75pt solid var(--soft-line); padding-inline-start: 2.4mm; margin: 0; }
+    .identities dl { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 2mm; align-content: start; border-inline-start: 0.75pt solid #c7d8dc; padding-inline-start: 2.4mm; margin: 0; }
     .identities dl > div { min-width: 0; margin-block-start: 1mm; }
     .identities .wide { grid-column: 1 / -1; }
     .identities dt { font-size: 8pt; font-weight: 700; color: var(--brand); }
     .identities dd { margin: 0; }
+    .quantity-list { display:flex; flex-wrap:wrap; gap:0 .4em; }
+    .quantity-entry, .quantity-pair { display:inline-flex; align-items:baseline; gap:.32em; white-space:nowrap; }
+    .quantity-entry bdi { overflow-wrap:normal; }
     .compact-identity { direction:ltr; align-items:center; justify-content:space-between; gap:4mm; padding-block-end:2mm; border-block-end:1pt solid var(--line); }
-    .compact-reference { display:flex; align-items:center; gap:3mm; }
+    .compact-reference { display:flex; align-items:center; gap:3mm; font-family:var(--heading-body); }
     .compact-identity strong { font-size: 12pt; }
     .compact-identity, .continued .full-identity { display: none; }
     .continued .compact-identity { display: flex; }
     .page-content { min-height: 0; flex: 1; }
     h1 { font-size: 12.5pt; margin: 2mm 0 1.4mm; }
     h2 { font-size: 11pt; margin: 2mm 0 1.4mm; }
-    h2 span { font-size: 8pt; font-weight: 400; margin-inline-start: 2mm; color: var(--body-text); }
+    h2 span { font-size: 8pt; font-weight: 400; margin-inline-start: 2mm; color:${reportColors.muted}; }
     table { width: 100%; table-layout: fixed; border: 0; border-collapse: collapse; font-size: 9pt; }
-    th, td { border-block-end: 0.65pt solid var(--soft-line); padding: .9mm 1.5mm; vertical-align: top; text-align: start; }
-    thead th { background: var(--head-bg); border-block-end: 1pt solid var(--line); color: var(--head-text); font-weight: 700; font-size:8pt; overflow-wrap:normal; }
-    tbody tr { background:var(--odd); }
-    tbody tr:nth-child(even) { background:var(--even); }
+    th, td { padding:.9mm 1.5mm; vertical-align:top; text-align:start; }
+    thead th { background:${reportColors.header}; border-block-end:1px solid ${reportColors.headerLine}; color:${reportColors.text}; font-weight:700; font-size:8pt; overflow-wrap:normal; }
     table .number { font-variant-numeric: tabular-nums; text-align: end; }
     table td.number, .finance td bdi { white-space:nowrap; overflow-wrap:normal; font-size:var(--value-size,9pt); }
-    tr.group th { background:color-mix(in srgb,var(--head-bg) 10%,white); font-size:9pt; color:var(--body-text); }
-    tr.group-unit th { background:color-mix(in srgb,var(--line) 12%,white); padding-inline-start:4mm; }
-    tr.group-work_type[data-band="unit"] th { padding-inline-start:6mm; }
-    tr[data-band="building"] > :first-child, tr[data-band="unit"] > :first-child { box-shadow:inset var(--band-side) 0 var(--line); }
-    tr[data-band="building"] { --band-side:2px; }
-    tr[data-band="unit"] { --band-side:4px; }
-    [dir="rtl"] tr[data-band="building"] { --band-side:-2px; }
-    [dir="rtl"] tr[data-band="unit"] { --band-side:-4px; }
-    .subtotal { color: var(--body-text); font-weight: 700; }
-    .detail .subtotal:last-child, .cover .subtotal { background:color-mix(in srgb,var(--head-bg) 12%,white); }
-    .empty { color: var(--body-text); padding-block: 4mm; text-align: center; }
+    tr.group th { background:${reportColors.group}; color:${reportColors.groupText}; font-size:9pt; }
+    tr.group-unit th, .cover tr[data-band-unit]:not([data-band-work-type]) > :first-child { padding-inline-start:4mm; }
+    tr.group-work_type[data-band-unit] th, .cover tr[data-band-work-type][data-band-unit] > :first-child { padding-inline-start:6mm; }
+    tr[data-band-building] > :first-child, tr[data-band-unit] > :first-child { position:relative; }
+    tr[data-band-building] > :first-child::before, tr[data-band-unit] > :first-child::after {
+      content:""; position:absolute; inset-block:0; inset-inline-start:0; inline-size:1px; pointer-events:none;
+    }
+    tr[data-band-building] > :first-child::before { background:var(--building-band); }
+    tr[data-band-unit] > :first-child::after { background:var(--unit-band); }
+    tr[data-band-building][data-band-unit] > :first-child::after { inset-inline-start:3px; }
+    tr[data-band-work-type] > :last-child { box-shadow:inset var(--opposite-x) 0 var(--work-band); }
+    .subtotal { color:#255363; font-weight:700; }
+    .detail .subtotal:last-child, .cover .subtotal { background:${reportColors.subtotal}; }
+    .empty { color:${reportColors.muted}; padding-block:4mm; text-align:center; }
     .finance { padding-block-start: 1.5mm; }
     .finance tbody th { font-weight: 400; }
-    .settlement-basis { color: var(--body-text); font-size: 8pt; margin-block-end: 1.3mm; }
-    .finance .payable { background:color-mix(in srgb,var(--head-bg) 12%,white); color:var(--body-text); font-weight:700; }
+    .settlement-basis { color:${reportColors.muted}; font-size:8pt; margin-block-end:1.3mm; }
+    .finance .payable { background:${reportColors.header}; color:${reportColors.text}; font-weight:700; }
     .finance .payable th { font-weight: 700; }
-    footer { direction: ltr; border-block-start: 0.7pt solid var(--soft-line); padding-block-start: 1.5mm; margin-block-start: 2mm; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4mm; color: var(--body-text); font-size: 8pt; }
+    footer { direction:ltr; border-block-start:0.7pt solid #adc2c9; padding-block-start:1.5mm; margin-block-start:2mm; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4mm; color:${reportColors.muted}; font-size:8pt; }
     footer > div:first-child { text-align: left; }
     .footer-company { text-align: center; }
     .footer-user { text-align: right; }
-    .signoff { direction: ltr; display: grid; grid-template-columns: 34mm 1fr; gap: 7mm; align-items: end; margin-block-start: 2mm; color: var(--body-text); }
-    .stamp { min-height: 15mm; border: 0.6pt solid var(--soft-line); padding: 2mm; font-size: 8pt; text-align: center; }
+    .signoff { direction:ltr; display:grid; grid-template-columns:34mm 1fr; gap:7mm; align-items:end; margin-block-start:2mm; color:${reportColors.muted}; }
+    .stamp { min-height:15mm; border:0.6pt solid #adc2c9; padding:2mm; font-size:8pt; text-align:center; }
     .signatories { display: flex; flex-wrap: wrap; justify-content: end; gap: 2mm 5mm; }
-    .signatory { min-width: 23mm; padding-block-start: 4mm; border-block-start: 0.6pt solid var(--soft-line); text-align: center; font-size: 8pt; }
+    .signatory { min-width:23mm; padding-block-start:4mm; border-block-start:0.6pt solid #adc2c9; text-align:center; font-size:8pt; }
     .signatory small { display: block; }
     </style></head><body>
     ${pageTemplate('cover', labels.cover, tableOpening(coverColumns), model)}

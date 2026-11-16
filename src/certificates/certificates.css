@@ -17,6 +17,7 @@
 .pc-workspace [hidden] { display: none; }
 .pc-name[aria-current="true"] { text-decoration: underline; }
 .pc-output-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: 10px; }
+.pc-report-checks { display:flex; flex-wrap:wrap; align-items:center; gap:0 18px; }
 .pc-output-actions { justify-content: flex-start; }
 .pc-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--pc-radius); padding: clamp(12px, 1.8vw, 22px); min-inline-size: 0; }
 .pc-toolbar, .pc-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
