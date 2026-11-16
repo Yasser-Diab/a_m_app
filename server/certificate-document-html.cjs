@@ -24,23 +24,40 @@ function rowCells(row, columns) {
     : `<td class="number" data-number="${key}">${amount(row[key], kind)}</td>`).join('');
 }
 
-function tableOpening(columns) {
+function tableOpening(columns, rows = '') {
   const total = columns.reduce((sum, column) => sum + column.weight, 0);
   return `<table><colgroup>${columns.map(({key,kind,weight}) => `<col data-key="${key}" data-weight="${weight}" data-kind="${kind}" style="width:${100 * weight / total}%">`).join('')}</colgroup>
-    <thead><tr>${columns.map(({ kind, label }) => `<th scope="col"${kind === 'text' ? '' : ' class="number"'}>${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody></tbody></table>`;
+    <thead><tr>${columns.map(({ kind, label }) => `<th scope="col"${kind === 'text' ? '' : ' class="number"'}>${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function rollupCells(values, columns, moneyKeys) {
+  const cells = [];
+  for (let index = 0; index < columns.length; index++) {
+    const {key} = columns[index];
+    if (key === 'billed_quantity' && values.quantities?.length) {
+      const extra = columns[index + 1]?.key === 'unit' ? 'unit' : '';
+      cells.push(`<td class="quantity-total" data-quantity-total="${key}" data-quantity-extra="${extra}"${extra ? ' colspan="2"' : ''}>${quantityList(values.quantities)}</td>`);
+      if (extra) index++;
+    } else if (key === 'count' || moneyKeys.includes(key)) {
+      cells.push(`<td class="number" data-number="${key}">${amount(values[key],key === 'count' ? 'number' : 'money')}</td>`);
+    } else cells.push('<td></td>');
+  }
+  return cells.join('');
 }
 
 function subtotalRow(values, columns, moneyKeys, title, attributes = '') {
-  const firstNumeric = columns.findIndex((column) => moneyKeys.includes(column.key));
+  const firstNumeric = columns.findIndex(({key}) => moneyKeys.includes(key) ||
+    (key === 'count' && values.count != null) || (key === 'billed_quantity' && values.quantities?.length));
   const caption = Array.isArray(title) ? title.map((part) => `<bdi dir="auto">${escapeHtml(part)}</bdi>`).join(' ') : escapeHtml(title);
-  return `<tr ${attributes} class="subtotal"><th scope="row" colspan="${firstNumeric}">${caption}</th>${columns.slice(firstNumeric).map(({ key }) => `<td class="number" data-number="${key}">${amount(values[key])}</td>`).join('')}</tr>`;
+  return `<tr ${attributes} class="subtotal"><th scope="row" colspan="${firstNumeric}">${caption}</th>${rollupCells(values,columns.slice(firstNumeric),moneyKeys)}</tr>`;
+}
+
+function quantityList(quantities, addSeparators = false) {
+  return `<span class="quantity-list">${quantities.map(({value,unit},index) => `<span class="quantity-entry">${addSeparators && index ? '<span aria-hidden="true">+</span>' : ''}<span class="quantity-pair"><bdi dir="ltr">${escapeHtml(value)}</bdi><bdi dir="auto">${escapeHtml(unit)}</bdi></span></span>`).join('')}</span>`;
 }
 
 function identityValue(field) {
-  if (field.quantities?.length) {
-    return `<span class="quantity-list">${field.quantities.map(({value,unit},index) => `<span class="quantity-entry">
-      ${index ? '<span aria-hidden="true">+</span>' : ''}<span class="quantity-pair"><bdi dir="ltr">${escapeHtml(value)}</bdi><bdi dir="auto">${escapeHtml(unit)}</bdi></span></span>`).join('')}</span>`;
-  }
+  if (field.quantities?.length) return quantityList(field.quantities,true);
   return `<bdi dir="${field.isolated ? 'ltr' : 'auto'}">${escapeHtml(field.value)}</bdi>`;
 }
 
@@ -92,9 +109,9 @@ function financeBlock(model) {
     ${model.historical && labels.recorded_basis ? `<div class="settlement-basis">${escapeHtml(labels.recorded_basis)}</div>` : ''}
     <table aria-label="${escapeHtml(labels.finance)}"><colgroup><col data-key="label" data-weight="${showBasis ? 29 : 43}" data-kind="text">
     ${showBasis ? '<col data-key="basis" data-weight="20" data-kind="text">' : ''}${valueColumns.map((key) => `<col data-key="${key}" data-weight="18" data-kind="money">`).join('')}</colgroup>
-    <thead><tr><th></th>${showBasis ? `<th>${escapeHtml(labels.basis)}</th>` : ''}${valueColumns.map((key) => `<th class="number">${escapeHtml(labels[key])}</th>`).join('')}</tr></thead>
+    <thead><tr><th></th>${showBasis ? `<th scope="col" class="basis-cell">${escapeHtml(labels.basis)}</th>` : ''}${valueColumns.map((key) => `<th class="number">${escapeHtml(labels[key])}</th>`).join('')}</tr></thead>
     <tbody>${financeRows.map((row) => `<tr${row.emphasis ? ' class="payable"' : ''}><th scope="row">${escapeHtml(row.label)}</th>
-      ${showBasis ? `<td>${escapeHtml(row.basis)} ${amount(row.basisValue)}</td>` : ''}
+      ${showBasis ? `<td class="basis-cell"><bdi class="basis-label" dir="auto">${escapeHtml(row.basis)}</bdi> ${amount(row.basisValue)}</td>` : ''}
       ${valueColumns.map((key) => `<td class="number" data-number="${key}">${amount(row[key])}</td>`).join('')}</tr>`).join('')}
     </tbody></table></section>`;
 }
@@ -144,11 +161,13 @@ function detailRows(model) {
 function buildCertificateHtml(model) {
   const { labels, locale, direction, columns, coverRows, moneyKeys, workTotals, receiptColumns, landscape, paper } = model;
   const coverColumns = [{ key: 'name', label: model.groupLabel || labels.work_type, weight: 34, kind: 'text' },
+    ...(workTotals.count != null ? [{key:'count',label:labels.count,weight:8,kind:'number'}] : []),
+    ...(workTotals.quantities?.length ? [{key:'billed_quantity',label:labels.billed_quantity,weight:26,kind:'quantity'}] : []),
     ...moneyKeys.map((key) => ({ key, label: labels[key], weight: 18, kind: 'money' }))];
   const size = paper === 'Letter' ? [215.9, 279.4] : [210, 297];
   const [width, height] = landscape ? size.toReversed() : size;
   const style = model.style || {};
-  const cover = coverRows.map((row) => `<tr ${bandAttributes(row.path || [])}>${rowCells(row, coverColumns)}</tr>`);
+  const cover = coverRows.map((row) => `<tr ${bandAttributes(row.path || [])}>${rowCells(row,coverColumns.slice(0,1))}${rollupCells(row,coverColumns.slice(1),moneyKeys)}</tr>`);
   cover.push(subtotalRow(workTotals, coverColumns, moneyKeys, labels.total));
   const receiptRows = model.receipts.map((row) => `<tr>${rowCells(row, receiptColumns)}</tr>`);
   return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="utf-8">
@@ -186,6 +205,7 @@ function buildCertificateHtml(model) {
     .quantity-list { display:flex; flex-wrap:wrap; gap:0 .4em; }
     .quantity-entry, .quantity-pair { display:inline-flex; align-items:baseline; gap:.32em; white-space:nowrap; }
     .quantity-entry bdi { overflow-wrap:normal; }
+    .quantity-total .quantity-list { justify-content:flex-end; column-gap:.65em; font-size:var(--value-size,9pt); }
     .compact-identity { direction:ltr; align-items:center; justify-content:space-between; gap:4mm; padding-block-end:2mm; border-block-end:1pt solid var(--line); }
     .compact-reference { display:flex; align-items:center; gap:3mm; font-family:var(--heading-body); }
     .compact-identity strong { font-size: 12pt; }
@@ -214,8 +234,10 @@ function buildCertificateHtml(model) {
     .subtotal { color:#255363; font-weight:700; }
     .detail .subtotal:last-child, .cover .subtotal { background:${reportColors.subtotal}; }
     .empty { color:${reportColors.muted}; padding-block:4mm; text-align:center; }
-    .finance { padding-block-start: 1.5mm; }
+    .finance, .payment-details { padding-block-start:1.5mm; }
     .finance tbody th { font-weight: 400; }
+    .finance .basis-cell { text-align:start; }
+    .finance .basis-label { white-space:normal; overflow-wrap:anywhere; font-size:inherit; }
     .settlement-basis { color:${reportColors.muted}; font-size:8pt; margin-block-end:1.3mm; }
     .finance .payable { background:${reportColors.header}; color:${reportColors.text}; font-weight:700; }
     .finance .payable th { font-weight: 700; }
@@ -223,18 +245,20 @@ function buildCertificateHtml(model) {
     footer > div:first-child { text-align: left; }
     .footer-company { text-align: center; }
     .footer-user { text-align: right; }
-    .signoff { direction:ltr; display:grid; grid-template-columns:34mm 1fr; gap:7mm; align-items:end; margin-block-start:2mm; color:${reportColors.muted}; }
+    .signoff { direction:ltr; display:grid; grid-template-columns:34mm minmax(0,1fr); gap:7mm; align-items:end; margin-block-start:2mm; color:${reportColors.muted}; }
     .stamp { min-height:15mm; border:0.6pt solid #adc2c9; padding:2mm; font-size:8pt; text-align:center; }
     .signatories { display: flex; flex-wrap: wrap; justify-content: end; gap: 2mm 5mm; }
-    .signatory { min-width:23mm; padding-block-start:4mm; border-block-start:0.6pt solid #adc2c9; text-align:center; font-size:8pt; }
+    .signatories[dir="rtl"] { justify-content:start; }
+    .signatory { min-width:23mm; max-width:100%; padding-block-start:4mm; border-block-start:0.6pt solid #adc2c9; text-align:center; font-size:8pt; overflow-wrap:anywhere; }
     .signatory small { display: block; }
     </style></head><body>
     ${pageTemplate('cover', labels.cover, tableOpening(coverColumns), model)}
     ${pageTemplate('detail', labels.detail, tableOpening(columns), model)}
-    ${pageTemplate('receipts', labels.receipts, tableOpening(receiptColumns), model)}
+    ${pageTemplate('receipts', '', '', model)}
     ${pageTemplate('settlement', '', '', model)}
-    ${sourceTemplate('cover-rows', cover)}${sourceTemplate('detail-rows', detailRows(model))}${sourceTemplate('receipts-rows', receiptRows)}
+    ${sourceTemplate('cover-rows', cover)}${sourceTemplate('detail-rows', detailRows(model))}
     <template id="settlement-block">${financeBlock(model)}</template>
+    <template id="receipts-block"><section class="payment-details"><h2>${escapeHtml(labels.receipts)}</h2>${tableOpening(receiptColumns,receiptRows.join(''))}</section></template>
     <template id="signatures-block">${signaturesBlock(model)}</template>
     </body></html>`;
 }
@@ -266,6 +290,14 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
       const width = context.measureText(cell.textContent).width;
       valueWidths.set(key,Math.max(width,valueWidths.get(key) || 0));
     }
+    for (const cell of contents.querySelectorAll('[data-quantity-total]')) {
+      const key = cell.dataset.quantityTotal;
+      const unitsWidth = wordWidths.get(cell.dataset.quantityExtra) || 0;
+      for (const pair of cell.querySelectorAll('.quantity-pair')) {
+        const width = context.measureText([...pair.children].map((part) => part.textContent).join(' ')).width + 4;
+        valueWidths.set(key,Math.max(width - unitsWidth,valueWidths.get(key) || 0));
+      }
+    }
     const baseWidth = (col, scale) => Math.max(wordWidths.get(col.dataset.key), (valueWidths.get(col.dataset.key) || 0) * scale + 14);
     const widthAt = (scale) => cols.reduce((sum,col) => sum + baseWidth(col,scale),0);
     let scale = 1;
@@ -280,18 +312,21 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     }
     const required = widthAt(scale);
     const extra = Math.max(0, available - required);
-    const extraWeight = (col) => Number(col.dataset.weight) * (col.dataset.kind === 'text' ? 1 : 0.18);
+    const extraWeight = (col) => Number(col.dataset.weight) * (['text','quantity'].includes(col.dataset.kind) ? 1 : 0.18);
     const totalWeight = cols.reduce((sum,col) => sum + extraWeight(col),0);
     for (const col of cols) {
       col.style.width = `${(baseWidth(col,scale) + extra * extraWeight(col) / totalWeight) / Math.max(required,available) * 100}%`;
     }
     table.style.setProperty('--value-size', `${9 * scale}pt`);
   }
-  for (const id of ['cover','detail','receipts']) {
+  for (const id of ['cover','detail']) {
     fitColumns(document.getElementById(id).content.querySelector('table'),document.getElementById(`${id}-rows`).content);
   }
-  const settlementTemplate = document.getElementById('settlement-block').content.querySelector('table');
-  if (settlementTemplate) fitColumns(settlementTemplate,settlementTemplate);
+  for (const id of ['settlement','receipts']) {
+    const table = document.getElementById(`${id}-block`).content.querySelector('table');
+    if (table) fitColumns(table,table);
+  }
+  const signoff = document.getElementById('signatures-block').content.firstElementChild;
 
   function makePage(id, continued) {
     const sheet = document.getElementById(id).content.firstElementChild.cloneNode(true);
@@ -318,8 +353,9 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     return units;
   }
 
-  function pagesFor(id, compactFirst = false) {
+  function pagesFor(id, compactFirst = false, firstSignoff = false) {
     let page = makePage(id, compactFirst);
+    if (firstSignoff) page.querySelector('main').append(signoff.cloneNode(true));
     const pages = [page];
     let table = page.querySelector('tbody');
     const headers = new Map();
@@ -330,7 +366,12 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
       table.append(...rows);
       if (!fits(page)) {
         rows.forEach((row) => row.remove());
-        if (!hadRows) throw new Error('The certificate heading or a work line is too tall for the chosen paper');
+        if (!hadRows) {
+          if (!firstSignoff || pages.length > 1) throw new Error('The certificate heading or a work line is too tall for the chosen paper');
+          table.closest('table').remove();
+          page.querySelector('main > h1')?.remove();
+          if (!fits(page)) throw new Error('The certificate heading and sign-off are too tall for the chosen paper');
+        }
         page = makePage(id, true);
         pages.push(page);
         table = page.querySelector('tbody');
@@ -347,44 +388,45 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     return pages;
   }
 
-  let detail = pagesFor('detail',outputMode === 'summary_details');
-  const longMeasured = measured && detail.length > 1;
-  const hasCover = outputMode === 'summary_details' || (longMeasured && outputMode !== 'detail_only');
-  if (hasCover && outputMode !== 'summary_details') {
-    detail.forEach((page) => page.remove());
-    detail = pagesFor('detail',true);
-  }
-  const cover = hasCover ? pagesFor('cover') : [];
-  const settlement = document.getElementById('settlement-block').content.firstElementChild?.cloneNode(true);
-  if (settlement) {
-    const settlementPages = cover.length ? cover : detail;
-    let page = settlementPages.at(-1);
-    page.querySelector('main').append(settlement);
-    if (!fits(page)) {
-      page = makePage('settlement', true);
-      settlementPages.push(page);
-      page.querySelector('main').append(settlement);
-      if (!fits(page)) throw new Error('The certificate settlement is too tall for the chosen paper');
+  function appendTableSection(id, pages) {
+    const source = document.getElementById(`${id}-block`).content.firstElementChild;
+    const rows = source?.querySelectorAll('tbody tr');
+    if (!rows?.length) return;
+    const skeleton = source.cloneNode(true);
+    skeleton.querySelector('tbody').replaceChildren();
+    function startSection(page) {
+      const section = skeleton.cloneNode(true);
+      const content = page.querySelector('main');
+      content.insertBefore(section,content.querySelector(':scope > .signoff'));
+      return section;
+    }
+    let page = pages.at(-1);
+    let section = startSection(page);
+    for (const sourceRow of rows) {
+      const row = sourceRow.cloneNode(true);
+      const body = section.querySelector('tbody');
+      body.append(row);
+      if (fits(page)) continue;
+      row.remove();
+      if (!body.rows.length) section.remove();
+      page = makePage(id,true);
+      pages.push(page);
+      section = startSection(page);
+      section.querySelector('tbody').append(row);
+      if (!fits(page)) throw new Error('A certificate summary or payment row is too tall for the chosen paper');
     }
   }
 
-  const signoff = document.getElementById('signatures-block').content.firstElementChild.cloneNode(true);
-  let lastDetail = detail.at(-1);
-  lastDetail.querySelector('footer').before(signoff);
-  if (!fits(lastDetail)) {
-    const finalPageHasSettlement = settlement && lastDetail.querySelector('main').contains(settlement);
-    lastDetail = makePage('settlement', true);
-    if (finalPageHasSettlement) lastDetail.querySelector('main').append(settlement);
-    lastDetail.querySelector('footer').before(signoff);
-    detail.push(lastDetail);
-    if (!fits(lastDetail)) {
-      const signoffPage = makePage('settlement', true);
-      signoffPage.querySelector('footer').before(signoff);
-      detail.push(signoffPage);
-    }
+  let openingPages = outputMode === 'summary_details' ? [] : pagesFor('detail',false,true);
+  const hasCover = outputMode === 'summary_details' || (measured && openingPages.length > 1 && outputMode !== 'detail_only');
+  if (hasCover) {
+    openingPages.forEach((page) => page.remove());
+    openingPages = pagesFor('cover',false,true);
   }
+  appendTableSection('settlement', openingPages);
+  if (hasReceipts) appendTableSection('receipts', openingPages);
 
-  const pages = [...cover, ...detail, ...(hasReceipts ? pagesFor('receipts',true) : [])];
+  const pages = hasCover ? [...openingPages,...pagesFor('detail',true)] : openingPages;
   for (const [index, page] of pages.entries()) {
     page.querySelector('.page-number').textContent = String(index + 1);
     page.querySelector('.page-total').textContent = String(pages.length);

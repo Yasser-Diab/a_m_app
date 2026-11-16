@@ -62,6 +62,7 @@ function addWorksheet(workbook, model, name, columns, rows) {
   const sheet = workbook.addWorksheet(name, { views: [{ rightToLeft:model.direction === 'rtl', showGridLines:false, state:'frozen', ySplit:1 }] });
   const fill = (value) => ({ type:'pattern', pattern:'solid', fgColor:color(value) });
   const border = model.direction === 'rtl' ? 'right' : 'left';
+  const basisAlignment = {horizontal:border, readingOrder:model.direction};
   const formatters = {money:new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
     value:new Intl.NumberFormat('en-US',{maximumFractionDigits:6})};
   sheet.columns = columns.map((column) => ({
@@ -69,27 +70,31 @@ function addWorksheet(workbook, model, name, columns, rows) {
     key: column.key,
     width: Math.max(column.weight + 4, Math.min(28, column.label.length + 2),
       ...rows.map((row) => column.kind !== 'text' && row[column.key] != null
-        ? formatters[column.kind === 'money' ? 'money' : 'value'].format(row[column.key]).length + 4 : 0)),
-    style: { alignment: { vertical: 'top', wrapText: column.kind === 'text' },
+        ? row.subtotal && column.key === 'billed_quantity' && row.quantities?.length
+          ? Math.max(...row.quantities.map(({value,unit}) => value.length + unit.length + 5))
+          : formatters[column.kind === 'money' ? 'money' : 'value'].format(row[column.key]).length + 4 : 0)),
+    style: { alignment: { vertical:'top', wrapText:column.kind === 'text', ...(column.key === 'basis' ? basisAlignment : {}) },
       ...(column.kind === 'money' ? { numFmt: '#,##0.00;[Red]-#,##0.00' } : {}),
       ...(column.kind === 'percent' ? { numFmt: '0.######"%"' } : {}),
     },
   }));
   sheet.getRow(1).height = 32;
-  sheet.getRow(1).eachCell((cell) => {
+  sheet.getRow(1).eachCell((cell,index) => {
     cell.font = { name:'Arial',bold:true,color:color(reportColors.text) };
     cell.fill = fill(reportColors.header);
     cell.border = {bottom:{style:'thin',color:color(reportColors.headerLine)}};
-    cell.alignment = { wrapText: true, vertical: 'middle' };
+    cell.alignment = { wrapText:true, vertical:'middle', ...(columns[index - 1].key === 'basis' ? basisAlignment : {}) };
   });
   for (const row of rows) {
     const entry = sheet.addRow(row.groupName ? [row.groupName] : row);
+    if (row.subtotal && row.quantities?.length > 1) entry.height = 15 * row.quantities.length + 2;
     if (row.groupName) sheet.mergeCells(entry.number,1,entry.number,columns.length);
     for (let index = 1; index <= columns.length; index++) {
       const cell = entry.getCell(index);
       cell.font = { name:'Arial',color:color(row.groupName ? reportColors.groupText : reportColors.text),bold:Boolean(row.groupName || row.subtotal) };
       if (row.groupName || row.subtotal) cell.fill = fill(row.groupName ? reportColors.group : reportColors.subtotal);
-      if (row.subtotal && columns[index - 1].key === 'description') cell.alignment = {...cell.alignment,readingOrder:model.direction};
+      if (row.subtotal && ['description','billed_quantity'].includes(columns[index - 1].key))
+        cell.alignment = {...cell.alignment,readingOrder:model.direction,wrapText:true};
     }
     if (row.band) {
       const first = entry.getCell(1);
@@ -124,17 +129,19 @@ async function writeCertificateXlsx(model) {
   if (model.issuer.website) identity.addRow([model.issuer.website, model.issuer.shortName]);
   if (model.appVersion) identity.addRow([`EasyCommercial ${model.appVersion}`]);
   const type = { key: 'work_type', label: model.labels.work_type, weight: 18, kind: 'text' };
+  const subtotal = (description,totals) => ({...totals,description,subtotal:true,
+    billed_quantity:totals.quantities?.map(({value,unit}) => `${value} ${unit}`).join('\n') || null});
   const detail = model.detailBands?.map(({kind,path,line,totals}) => {
     const band = path.some((group) => group.kind === 'unit') ? 'unit' : path.some((group) => group.kind === 'building') ? 'building' : '';
     const workBand = path.some((group) => group.kind === 'work_type');
     if (kind === 'group') return {groupName:path.at(-1).name,band,workBand};
-    if (kind === 'subtotal') return {description:subtotalLabelParts(model,path.at(-1)).join(' '),subtotal:true,...totals,band,workBand};
+    if (kind === 'subtotal') return {...subtotal(subtotalLabelParts(model,path.at(-1)).join(' '),totals),band,workBand};
     return {...line,band,workBand};
   }) ?? model.detailGroups?.flatMap((group) => [
     ...group.lines,
     ...(model.showGroupSubtotals && group.name ? [{description:`${model.labels.subtotal} · ${group.name}`,...group.totals}] : []),
   ]) ?? model.lines;
-  addWorksheet(workbook, model, model.labels.detail, [type, ...model.columns], detail);
+  addWorksheet(workbook, model, model.labels.detail, [type, ...model.columns], [...detail,subtotal(model.labels.total,model.workTotals)]);
   if (model.financeRows.length) addWorksheet(workbook, model, model.labels.finance, [
     { key: 'label', label: model.labels.finance, weight: 38, kind: 'text' },
     { key: 'basis', label: model.labels.basis, weight: 19, kind: 'text' },

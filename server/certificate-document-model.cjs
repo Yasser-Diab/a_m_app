@@ -2,7 +2,7 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 8;
+const MODEL_VERSION = 9;
 const reportColors = {text:'#183148', muted:'#3c5266', header:'#e5eef1', headerLine:'#b5cbd1', group:'#f3f7f8', groupText:'#26525a',
   subtotal:'#edf4f5', building:'#98c3e0', unit:'#acd3ac', workType:'#a2cbc6'};
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
@@ -28,7 +28,7 @@ const labels = {
     current_credit: 'Current credit', cumulative_credit: 'Credit to date',
     ordinary_collections: 'Ordinary collections', advance_recovery: 'Advance recovery',
     settled_work: 'Work value', receipts: 'Payment details', advance_receipts: 'Advance payments received',
-    collection_received: 'Receipt date', collection_cleared: 'Clearance date',
+    collection_received: 'By payment receipt date', collection_cleared: 'By payment clearance date',
     received_date: 'Received', method: 'Method', reference: 'Reference', amount: 'Amount',
     receipt_type: 'Type', status: 'Status', payment_details_through: 'Payment details through',
     page: 'Page', of: 'of', no_lines: 'No work rows',
@@ -60,7 +60,7 @@ const labels = {
     current_credit: 'رصيد دائن للفترة', cumulative_credit: 'رصيد دائن حتى تاريخه',
     ordinary_collections: 'التحصيلات العادية', advance_recovery: 'استرداد الدفعة المقدمة',
     settled_work: 'قيمة الأعمال', receipts: 'تفاصيل الدفعات', advance_receipts: 'الدفعات المقدمة المستلمة',
-    collection_received: 'تاريخ الاستلام', collection_cleared: 'تاريخ التسوية',
+    collection_received: 'حسب تاريخ استلام الدفعة', collection_cleared: 'حسب تاريخ تحصيل الدفعة',
     received_date: 'تاريخ الاستلام', method: 'طريقة التحصيل', reference: 'المرجع', amount: 'المبلغ',
     receipt_type: 'النوع', status: 'الحالة', payment_details_through: 'تفاصيل الدفعات حتى',
     page: 'صفحة', of: 'من', no_lines: 'لا توجد بنود أعمال',
@@ -118,8 +118,10 @@ function asCents(value) {
   return Math.round(money(value) * 100);
 }
 
-function financialRollup(rows, keys) {
-  return Object.fromEntries(keys.map((key) => [key, rows.reduce((sum, row) => sum + asCents(row[key]), 0) / 100]));
+function workRollup(rows, keys) {
+  const values = Object.fromEntries(keys.map((key) => [key, rows.reduce((sum, row) => sum + asCents(row[key]), 0) / 100]));
+  const count = rows.reduce((sum, row) => row.count == null ? sum : (sum ?? 0) + row.count, null);
+  return { ...values, count, quantities: quantitySummary(rows) };
 }
 
 function column(key, weight, kind = 'text') {
@@ -137,7 +139,7 @@ function detailColumns(lines, moneyKeys, translations, dimensionLabel) {
     column('description', 38),
     measured && { ...column('width', 8, 'number'), label: `${translations[area ? 'width' : 'length']} (${dimensionLabel})` },
     area && { ...column('height', 8, 'number'), label: `${translations.height} (${dimensionLabel})` },
-    measured && lines.some((line) => ['area', 'linear'].includes(line.mode) && number(line.count) !== null) && column('count', 7, 'number'),
+    populated('count') && column('count', 7, 'number'),
     (pricedQuantity || populated('billed_quantity')) && column('billed_quantity', 10, 'number'),
     (pricedQuantity || populated('unit')) && column('unit', 7),
     (pricedQuantity || populated('rate')) && column('rate', 11, 'money'),
@@ -152,7 +154,7 @@ function detailColumns(lines, moneyKeys, translations, dimensionLabel) {
 
 const unitTranslations = [
   ['م²','m²',/^(?:m\^?2|m²|م2|م²|sqm|square met(?:re|er)s?|متر مربع|متر مسطح)$/i],
-  ['م.ط','lm',/^(?:lm|l\.m\.?|long met(?:re|er)s?|linear met(?:re|er)s?|م\.?\s*ط\.?|متر طولي)$/i],
+  ['م.ط','l.m',/^(?:lm|l\.m\.?|long met(?:re|er)s?|linear met(?:re|er)s?|م\.?\s*ط\.?|متر طولي)$/i],
   ['م','m',/^(?:m|met(?:re|er)s?|م|متر)$/i],
   ['م³','m³',/^(?:m\^?3|m³|م3|م³|cbm|cubic met(?:re|er)s?|متر مكعب)$/i],
   ['عدد','Pcs',/^(?:pcs?\.?|ea|each|count|pieces?|units?|nos?\.?|عدد|وحد[ةه]|قطع[ةه])$/i],
@@ -170,6 +172,7 @@ function pricedUnit(value, locale, mode) {
     return defaults[mode] ? pricedUnit(defaults[mode],locale) : '';
   }
   const translated = unitTranslations.find(([, , pattern]) => pattern.test(unit));
+  if (mode === 'linear' && translated?.[1] === 'm') return locale === 'ar' ? 'م.ط' : 'l.m';
   return translated?.[locale === 'ar' ? 0 : 1] ?? unit;
 }
 
@@ -209,7 +212,7 @@ function detailBands(lines, options, moneyKeys) {
     if (node.kind === 'line') return [{...node,path:ancestors}];
     const path = node.kind ? [...ancestors,{kind:node.kind,name:node.name}] : ancestors;
     return [...(node.kind ? [{kind:'group',path}] : []), ...node.items.flatMap((item) => flatten(item,path)),
-      ...(node.kind && options[`show_${node.kind}_subtotals`] ? [{kind:'subtotal',path,totals:financialRollup(node.lines,moneyKeys)}] : [])];
+      ...(node.kind && options[`show_${node.kind}_subtotals`] ? [{kind:'subtotal',path,totals:workRollup(node.lines,moneyKeys)}] : [])];
   }
   return flatten(root,[]);
 }
@@ -288,7 +291,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       building_unit:text(names.building_unit), floor_apartment:text(names.floor_apartment),
       width: measured ? dimension(line.width) : null,
       height: line.mode === 'area' ? dimension(line.height) : null,
-      count: measured ? number(line.count) : null,
+      count: measured ? number(line.count) : line.mode === 'count' ? number(line.count ?? line.billed_quantity ?? line.quantity) : null,
       billed_quantity: number(line.billed_quantity ?? line.quantity), unit: pricedUnit(line.unit,locale,line.mode),
       rate: number(line.rate), agreed_amount: number(line.agreed_amount),
       previous_progress: Object.hasOwn(line,'previous_progress') ? number(line.previous_progress) :
@@ -301,6 +304,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   });
   const moneyKeys = comparable ? ['last_current', 'previous', 'current', 'cumulative'] : ['previous', 'current', 'cumulative'];
   const columns = detailColumns(lines, moneyKeys, t, dimensionLabel);
+  const workTotals = workRollup(lines, moneyKeys);
   const groupBy = header.group_by ?? (header.group_work_types ? 'work_type' : 'none');
   const grouping = input.report_options || certificateReportOptions(header);
   const bands = detailBands(lines,grouping,moneyKeys);
@@ -315,7 +319,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     groups.get(key).lines.push(line);
   }
   const detailGroups = [...groups.values()].map(({name,lines:groupLines}) =>
-    ({name,lines:groupLines,totals:financialRollup(groupLines,moneyKeys)}));
+    ({name,lines:groupLines,totals:workRollup(groupLines,moneyKeys)}));
   const components = totals.components || [];
   const recordedCollections = [
     ...(totals.advance_receipts ? [{key:'advance_receipts',
@@ -379,7 +383,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   })) : [];
 
   const issueDate = text(input.issued_at || header.issue_date || (historical ? header.work_to : '')).slice(0,10);
-  const quantities = quantitySummary(lines);
+  const {quantities} = workTotals;
   const quantity = quantities.map(({value,unit}) => `${value} ${unit}`).join(' + ');
   const customerName = nameForPrint(customer, locale);
   const projectName = nameForPrint(project, locale);
@@ -452,7 +456,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
     detailGroups, detailBands:bands, coverRows,
-    workTotals: financialRollup(lines, moneyKeys), financeRows,
+    workTotals, financeRows,
   };
 }
 

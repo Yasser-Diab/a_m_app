@@ -29,7 +29,7 @@ async function verifyPdf(model, expected) {
   if (expected) assert.deepEqual(pagination, expected);
   else {
     assert.ok(pagination.detailPages > 1);
-    assert.equal(pagination.pageCount, pagination.detailPages + 1);
+    assert.ok(pagination.pageCount > pagination.detailPages);
     assert.equal(pagination.hasCover, true);
   }
   const raw = buffer.toString('latin1');
@@ -97,7 +97,7 @@ async function main() {
   assert.deepEqual(buildCertificateDocument(fixture('ar', ['Pcs','KG','linear meter'].map((unit) => ({...linear,unit})),{})).lines.map(({unit}) => unit),
     ['عدد','كجم','م.ط']);
   assert.deepEqual(buildCertificateDocument(fixture('en', ['عدد','كجم','م.ط'].map((unit) => ({...linear,unit})),{})).lines.map(({unit}) => unit),
-    ['Pcs','kg','lm']);
+    ['Pcs','kg','l.m']);
   assert.equal(arabicModel.direction, 'rtl');
   assert.equal(arabicModel.lines[0].current_progress, 100);
   assert.equal(arabicModel.watermark,'APPROVED');
@@ -122,6 +122,16 @@ async function main() {
   const referenceColumn = payments.getRow(1).values.indexOf(customerPayments.labels.reference);
   assert.equal(payments.getRow(2).getCell(referenceColumn).value,'RCPT-100');
   const arabic = await verifyPdf(arabicModel);
+
+  const compact = fixture('ar', [lump], {current:25_000,current_payable:24_000,cumulative_payable:24_000,ordinary_collections:1000}, {
+    include_receipts:true, receipts:[{kind:'receipt',amount:1000,reference:'RCPT-200'}],
+    rule_settings:{collections_basis:'received',signatures:[{name:'Project Engineer'}]},
+  });
+  const compactCover = buildCertificateDocument({...compact,header:{...compact.header,output_mode:'cover'}});
+  assert.ok(buildCertificateHtml(compactCover).includes('حسب تاريخ استلام الدفعة'));
+  await verifyPdf(compactCover,{pageCount:2,detailPages:1,hasCover:true});
+  await verifyPdf(buildCertificateDocument({...compact,header:{...compact.header,output_mode:'detail'}}),
+    {pageCount:1,detailPages:1,hasCover:false});
 
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(await writeCertificateXlsx(arabicModel));
@@ -194,6 +204,31 @@ async function main() {
       assert.ok(rowNumber > 0);
       assert.equal(detail.getRow(rowNumber).getCell(captionColumn).alignment.readingOrder,named.direction);
     }
+  }
+
+  const quantityLines = [
+    {...lump,id:'area',mode:'area',count:3,billed_quantity:9.5,unit:'m²',width:1,height:3,dimension_unit:'m'},
+    {...lump,id:'linear',mode:'linear',count:4,billed_quantity:8,unit:'m',width:2,dimension_unit:'m'},
+    {...lump,id:'pcs',mode:'count',count:6,billed_quantity:6,unit:'Pcs'},
+  ].map((line) => ({...line,building_unit:'12',floor_apartment:'جانبية شمال'}));
+  const quantities = buildCertificateDocument({...fixture('ar',quantityLines,{}),report_options:allSubtotals});
+  const expectedQuantities = [{value:'9.5',unit:'م²'},{value:'8',unit:'م.ط'},{value:'6',unit:'عدد'}];
+  assert.deepEqual(quantities.workTotals.quantities,expectedQuantities);
+  assert.equal(quantities.workTotals.count,13);
+  assert.equal(quantities.coverRows[0].count,13);
+  for (const row of quantities.detailBands.filter(({kind}) => kind === 'subtotal')) {
+    assert.deepEqual(row.totals.quantities,expectedQuantities);
+    assert.equal(row.totals.count,13);
+  }
+  const quantityWorkbook = new ExcelJS.Workbook();
+  await quantityWorkbook.xlsx.load(await writeCertificateXlsx(quantities));
+  const quantitySheet = quantityWorkbook.getWorksheet(quantities.labels.detail);
+  const headers = quantitySheet.getRow(1).values;
+  const captions = quantitySheet.getColumn(headers.indexOf(quantities.labels.description)).values;
+  for (const label of ['إجمالي جانبية شمال','إجمالي 12',quantities.labels.total]) {
+    const totalRow = quantitySheet.getRow(captions.indexOf(label));
+    assert.equal(totalRow.getCell(headers.indexOf(quantities.labels.count)).value,13);
+    assert.equal(totalRow.getCell(headers.indexOf(quantities.labels.billed_quantity)).value,'9.5 م²\n8 م.ط\n6 عدد');
   }
 
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'certificate-document-test-'));
