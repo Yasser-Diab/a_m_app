@@ -2,7 +2,7 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 6;
+const MODEL_VERSION = 7;
 const reportColors = {text:'#183148', muted:'#3c5266', header:'#e5eef1', headerLine:'#b5cbd1', group:'#f3f7f8', groupText:'#26525a',
   subtotal:'#edf4f5', building:'#98c3e0', unit:'#acd3ac', workType:'#a2cbc6'};
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
@@ -253,7 +253,6 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     building_unit: locale === 'ar' ? 'المبنى' : 'Building',
     floor_apartment: locale === 'ar' ? 'الوحدة / الشقة' : 'Unit / apartment',
     subtotal: locale === 'ar' ? 'الإجمالي الفرعي' : 'Subtotal',
-    group: locale === 'ar' ? 'المجموعة' : 'Group',
     building_subtotal: locale === 'ar' ? 'إجمالي المبنى' : 'Building subtotal',
     unit_subtotal: locale === 'ar' ? 'إجمالي الوحدة' : 'Unit subtotal',
     work_type_subtotal: locale === 'ar' ? 'إجمالي نوع الأعمال' : 'Work type subtotal',
@@ -307,7 +306,8 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const groupBy = header.group_by ?? (header.group_work_types ? 'work_type' : 'none');
   const grouping = input.report_options || certificateReportOptions(header);
   const bands = detailBands(lines,grouping,moneyKeys);
-  const showGroupSubtotals = bands.some((row) => row.kind === 'subtotal');
+  const subtotals = bands.filter((row) => row.kind === 'subtotal');
+  const showGroupSubtotals = subtotals.length > 0;
   const groups = new Map();
   for (const line of lines) {
     const name = groupBy === 'unit' && line.floor_apartment ? [line.building_unit,line.floor_apartment].filter(Boolean).join(' / ') :
@@ -422,15 +422,13 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     if (/^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(issuer[key])) palette[key] = issuer[key];
   }
   const font = (value) => /^[a-z0-9 ,"'-]+$/i.test(value || '') ? value : 'Arial,Tahoma,sans-serif';
-  const subtotalKinds = ['building','unit','work_type'].filter((kind) => grouping[`show_${kind}_subtotals`] && (kind !== 'work_type' || grouping.group_work_types));
-  const groupTotals = new Map(bands.filter((row) => row.kind === 'subtotal').map(({path,totals}) => [JSON.stringify(path),totals]));
-  const coverRows = subtotalKinds.length > 1 ? bands.filter((row) => row.kind === 'group' && groupTotals.has(JSON.stringify(row.path)))
-    .map(({path}) => ({name:path.at(-1).name,path,...groupTotals.get(JSON.stringify(path))})) :
-    subtotalKinds.length === 1 && (subtotalKinds[0] !== 'work_type' || groupBy !== 'work_type') ?
-      bands.filter(({kind,path}) => kind === 'subtotal' && path.at(-1).kind === subtotalKinds[0])
-        .map(({path,totals}) => ({name:path.map(({name}) => name).join(' / '),path,...totals})) :
-    showGroupSubtotals || (header.group_by == null && grouping.group_work_types)
-      ? detailGroups.filter(({name}) => name).map(({name,totals}) => ({name,path:[{kind:'work_type',name}],...totals})) : [];
+  const coverKind = ['building','unit','work_type'].find((kind) => subtotals.some(({path}) => path.at(-1).kind === kind));
+  const workTypeSummary = groupBy === 'work_type' && (coverKind === 'work_type' ||
+    (!coverKind && header.group_by == null && grouping.group_work_types));
+  const coverRows = workTypeSummary
+    ? detailGroups.filter(({name}) => name).map(({name,totals}) => ({name,path:[{kind:'work_type',name}],...totals}))
+    : subtotals.filter(({path}) => path.at(-1).kind === coverKind)
+      .map(({path,totals}) => ({name:path.map(({name}) => name).join(' / '),path,...totals}));
   return {
     modelVersion: MODEL_VERSION, locale, direction: locale === 'ar' ? 'rtl' : 'ltr', labels: t,
     variant, issued, historical, approved, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',
@@ -450,7 +448,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       customer:customerName,project:projectName}),
     signatures: (input.rule_settings?.signatures || []).map((person) => ({ name: text(person.name), title: text(person.title) })).filter((person) => person.name),
     showGroupSubtotals,
-    groupLabel: subtotalKinds.length > 1 ? t.group : t[({building:'building_unit',unit:'floor_apartment'})[subtotalKinds[0] || groupBy] || 'work_type'],
+    groupLabel: t[({building:'building_unit',unit:'floor_apartment'})[coverKind || groupBy] || 'work_type'],
     identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
     detailGroups, detailBands:bands, coverRows,
