@@ -1,7 +1,7 @@
-const {audit, date, fail, idOf, lookup, str, today} = require("./certificate-access.cjs");
+const {audit, date, fail, idOf, lookup, parse, setting, setSetting, str, today} = require("./certificate-access.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
 const {checkedLocation} = require("./certificate-projects.cjs");
-const {customerReceipts} = require("./commercial-ledger.cjs");
+const {customerReceipts, workbookReceipt} = require("./commercial-ledger.cjs");
 
 const DATE_FLOOR = "0001-01-01";
 
@@ -121,6 +121,8 @@ function storeAllocations(database, projectId, receiptId, at, rows) {
   [projectId,receiptId,item.part,item.locationId,item.certification,at]);
 }
 
+const lastReceiptIdSetting = "certificates_last_receipt_id";
+
 function addReceipt(database, project, input, user) {
   const kind = ["receipt","advance","reversal"].includes(input.kind) ? input.kind : "receipt";
   const key = str(input.command_key, 200);
@@ -146,12 +148,13 @@ function addReceipt(database, project, input, user) {
   const supplied = input.allocations === undefined ? [] : input.allocations;
   if (kind === "reversal" && supplied?.length) fail(400, "A reversal inherits its original allocations");
   const {allocations,allocated} = normalizeAllocations(database,project.id,supplied,amount);
-  const result = database.run(`INSERT INTO cert_receipts
-    (project_id,kind,amount_minor,received_at,cleared_at,due_at,currency,status,method,reference,evidence,command_key,reverses_id,created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-  [project.id,kind,amount,received,cleared,due,project.currency,status,str(input.method),str(input.reference),
+  const last = database.get("SELECT MAX(id) AS id FROM cert_receipts").id || 0;
+  const receiptId = Math.max(last, Number(setting(database,lastReceiptIdSetting,"0")) || 0) + 1;
+  database.run(`INSERT INTO cert_receipts
+    (id,project_id,kind,amount_minor,received_at,cleared_at,due_at,currency,status,method,reference,evidence,command_key,reverses_id,created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  [receiptId,project.id,kind,amount,received,cleared,due,project.currency,status,str(input.method),str(input.reference),
     str(input.evidence,2000),key || null,reversesId,user.id]);
-  const receiptId = result.lastInsertRowid;
   storeAllocations(database,project.id,receiptId,received,allocations);
   audit(database, user, kind + "_posted", {projectId:project.id, reason:input.reason,
     details:{receipt_id:receiptId, amount_minor:amount, allocated_minor:allocated, reverses_id:reversesId}});
@@ -189,6 +192,63 @@ function updateReceipt(database, project, receiptId, input, user) {
   return publicReceipt(database.get("SELECT * FROM cert_receipts WHERE id=?",[receiptId]));
 }
 
+function changeReceipt(database, project, receiptId, input, user) {
+  const importedId = receiptId.match(/^receipt-import-(\d+)$/)?.[1];
+  const imported = importedId ? database.get(`SELECT rowid,amount_minor,data_json FROM cert_legacy_records
+    WHERE project_id=? AND record_type='receipt' AND rowid=?`, [project.id,idOf(importedId)]) : null;
+  const receipt = imported ? workbookReceipt(imported) : database.get("SELECT * FROM cert_receipts WHERE project_id=? AND id=?",[project.id,idOf(receiptId)]);
+  if (!receipt) fail(404,"Receipt not found");
+  if (!imported && database.get("SELECT 1 FROM cert_receipts WHERE reverses_id=?",[receipt.id]))
+    fail(409,"Remove the reversal before changing this payment");
+  if (!imported && database.get("SELECT 1 FROM cert_advance_recoveries WHERE advance_id=?",[receipt.id]))
+    fail(409,"This advance has a recovery in a certificate");
+  const recognized = database.get(`SELECT 1 FROM cert_revisions r LEFT JOIN cert_legacy_workflow h ON h.revision_id=r.id
+    WHERE r.project_id=? AND (r.status IN ('approved','issued') OR h.approved_at IS NOT NULL)
+    AND EXISTS (SELECT 1 FROM json_each(COALESCE(h.approved_json,r.snapshot_json),'$.receipts') p
+      WHERE json_extract(p.value,'$.id')=?) LIMIT 1`,[project.id,receipt.id]);
+  if (recognized) fail(409,"This payment is included in an approved certificate. Record a reversal or correct the certificate first");
+
+  if (!input) {
+    if (imported) database.run("DELETE FROM cert_legacy_records WHERE rowid=?",[imported.rowid]);
+    else {
+      const lastDeleted = Number(setting(database,lastReceiptIdSetting,"0")) || 0;
+      if (receipt.id > lastDeleted) setSetting(database,lastReceiptIdSetting,String(receipt.id));
+      database.run("DELETE FROM cert_receipt_allocations WHERE receipt_id=?",[receipt.id]);
+      database.run("DELETE FROM cert_receipts WHERE id=?",[receipt.id]);
+    }
+    audit(database,user,"receipt_deleted",{projectId:project.id,details:{receipt_id:receipt.id,amount_minor:receipt.amount_minor}});
+    return {deleted:true};
+  }
+
+  if (receipt.kind === "reversal") fail(409,"A reversal must keep its original payment values");
+  const saved = {...receipt,...input};
+  const amount = Object.hasOwn(input,"amount") ? toMinor(input.amount) : receipt.amount_minor;
+  if (!(amount > 0)) fail(400,"The receipt amount must be positive");
+  if (!["receipt","advance"].includes(saved.kind)) fail(400,"Select a valid receipt type");
+  if (!["pending","received","cleared"].includes(saved.status)) fail(400,"Select a valid receipt status");
+  const received = date(saved.received_at);
+  const cleared = date(saved.cleared_at,true);
+  const due = date(saved.due_at,true);
+  if (cleared && cleared < received) fail(400,"Clearance cannot precede receipt");
+  if (saved.status === "cleared" && !cleared) fail(400,"Clearance date is required for a cleared receipt");
+  const method = str(saved.method), reference = str(saved.reference), evidence = str(saved.evidence,2000);
+  if (imported) {
+    const source = parse(imported.data_json);
+    const data = {...source,kind:saved.kind,status:saved.status,date:received,due_date:due,cleared_at:cleared,
+      reference,method,evidence,amount:money(amount)};
+    database.run("UPDATE cert_legacy_records SET amount_minor=?,data_json=? WHERE rowid=?",[amount,JSON.stringify(data),imported.rowid]);
+  } else {
+    const allocations = database.get(`SELECT SUM(amount_minor) AS amount,MIN(allocated_at) AS first_date
+      FROM cert_receipt_allocations WHERE receipt_id=?`,[receipt.id]);
+    if (allocations.amount > amount) fail(400,"Amount cannot be less than the allocated balance");
+    if (allocations.first_date && allocations.first_date < received) fail(400,"Receipt date cannot be after an allocation");
+    database.run(`UPDATE cert_receipts SET kind=?,amount_minor=?,received_at=?,cleared_at=?,due_at=?,status=?,method=?,reference=?,evidence=? WHERE id=?`,
+      [saved.kind,amount,received,cleared,due,saved.status,method,reference,evidence,receipt.id]);
+  }
+  audit(database,user,"receipt_edited",{projectId:project.id,details:{receipt_id:receipt.id,previous_amount_minor:receipt.amount_minor,amount_minor:amount}});
+  return {id:receipt.id,amount:money(amount)};
+}
+
 function collectionResponse(database, project, ledger, cutoff) {
   return {
     cutoff, project_id: project.id,
@@ -200,4 +260,4 @@ function collectionResponse(database, project, ledger, cutoff) {
   };
 }
 
-module.exports = {allocationLedger, addReceipt, updateReceipt, collectionResponse, DATE_FLOOR};
+module.exports = {allocationLedger, addReceipt, updateReceipt, changeReceipt, collectionResponse, DATE_FLOOR};

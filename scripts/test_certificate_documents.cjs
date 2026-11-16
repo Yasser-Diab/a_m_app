@@ -63,7 +63,7 @@ async function main() {
   const linear = { ...lump, mode: 'linear', width: 2.5, height: 7.5, dimension_unit: 'm', billed_quantity: 2.5, unit: 'm', rate: 25 };
   const linearModel = buildCertificateDocument(fixture('en', [linear], {}));
   assert.equal(linearModel.columns.some((column) => column.key === 'height'), false);
-  assert.equal(linearModel.columns.find((column) => column.key === 'width').label, 'Length');
+  assert.equal(linearModel.columns.find((column) => column.key === 'width').label, 'Length (m)');
   const direct = buildCertificateDocument(fixture('en', [{ ...linear, mode: 'direct' }], {}));
   assert.equal(direct.columns.some((column) => column.key === 'width'), false);
 
@@ -91,6 +91,12 @@ async function main() {
   assert.equal(arabicModel.coverRows.length, 2);
   assert.equal(arabicModel.coverRows.reduce((sum, row) => sum + row.current, 0), 3400);
   assert.equal(arabicModel.columns.some((column) => column.key === 'height'), true);
+  assert.equal(arabicModel.columns.some(({key}) => ['building_unit','floor_apartment','location','dimension_unit'].includes(key)), false);
+  assert.equal(arabicModel.lines[0].unit,'م²');
+  assert.deepEqual(buildCertificateDocument(fixture('ar', ['Pcs','KG','linear meter'].map((unit) => ({...linear,unit})),{})).lines.map(({unit}) => unit),
+    ['عدد','كجم','م.ط']);
+  assert.deepEqual(buildCertificateDocument(fixture('en', ['عدد','كجم','م.ط'].map((unit) => ({...linear,unit})),{})).lines.map(({unit}) => unit),
+    ['Pcs','kg','lm']);
   assert.equal(arabicModel.direction, 'rtl');
   assert.equal(arabicModel.lines[0].current_progress, 100);
   assert.equal(arabicModel.watermark,'APPROVED');
@@ -109,7 +115,9 @@ async function main() {
   const measurements = workbook.getWorksheet('تفاصيل الأعمال');
   assert.equal(measurements.views[0].rightToLeft, true);
   const amountIndex = measurements.getRow(1).values.indexOf(arabicModel.labels.current);
-  assert.equal(measurements.getRow(2).getCell(amountIndex).value, 100);
+  assert.equal(measurements.getRow(2).getCell(1).value, 'المبنى 1');
+  assert.equal(measurements.getRow(2).getCell(1).border.right.style,'thin');
+  assert.equal(measurements.getRows(2,3).find((row) => row.getCell(amountIndex).value === 100).getCell(amountIndex).value,100);
 
   const buildingRows = [1,2,3].map((id) => ({...lump,id,building_unit:id === 2 ? 'Tower B' : 'Tower A',
     floor_apartment:'Apartment 1',current:id*100}));
@@ -124,7 +132,10 @@ async function main() {
   await unitWorkbook.xlsx.load(await writeCertificateXlsx(unitModel));
   const works = unitWorkbook.getWorksheet(unitModel.labels.detail);
   const columnIndex = works.getRow(1).values.indexOf(unitModel.labels.current);
-  assert.equal(works.getRow(4).getCell(columnIndex).value,400);
+  assert.equal(works.getRow(2).getCell(1).value,'Tower A');
+  assert.equal(works.getRow(3).getCell(1).value,'Apartment 1');
+  assert.equal(works.getRow(3).getCell(1).border.left.style,'medium');
+  assert.equal(works.getRow(6).getCell(columnIndex).value,400);
   byUnit.header.group_by = 'building';
   assert.deepEqual(buildCertificateDocument(byUnit).coverRows.map(({name}) => name),['Tower A','Tower B']);
   byUnit.header.group_by = 'work_type';

@@ -734,6 +734,7 @@ const APP_VARIANT_ID = "main";
 const INITIAL_ACTIVE_TAB = ROUTE_INITIAL_TABS[currentRouteKey()] || APP_VARIANT.defaultTab;
 const NAV_ITEMS = NAV;
 const ProgressCertificates = lazy(() => import("./certificates/Certificates.jsx"));
+const ProjectReceiptEditor = lazy(() => import("./certificates/CertificateOperations.jsx").then(({ReceiptEditor}) => ({default:ReceiptEditor})));
 const CertificateGrants = lazy(() => import("./certificates/CertificateGrants.jsx"));
 const CertificateAccessPanel = lazy(() => import("./certificates/CertificateAccessPanel.jsx"));
 
@@ -9618,6 +9619,7 @@ function PaymentsView({
   const [paymentKind, setPaymentKind] = useState("receipt");
   const linkedCommand = useRef(null);
   const [editingPayment, setEditingPayment] = useState(null);
+  const [editingReceipt, setEditingReceipt] = useState(null);
   const [appliedFocusKey, setAppliedFocusKey] = useState("");
   const [busy, setBusy] = useState(false);
   const partyOptions = isContractorMode ? lookups.contractors : lookups.customers;
@@ -9860,6 +9862,10 @@ function PaymentsView({
   }
 
   function editPayment(row) {
+    if (row.source === "certificate_receipt") {
+      setEditingReceipt(row);
+      return;
+    }
     setEditingPayment(row);
     setReviewCustomer(
       row.base_party_name ||
@@ -9889,21 +9895,18 @@ function PaymentsView({
   }
 
   async function deletePayment(row) {
-    const label = row.party_role === "contractor" ? "خصم" : "تحصيل";
-    if (
-      !window.confirm(
-        `حذف ${label} ${row.document_operation_no || row.operation_no || row.id}؟`,
-      )
-    )
-      return;
+    if (busy || !window.confirm(t("هل تريد حذف هذه الدفعة؟", "Delete this payment?"))) return;
     setBusy(true);
     try {
-      await api.request(`/api/entries/${row.id}`, { method: "DELETE" });
+      const endpoint = row.source === "certificate_receipt"
+        ? `/api/certificates/projects/${row.project_id}/collections/${row.receipt_id}` : `/api/entries/${row.id}`;
+      await api.request(endpoint, { method: "DELETE" });
       setRecent((current) => current.filter((item) => item.id !== row.id));
-      setMessage("تم حذف الدفعة.");
+      if (editingPayment?.id === row.id) resetPaymentForm();
+      setMessage(t("تم حذف الدفعة.", "Payment deleted."));
       await refreshAll();
     } catch (error) {
-      setMessage(`تعذر حذف الدفعة: ${error.message}`);
+      setMessage(`${t("تعذر حذف الدفعة", "Could not delete payment")} · ${error.message}`);
     } finally {
       setBusy(false);
     }
@@ -10191,24 +10194,27 @@ function PaymentsView({
                   <td>{text(row.work_type)}</td>
                   <td>{money(row.source === "certificate_receipt" ? Number(row.collection_amount || 0) : Math.abs(Number(row.collection_amount || 0)))}</td>
                   <td>{text(row.collection_note)}</td>
-                  <td className="row-actions">{row.source !== "certificate_receipt" && <>
-                    <button
+                  <td className="row-actions">
+                    {(row.source !== "certificate_receipt" || row.can_edit_receipt) && <button
                       type="button"
                       className="icon-button"
                       title={t("تعديل الدفعة", "Edit payment")}
+                      aria-label={t("تعديل الدفعة", "Edit payment")}
                       onClick={() => editPayment(row)}
                     >
                       <Pencil size={16} />
-                    </button>
-                    <button
+                    </button>}
+                    {(row.source !== "certificate_receipt" || row.can_delete_receipt) && <button
                       type="button"
                       className="icon-button danger"
                       title={t("حذف الدفعة", "Delete payment")}
+                      aria-label={t("حذف الدفعة", "Delete payment")}
+                      disabled={busy}
                       onClick={() => deletePayment(row)}
                     >
                       <Trash2 size={16} />
-                    </button>
-                  </>}</td>
+                    </button>}
+                  </td>
                 </tr>
               ))}
               {!visiblePayments.length && (
@@ -10220,6 +10226,16 @@ function PaymentsView({
           </table>
         </div>
       </section>
+      {editingReceipt && <Suspense fallback={null}>
+        <ProjectReceiptEditor data={{action:"edit",receipt:editingReceipt.receipt}}
+          project={{id:editingReceipt.project_id}} currency={editingReceipt.currency} t={t}
+          request={(path,{body,...options}) => api.request(`/api/certificates${path}`,{...options,body:body && JSON.stringify(body)})}
+          onClose={() => setEditingReceipt(null)} onSaved={() => {
+            setEditingReceipt(null);
+            setMessage(t("تم تعديل الدفعة.", "Payment updated."));
+            void refreshAll();
+          }} />
+      </Suspense>}
     </div>
   );
 }

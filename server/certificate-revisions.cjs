@@ -289,6 +289,25 @@ function validateReview(input) {
   if (input.validation.length) fail(422, "Resolve the certificate validation errors", {validation: input.validation});
 }
 
+const liveNumberSql = `MAX(CASE WHEN official_number IS NOT NULL THEN official_number
+  WHEN legacy_number <> '' AND legacy_number NOT GLOB '*[^0-9]*' THEN CAST(legacy_number AS INTEGER) ELSE 0 END)`;
+
+function nextSeriesNumber(database, row) {
+  const params = [row.project_id, row.series_key];
+  const {number} = database.get(`SELECT ${liveNumberSql} AS number FROM cert_revisions
+    WHERE project_id=? AND series_key=?`, params);
+  if (!number) return 1;
+  const series = database.get("SELECT next_number FROM cert_series WHERE project_id=? AND reference=?", params);
+  return Math.max(number + 1, series?.next_number ?? 1);
+}
+
+function certificateNumber(database, row) {
+  if (row.official_number || row.legacy_number) return row.official_number || row.legacy_number;
+  const previous = row.revises_id ? getRevision(database,row.revises_id) : null;
+  const previousNumber = previous?.official_number ?? Number(previous?.legacy_number);
+  return Number.isSafeInteger(previousNumber) && previousNumber > 0 ? previousNumber : nextSeriesNumber(database,row);
+}
+
 function makeRevision(database, row, action, reason, user) {
   const source = certificateDocumentInput(database,row);
   if (!["approved","issued"].includes(source.status) || (action !== "revise" && row.status === "approved"))
@@ -368,13 +387,8 @@ function runAction(database, row, body, user, enqueueRender) {
       const series = database.get("SELECT * FROM cert_series WHERE project_id=? AND reference=?", [row.project_id,row.series_key]);
       if (series.final_revision_id && !row.revises_id) fail(409, "The series has been finalized");
       if (row.type === "reopen" && series.final_revision_id !== row.revises_id) fail(409, "The final certificate changed");
-      const previous = row.revises_id ? getRevision(database, row.revises_id) : null;
-      const legacyMax = database.get(`SELECT MAX(CAST(legacy_number AS INTEGER)) AS number FROM cert_revisions
-        WHERE project_id=? AND series_key=? AND legacy_number <> '' AND legacy_number NOT GLOB '*[^0-9]*'`,
-      [row.project_id,row.series_key]).number;
-      const nextAvailable = Math.max(series.next_number, Number(legacyMax || 0) + 1);
-      const previousNumber = previous?.official_number ?? Number(previous?.legacy_number);
-      const number = Number.isSafeInteger(previousNumber) && previousNumber > 0 ? previousNumber : nextAvailable;
+      const nextAvailable = nextSeriesNumber(database,row);
+      const number = row.revises_id ? certificateNumber(database,row) : nextAvailable;
       const timestamp = now();
       const frozen = {...model, official_number:number, issued_at:timestamp, status:"issued",pdf_status:"pending",version:row.version+1};
       database.run(`UPDATE cert_series SET next_number=?,final_revision_id=? WHERE project_id=? AND reference=?`,
@@ -398,7 +412,7 @@ function runAction(database, row, body, user, enqueueRender) {
 
 function forAccess(database, row, access) {
   const raw = certificateDocumentInput(database, row);
-  const result = {...raw};
+  const result = {...raw, certificate_number:certificateNumber(database,row)};
   if (row.status === "approved" && !row.snapshot_json) result.can_return_legacy_approval = true;
   const collectionAccess = access.capabilities.includes("view_collections");
   const auditAccess = access.capabilities.includes("view_audit");
@@ -425,5 +439,5 @@ function forAccess(database, row, access) {
   return result;
 }
 
-module.exports = {getRevision, getLines, replaceLines, scopeBaseline, certificateDocumentInput,
+module.exports = {getRevision, getLines, replaceLines, scopeBaseline, certificateDocumentInput, certificateNumber,
   createDraft, requireVersion, saveDraft, runAction, forAccess, recognizedReceipts};

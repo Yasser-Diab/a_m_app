@@ -26,7 +26,7 @@ async function fetchOutput({ apiBase, session, certificate, resource, variant, o
   }
   const blob = await response.blob();
   const extension = resource === "xlsx" ? "xlsx" : "pdf";
-  const fallback = `Certificate-${certificate.official_number || certificate.legacy_number || certificate.id}${certificate.revision > 1 ? `-R${certificate.revision}` : ""}.${extension}`;
+  const fallback = `Certificate-${certificate.certificate_number ?? certificate.official_number ?? certificate.legacy_number ?? "Draft"}${certificate.revision > 1 ? `-R${certificate.revision}` : ""}.${extension}`;
   return {
     blob, filename: outputFileName(response, fallback),
     pages: response.headers.get("X-Certificate-Page-Count"),

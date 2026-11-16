@@ -61,6 +61,13 @@ function localizedMode(value) {
   return Object.keys(modes).find((mode) => key === mode || modes[mode].some((name) => searchText(name) === key)) || value;
 }
 
+function cellChoices(kind, t) {
+  if (kind === "mode") return Object.entries(modes).map(([key,label]) => ({key,label:t(...label)}));
+  if (kind === "recognition") return [{key:"incremental",label:t("عن الفترة","This period")},{key:"cumulative",label:t("تراكمي","Cumulative")}];
+  if (kind === "dimension") return [{key:"",label:"—"},...[["mm","مم"],["cm","سم"],["m","م"]].map(([key,arabic]) => ({key,label:t(arabic,key)}))];
+  return null;
+}
+
 function cellValue(row,key,locations) {
   if (key !== "building_unit" && key !== "floor_apartment") return row[key];
   if (Object.hasOwn(row,key)) return row[key];
@@ -69,7 +76,7 @@ function cellValue(row,key,locations) {
   return key === "building_unit" ? parts[0] || "" : parts.length > 1 ? parts.at(-1) : "";
 }
 
-const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, locations, onEdit, onSelectRow, onMenu, selected, error, locale, addition }) {
+const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, locations, editor, focus, onInput, onSelectRow, onMenu, selected, error, locale, addition }) {
   const rowLabel = rowIndex + 1;
   return <tr aria-rowindex={rowIndex + 2} className={addition ? "pc-grid-addition" : error ? "pc-row-invalid" : undefined}>
     <th scope="row" className="pc-grid-index"><div className="pc-grid-row-buttons">
@@ -82,30 +89,24 @@ const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, loc
       const applicable = applies(row, column) || (readOnly && key === "quantity" && row.billed_quantity != null);
       const value = readOnly && key === "quantity" ? row.billed_quantity ?? row.quantity : cellValue(row,key,locations);
       const label = `${t(...column.label)} · ${rowIndex + 1}`;
-      const coord = { "data-row-id": row._gridId, "data-column": key, "aria-label": label };
+      const active = editor?.columnKey === key;
+      const choices = cellChoices(kind,t);
+      const display = choices?.find((item) => item.key === (value ?? (kind === "mode" ? "direct" : kind === "recognition" ? "incremental" : "")))?.label ?? value;
       let content = null;
       if (kind === "money") content = <Money value={row[key]} locale={locale} />;
       else if (kind === "computedPercent") {
         const percent = Object.hasOwn(row, key) ? value : key === "current_progress" && !row.carried_forward ? row.progress : null;
         content = percent == null || percent === "" ? "—" : <bdi>{numberText(percent)}%</bdi>;
       }
-      else if (applicable && readOnly) content = <bdi>{kind === "mode" && modes[value] ? t(...modes[value]) :
-          key === "progress" ? `${numberText(value ?? 100)}%` : kind === "number" ? numberText(value ?? "") : value ?? ""}</bdi>;
-      else if (applicable && kind === "mode") content = <select {...coord} value={row[key] || "direct"} onChange={(event) => onEdit(row._gridId, key, event.target.value)}>
-        {Object.entries(modes).map(([mode, name]) => <option key={mode} value={mode}>{t(...name)}</option>)}
-      </select>;
-      else if (applicable && kind === "recognition") content = <select {...coord} value={row[key] || "incremental"} onChange={(event) => onEdit(row._gridId, key, event.target.value)}>
-        <option value="incremental">{t("عن الفترة", "This period")}</option><option value="cumulative">{t("تراكمي", "Cumulative")}</option>
-      </select>;
-      else if (applicable && kind === "dimension") content = <select {...coord} dir="ltr" value={row[key] || ""} onChange={(event) => onEdit(row._gridId, key, event.target.value)}>
-        <option value="">—</option><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option>
-      </select>;
-      else if (applicable) content = <input {...coord} autoComplete="off" inputMode={kind === "number" ? "decimal" : undefined}
-        dir={kind === "number" ? "ltr" : "auto"} value={value ?? ""}
-        aria-autocomplete={suggestionKeys.has(key) ? "list" : undefined}
-        placeholder={key === "progress" && (row.mode !== "lump" || !row.claim_amount) ? "100" : undefined}
-        onChange={(event) => onEdit(row._gridId, key, event.target.value)} />;
-      return <td key={key} className={`${applicable ? "" : "pc-grid-off"} ${selected?.includes(key) ? "pc-grid-selected" : ""}`}>{content}</td>;
+      else if (applicable && active && !readOnly) content = <input data-cell-editor="true" aria-label={label} autoComplete="off"
+        readOnly={Boolean(choices)} aria-haspopup={choices ? "listbox" : undefined} inputMode={kind === "number" ? "decimal" : undefined}
+        dir={kind === "number" ? "ltr" : "auto"} value={choices ? display ?? "" : editor.value}
+        aria-autocomplete={suggestionKeys.has(key) ? "list" : undefined} onChange={(event) => onInput(event.target.value)} />;
+      else if (applicable) content = <bdi className="pc-grid-cell-value">{key === "progress" && readOnly ? `${numberText(value ?? 100)}%` :
+        kind === "number" ? numberText(display ?? "") : display ?? ""}</bdi>;
+      return <td key={key} data-row-id={row._gridId} data-column={key} aria-label={label} aria-selected={Boolean(selected?.includes(key))}
+        tabIndex={focus === key ? 0 : -1}
+        className={`${applicable ? "" : "pc-grid-off"} ${selected?.includes(key) ? "pc-grid-selected" : ""}`}>{content}</td>;
     })}
   </tr>;
 });
@@ -116,11 +117,14 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   const additionRow = useRef(null);
   if (!additionRow.current) additionRow.current = emptyLine();
   const nextFocus = useRef(null);
+  const pointerSelection = useRef(null);
+  const editing = useRef(null);
   const resizing = useRef(null);
   const history = useRef({ past: [], future: [] });
   const [historyTick, setHistoryTick] = useState(0);
   const [page, setPage] = useState(0);
   const [selection, setSelection] = useState(null);
+  const [editor, setEditor] = useState(null);
   const [search, setSearch] = useState("");
   const [matchIndex, setMatchIndex] = useState(0);
   const [rowMenu, setRowMenu] = useState(null);
@@ -141,6 +145,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     return modes ? rows.some((row) => modes.includes(row.mode)) : rows.some((row) => row[key] != null && row[key] !== "");
   }), [readOnly,rows]);
   const columns = fullReadView ? GRID_COLUMNS : compactColumns;
+  const selectionColumns = columns.map(({key}) => key);
   const editableColumns = columns.filter(({key}) => gridKeys.includes(key)).map(({key}) => key);
   const locationMap = useMemo(() => new Map(locations.map((location) => [String(location.id), location])), [locations]);
   const editable = !readOnly && !sortedView;
@@ -179,9 +184,15 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   function focusPending() {
     const point = nextFocus.current;
     if (!point) return;
-    const target = grid.current?.querySelector(`[data-row-id="${CSS.escape(point.rowId)}"][data-column="${CSS.escape(point.columnKey)}"]`);
+    const cell = grid.current?.querySelector(`[data-row-id="${CSS.escape(point.rowId)}"][data-column="${CSS.escape(point.columnKey)}"]`);
+    const target = point.edit ? cell?.querySelector('input') : cell;
     if (!target) return;
-    target.focus(); target.select?.(); nextFocus.current = null;
+    target.focus();
+    if (point.edit && !target.readOnly) {
+      if (point.typing) target.setSelectionRange(target.value.length,target.value.length);
+      else target.select();
+    }
+    nextFocus.current = null;
   }
   useLayoutEffect(focusPending);
 
@@ -235,11 +246,11 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     setSelection((current) => smartSelectionAfterNavigation({ selection: current, destination: point, extendSelection: extend }));
   }
 
-  function range() {
+  function range(order = selectionColumns) {
     if (!selection) return null;
     const rowIndex = (point) => displayRows.findIndex((row) => row._gridId === point.rowId);
     const indexes = [rowIndex(selection.anchorCell), rowIndex(selection.focusCell)];
-    const keys = [editableColumns.indexOf(selection.anchorCell.columnKey), editableColumns.indexOf(selection.focusCell.columnKey)];
+    const keys = [order.indexOf(selection.anchorCell.columnKey), order.indexOf(selection.focusCell.columnKey)];
     if ([...indexes,...keys].includes(-1)) return null;
     return { rowStart: Math.min(...indexes), rowEnd: Math.max(...indexes), colStart: Math.min(...keys), colEnd: Math.max(...keys) };
   }
@@ -284,15 +295,15 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   }
 
   function rowSelection(id,extend) {
-    const first = {rowId:id,columnKey:editableColumns[0]};
-    const last = {rowId:id,columnKey:editableColumns.at(-1)};
+    const first = {rowId:id,columnKey:selectionColumns[0]};
+    const last = {rowId:id,columnKey:selectionColumns.at(-1)};
     setSelection((current) => ({anchorCell:extend && current?.anchorCell ? current.anchorCell : first,focusCell:last}));
   }
 
   function copySelection(event) {
     const bounds = range();
-    if (!bounds || (bounds.rowStart === bounds.rowEnd && bounds.colStart === bounds.colEnd)) return;
-    const keys = editableColumns.slice(bounds.colStart,bounds.colEnd+1);
+    if (!bounds || event.target.matches('[data-cell-editor]')) return;
+    const keys = selectionColumns.slice(bounds.colStart,bounds.colEnd+1);
     const text = displayRows.slice(bounds.rowStart,bounds.rowEnd+1).filter((row) => row !== additionRow.current)
       .map((row) => keys.map((key) => String(cellValue(row,key,locationMap) ?? "").replace(/[\t\r\n]+/g," ")).join("\t")).join("\n");
     if (!text) return;
@@ -300,10 +311,50 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     event.preventDefault();
   }
 
+  function pointFrom(target) {
+    const cell = target.closest?.('td[data-row-id][data-column]');
+    return cell ? {rowId:cell.dataset.rowId,columnKey:cell.dataset.column} : null;
+  }
+
+  function beginEditing(point, typed) {
+    const row = point && displayRows.find((item) => item._gridId === point.rowId);
+    const column = row && columns.find((item) => item.key === point.columnKey);
+    if (!editable || !row || row.carried_forward || !column || !gridKeys.includes(column.key) || !applies(row,column)) return false;
+    const choices = cellChoices(column.kind,t);
+    const value = String(cellValue(row,column.key,locationMap) ?? "");
+    const active = {...point,value:choices ? value : typed ?? value,initial:value,choices};
+    editing.current = active;
+    setEditor(active);
+    select(point,false);
+    focusCell({...point,edit:true,typing:typed != null});
+    return true;
+  }
+
+  function updateEditor(value) {
+    if (!editing.current) return;
+    const active = {...editing.current,value};
+    editing.current = active;
+    setEditor(active);
+    setSuggestionIndex(-1);
+  }
+
+  function finishEditing({commit = true, restore = false, value} = {}) {
+    const active = editing.current;
+    if (!active) return false;
+    editing.current = null;
+    setEditor(null);
+    setSuggestionCell(null);
+    const next = value ?? active.value;
+    const added = commit && active.rowId === additionRow.current._gridId && Boolean(String(next).trim()) && next !== active.initial;
+    if (commit && next !== active.initial) edit(active.rowId,active.columnKey,next);
+    if (restore) focusCell({rowId:active.rowId,columnKey:active.columnKey});
+    return added;
+  }
+
   const suggestionRow = suggestionCell && displayRows.find((row) => row._gridId === suggestionCell.rowId);
-  const suggestionsForCell = !editable || !suggestionRow ? [] : (() => {
-    const key = suggestionCell.columnKey;
-    const typed = searchText(cellValue(suggestionRow,key,locationMap));
+  const suggestionsForCell = !editable || !suggestionRow || !editor ? [] : editor.choices ?? (() => {
+    const key = editor.columnKey;
+    const typed = searchText(editor.value);
     const contextKey = key === "floor_apartment" ? "building_unit" : key === "building_unit" ? "floor_apartment" : "";
     const context = contextKey && searchText(cellValue(suggestionRow,contextKey,locationMap));
     const catalog = locations.map((location) => ({location:location.label}));
@@ -317,90 +368,130 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
       if (!normalized || seen.has(normalized) || !normalized.includes(typed)) return false;
       seen.add(normalized);
       return true;
-    }).slice(0,12);
+    }).slice(0,12).map((value) => ({key:value,label:value}));
   })();
 
   function showSuggestions(target) {
-    const {rowId,column} = target.dataset;
-    if (!editable || !rowId || !suggestionKeys.has(column)) return setSuggestionCell(null);
+    const active = editing.current;
+    if (!target.matches('[data-cell-editor]') || !active || (!active.choices && !suggestionKeys.has(active.columnKey))) return;
     const box = target.getBoundingClientRect();
     const width = Math.min(Math.max(box.width,165),window.innerWidth-20);
     const left = Math.max(10,Math.min(locale === "ar" ? box.right-width : box.left,window.innerWidth-width-10));
     const above = window.innerHeight-box.bottom < 220 && box.top > 230;
     setSuggestionIndex(-1);
-    setSuggestionCell({rowId,columnKey:column,width,left,...(above ? {bottom:window.innerHeight-box.top+4} : {top:box.bottom+4})});
+    setSuggestionCell({rowId:active.rowId,width,left,...(above ? {bottom:window.innerHeight-box.top+4} : {top:box.bottom+4})});
   }
 
-  function pickSuggestion(value) {
-    if (!suggestionCell) return;
-    edit(suggestionCell.rowId,suggestionCell.columnKey,value);
-    setSuggestionCell(null);
+  function onCellPointerDown(event) {
+    if (event.button !== 0 || event.pointerType === "touch" || event.target.matches('[data-cell-editor]')) return;
+    const point = pointFrom(event.target);
+    if (!point) return;
+    event.preventDefault();
+    finishEditing();
+    pointerSelection.current = {pointerId:event.pointerId,point,moved:false};
+    select(point,event.shiftKey);
+    event.target.closest('td').focus();
+  }
+
+  function extendPointerSelection(event) {
+    const drag = pointerSelection.current;
+    if (!drag || event.pointerId !== drag.pointerId || !(event.buttons & 1)) return;
+    const point = pointFrom(event.target);
+    if (!point || (point.rowId === drag.point.rowId && point.columnKey === drag.point.columnKey)) return;
+    drag.point = point;
+    drag.moved = true;
+    select(point,true);
+    event.target.closest('td').focus({preventScroll:true});
   }
 
   function onKeyDown(event) {
-    if (!editable || event.defaultPrevented || event.nativeEvent.isComposing) return;
-    const { rowId, column } = event.target.dataset;
-    if (event.key === "Enter" && event.target.dataset.rowSelector) {
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    const key = event.key;
+    const control = event.ctrlKey || event.metaKey;
+    if (key === "Enter" && event.target.dataset.rowSelector) {
       event.preventDefault();
-      const id = event.target.dataset.rowSelector;
-      const index = displayRows.findIndex((row) => row._gridId === id);
+      const index = displayRows.findIndex((row) => row._gridId === event.target.dataset.rowSelector);
       const next = displayRows[index] === additionRow.current ? displayRows[index] :
         displayRows.slice(index+1).find((row) => !row.carried_forward);
-      if (next) focusCell({rowId:next._gridId,columnKey:editableColumns[0]});
+      if (next) {
+        const point = {rowId:next._gridId,columnKey:selectionColumns[0]};
+        select(point,false);
+        focusCell(point);
+      }
       return;
     }
-    if (!rowId || !column) return;
-    const physical = event.code;
-    const control = event.ctrlKey || event.metaKey;
-    if (event.key === "Escape" && suggestionsForCell.length) {
-      event.preventDefault(); event.stopPropagation(); setSuggestionCell(null); return;
+    const point = pointFrom(event.target) || (event.target === grid.current ? selection?.focusCell : null);
+    if (!point) return;
+    const active = event.target.matches('[data-cell-editor]') ? editing.current : null;
+    if (active && key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      finishEditing({commit:Boolean(suggestionsForCell.length),restore:true});
+      return;
     }
-    if (suggestionsForCell.length && !control && !event.shiftKey) {
-      if (["ArrowUp","ArrowDown"].includes(event.key)) {
+    if (active && suggestionsForCell.length && !control && !event.shiftKey) {
+      if (key === "ArrowUp" || key === "ArrowDown") {
         event.preventDefault();
         const count = suggestionsForCell.length;
-        setSuggestionIndex((index) => index < 0 ? (event.key === "ArrowUp" ? count-1 : 0) :
-          (index+(event.key === "ArrowUp" ? -1 : 1)+count)%count);
+        setSuggestionIndex((index) => index < 0 ? (key === "ArrowUp" ? count-1 : 0) : (index+(key === "ArrowUp" ? -1 : 1)+count)%count);
         return;
       }
-      if (event.key === "Enter" && suggestionIndex >= 0 && suggestionsForCell[suggestionIndex] != null) {
-        event.preventDefault(); pickSuggestion(suggestionsForCell[suggestionIndex]); return;
+      if (key === "Enter" && suggestionIndex >= 0) {
+        event.preventDefault();
+        finishEditing({value:suggestionsForCell[suggestionIndex].key,restore:true});
+        return;
       }
     }
-    if (control && (physical === "KeyZ" || physical === "KeyY")) {
-      event.preventDefault(); historyMove(event.shiftKey || physical === "KeyY" ? "future" : "past"); return;
+    if (active && key !== "Enter" && key !== "Tab" && key !== "ArrowDown" && key !== "ArrowUp") return;
+    if (!active && editable && control && (event.code === "KeyZ" || event.code === "KeyY")) {
+      event.preventDefault(); historyMove(event.shiftKey || event.code === "KeyY" ? "future" : "past"); return;
     }
-    if (isSmartFillDownShortcut(event)) {
+    if (!active && editable && isSmartFillDownShortcut(event)) {
       const next = rows.some((row) => row.carried_forward) ? null :
-        fillSmartSelectionDownRows({ rows, range: range(), columnOrder: editableColumns, createRow: emptyLine });
+        fillSmartSelectionDownRows({rows,range:range(editableColumns),columnOrder:editableColumns,createRow:emptyLine});
       if (next) { event.preventDefault(); change(next); }
       return;
     }
-    const rowIndex = displayRows.findIndex((row) => row._gridId === rowId);
-    const columnIndex = editableColumns.indexOf(column);
-    const key = event.key;
-    if (control && key.startsWith("Arrow")) {
-      const physicalKey = locale === "en" ? ({ ArrowLeft: "ArrowRight", ArrowRight: "ArrowLeft" }[key] || key) : key;
-      const point = findSmartCtrlArrowDestination({ rows:displayRows, columnOrder:editableColumns, focusCell: { rowId, columnKey: column }, direction:physicalKey });
-      if (point) { event.preventDefault(); select(point, event.shiftKey); focusCell(point); }
+    if (!active && !control && !event.altKey && (key === "F2" || key.length === 1)) {
+      if (beginEditing(point,key === "F2" ? undefined : key)) event.preventDefault();
+      return;
+    }
+    if (!active && control && key.startsWith("Arrow")) {
+      const physicalKey = locale === "en" ? ({ArrowLeft:"ArrowRight",ArrowRight:"ArrowLeft"}[key] || key) : key;
+      const destination = findSmartCtrlArrowDestination({rows:displayRows,columnOrder:selectionColumns,focusCell:point,direction:physicalKey});
+      if (destination) { event.preventDefault(); select(destination,event.shiftKey); focusCell(destination); }
       return;
     }
     const horizontal = locale === "ar" ? -1 : 1;
-    const deltas = { Enter: [event.shiftKey ? -1 : 1, 0], ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -horizontal], ArrowRight: [0, horizontal] };
-    const delta = deltas[key];
-    if (!delta || (key.startsWith("Arrow") && delta[1] && !event.shiftKey) || (key === "Enter" && event.target.tagName !== "INPUT")) return;
-    if (key === "Enter") event.preventDefault();
-    let targetIndex = rowIndex + delta[0];
-    while (delta[0] && displayRows[targetIndex]?.carried_forward) targetIndex += delta[0];
-    const next = displayRows[targetIndex];
-    const target = editableColumns[columnIndex + delta[1]];
-    const targetColumn = GRID_COLUMNS.find((item) => item.key === target && next && applies(next,item)) ||
-      (key === "Enter" && next ? columns.find((item) => gridKeys.includes(item.key) && applies(next,item)) : null);
-    if (next && targetColumn) {
-      event.preventDefault();
-      const point = { rowId: next._gridId, columnKey: targetColumn.key };
-      select(point, key !== "Enter" && event.shiftKey);
-      focusCell(point);
+    const delta = {Enter:[event.shiftKey ? -1 : 1,0],Tab:[0,event.shiftKey ? -1 : 1],
+      ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-horizontal],ArrowRight:[0,horizontal]}[key];
+    if (!delta || (key === "Tab" && !active)) return;
+    const rowIndex = displayRows.findIndex((row) => row._gridId === point.rowId);
+    const targetIndex = rowIndex + delta[0];
+    const targetColumn = selectionColumns[selectionColumns.indexOf(point.columnKey)+delta[1]];
+    if (active) {
+      const added = finishEditing();
+      const destination = added && targetIndex === displayRows.length ? additionRow.current : displayRows[targetIndex];
+      if (destination && targetColumn) {
+        event.preventDefault();
+        const target = {rowId:destination._gridId,columnKey:targetColumn};
+        select(target,false);
+        focusCell(target,targetIndex);
+      } else if (key !== "Tab") {
+        event.preventDefault();
+        focusCell(point);
+      }
+      return;
+    }
+    event.preventDefault();
+    if (key === "Enter" && displayRows[rowIndex] === additionRow.current) {
+      beginEditing(point);
+      return;
+    }
+    if (displayRows[targetIndex] && targetColumn) {
+      const target = {rowId:displayRows[targetIndex]._gridId,columnKey:targetColumn};
+      select(target,key !== "Enter" && event.shiftKey);
+      focusCell(target,targetIndex);
     }
   }
 
@@ -409,7 +500,9 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     const row = additionRow.current;
     additionRow.current = emptyLine();
     change([...rows,row]);
-    focusCell({rowId:row._gridId,columnKey:"description"},rows.length);
+    const point = {rowId:row._gridId,columnKey:"description"};
+    select(point,false);
+    focusCell(point,rows.length);
   }
 
   function toggleFullScreen() {
@@ -481,22 +574,31 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
         if (fullScreen) setViewport({top:event.currentTarget.scrollTop,height:event.currentTarget.clientHeight});
         if (suggestionCell) setSuggestionCell(null);
       }}
-      onMouseDown={(event) => { const { rowId, column } = event.target.dataset; if (rowId && column) select({ rowId, columnKey: column }, event.shiftKey); }}
-      onFocus={(event) => {
-        const {rowId,column} = event.target.dataset;
-        showSuggestions(event.target);
-        if (rowId && column && !nextFocus.current && !event.nativeEvent.sourceCapabilities) select({rowId,columnKey:column},false);
+      onPointerDown={onCellPointerDown}
+      onPointerMove={extendPointerSelection}
+      onClick={(event) => {
+        if (event.nativeEvent.pointerType !== "touch") return;
+        const point = pointFrom(event.target);
+        if (point && !editing.current) select(point,false);
       }}
-      onBlur={() => setSuggestionCell(null)}
-      onInput={(event) => showSuggestions(event.target)}
+      onDoubleClick={(event) => {
+        if (!pointerSelection.current?.moved && !editing.current) beginEditing(pointFrom(event.target));
+      }}
+      onFocus={(event) => showSuggestions(event.target)}
+      onBlur={(event) => {
+        if (event.target.matches('[data-cell-editor]')) finishEditing();
+      }}
       onCopy={copySelection}
       onPaste={(event) => {
-        const {rowId,column,rowSelector} = event.target.dataset;
+        const {rowSelector} = event.target.dataset;
         const value = event.clipboardData.getData("text/plain");
-        const point = rowId ? {rowId,columnKey:column} : rowSelector ? {rowId:rowSelector,columnKey:editableColumns[0]} : selection?.anchorCell;
-        if (editable && (/[\t\r\n]/.test(value) || rowSelector) && paste(value,point)) event.preventDefault();
+        const point = pointFrom(event.target) || (rowSelector ? {rowId:rowSelector,columnKey:editableColumns[0]} : selection?.focusCell);
+        if (editable && gridKeys.includes(point?.columnKey) && (!editing.current || /[\t\r\n]/.test(value))) {
+          if (editing.current) finishEditing({commit:false,restore:true});
+          if (paste(value,point)) event.preventDefault();
+        }
       }}>
-      <table className="pc-grid" aria-rowcount={displayRows.length + 1}>
+      <table className="pc-grid" role="grid" aria-multiselectable="true" aria-rowcount={displayRows.length + 1}>
         <colgroup><col style={{width:72}} />{columns.map(({ key, width }) => <col key={key} style={{ width:widths[key] || width || 105 }} />)}</colgroup>
         <thead><tr><th scope="col" className="pc-grid-index">#</th>{columns.map(({key,label,width}) => <th scope="col" key={key}>{t(...label)}
           <button type="button" className="pc-grid-resizer" aria-label={`${t("تغيير عرض العمود","Resize column")} ${t(...label)}`}
@@ -521,10 +623,12 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
         {fullScreen && start > 0 && <tr className="pc-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:start*virtualHeight}} /></tr>}
         {visible.map((row, index) => {
           const absolute = start + index;
-          const selected = !sortedView && selectedRange && absolute >= selectedRange.rowStart && absolute <= selectedRange.rowEnd
-            ? editableColumns.slice(selectedRange.colStart, selectedRange.colEnd + 1) : null;
+          const selected = selectedRange && absolute >= selectedRange.rowStart && absolute <= selectedRange.rowEnd
+            ? selectionColumns.slice(selectedRange.colStart, selectedRange.colEnd + 1) : null;
           return <WorkRow key={row._gridId} row={row} rowIndex={absolute} columns={columns} t={t} readOnly={!editable || row.carried_forward} locations={locationMap}
-            onEdit={edit} onSelectRow={rowSelection} onMenu={setRowMenu} selected={selected} error={errors.has(String(row.id)) || errors.has(String(row.identity))}
+            editor={editor?.rowId === row._gridId ? editor : null}
+            focus={selection?.focusCell.rowId === row._gridId ? selection.focusCell.columnKey : null}
+            onInput={updateEditor} onSelectRow={rowSelection} onMenu={setRowMenu} selected={selected} error={errors.has(String(row.id)) || errors.has(String(row.identity))}
             locale={locale} addition={canAdd && row === additionRow.current} />;
         })}
         {fullScreen && end < displayRows.length && <tr className="pc-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:(displayRows.length-end)*virtualHeight}} /></tr>}
@@ -534,8 +638,8 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     </div>
     {suggestionCell && suggestionsForCell.length > 0 && <div className="pc-grid-suggestions" role="listbox"
       style={{width:suggestionCell.width,left:suggestionCell.left,top:suggestionCell.top,bottom:suggestionCell.bottom}}>
-      {suggestionsForCell.map((value,index) => <div role="option" key={value} aria-selected={suggestionIndex === index} dir="auto"
-        onMouseDown={(event) => event.preventDefault()} onClick={() => pickSuggestion(value)}>{value}</div>)}
+      {suggestionsForCell.map(({key,label},index) => <div role="option" key={key} aria-selected={suggestionIndex === index} dir="auto"
+        onMouseDown={(event) => event.preventDefault()} onClick={() => finishEditing({value:key,restore:true})}>{label}</div>)}
     </div>}
     <div className="pc-grid-footer">
       {fullScreen ? <span><bdi>{rows.length}</bdi> {t("صفوف","rows")}</span> : <div className="pc-pagination">

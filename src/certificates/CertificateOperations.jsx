@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, queryString, Status, useDebounce, useResource } from "./shared.jsx";
+import "./certificates.css";
 
 export function ProjectPicker({ value, onSelect, request, t, disabled }) {
   const [search, setSearch] = useState("");
@@ -160,17 +161,30 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
 
 const kinds = { receipt: ["تحصيل عادي", "Ordinary receipt"], advance: ["دفعة مقدمة", "Advance receipt"], reversal: ["عكس تحصيل", "Reversal"] };
 
-export function Collections({ request, canEdit, locale, t, onAccessChanged }) {
+export function Collections({ request, canEdit, canDelete, locale, t, onAccessChanged }) {
   const [project, setProject] = useState(null);
   const [cutoff, setCutoff] = useState(localDate);
   const [revision, setRevision] = useState(0);
   const [editor, setEditor] = useState(null);
+  const [changeError, setChangeError] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const ledger = useResource(request, project ? `/projects/${project.id}/collections${queryString({ cutoff })}` : null, revision);
   const context = useResource(request, project ? `/projects/${project.id}` : null);
   const certificates = useResource(request, project && editor ? `/${queryString({ project_id: project.id, status: "issued" })}` : null);
   const currency = project?.currency || context.data?.currency;
   const locations = useMemo(() => locationOptions(context.data?.locations), [context.data?.locations]);
   const data = ledger.data;
+  async function deleteReceipt(receipt) {
+    if (deleting || !window.confirm(t("هل تريد حذف هذه الدفعة نهائيًا؟", "Permanently delete this payment?"))) return;
+    setChangeError(null);
+    setDeleting(true);
+    try {
+      await request(`/projects/${project.id}/collections/${receipt.id}`, {method:"DELETE"});
+      setRevision((current) => current + 1);
+    } catch (error) {
+      setChangeError(error);
+    } finally { setDeleting(false); }
+  }
   return <section className="pc-panel pc-stack">
     <div className="pc-toolbar"><h2>{t("التحصيلات", "Collections")}</h2>
       {canEdit && <button type="button" className="primary" disabled={!project} onClick={() => setEditor({ kind: "receipt" })}><Plus size={16} />{t("تسجيل تحصيل", "Record receipt")}</button>}</div>
@@ -178,7 +192,7 @@ export function Collections({ request, canEdit, locale, t, onAccessChanged }) {
       <ProjectPicker value={project} onSelect={setProject} request={request} t={t} />
       <Field label={t("تاريخ قطع التحصيلات", "Collections cutoff")}><input type="date" dir="ltr" value={cutoff} onChange={(event) => setCutoff(event.target.value)} /></Field>
     </div>
-    <Problem error={ledger.error || context.error} t={t} />
+    <Problem error={changeError || ledger.error || context.error} t={t} />
     {ledger.pending && <p role="status">{t("جارٍ تحميل التحصيلات…", "Loading collections…")}</p>}
     {data && <>
       <div className="pc-cards">
@@ -186,8 +200,9 @@ export function Collections({ request, canEdit, locale, t, onAccessChanged }) {
         <div><span>{t("رصيد غير موزع", "Unapplied balance")}</span><strong><Money value={data.unapplied} locale={locale} currency={currency} /></strong></div>
         <div><span>{t("تاريخ القطع", "Cutoff")}</span><strong><bdi>{data.cutoff || cutoff}</bdi></strong></div>
       </div>
-      <LedgerTable data={data} canEdit={canEdit} t={t} locale={locale} currency={currency} locations={locations} onReverse={(receipt) => setEditor({ kind: "reversal", receipt })}
-        onFollowup={(action, receipt) => setEditor({ action, receipt })} />
+      <LedgerTable data={data} canEdit={canEdit} canDelete={canDelete} deleting={deleting} t={t} locale={locale} currency={currency} locations={locations}
+        onReverse={(receipt) => setEditor({ kind: "reversal", receipt })} onDelete={deleteReceipt}
+        onFollowup={(action, receipt) => { setChangeError(null); setEditor({ action, receipt }); }} />
     </>}
     {!project && <div className="pc-empty">{t("اختر مشروعًا لعرض تحصيلاته.", "Select a project to see its collections.")}</div>}
     {editor && project && <ReceiptEditor data={editor} project={project} locations={locations} certificates={certificates.data?.items || []} t={t} request={request} currency={currency} onClose={() => setEditor(null)} onSaved={() => {
@@ -196,7 +211,7 @@ export function Collections({ request, canEdit, locale, t, onAccessChanged }) {
   </section>;
 }
 
-function LedgerTable({ data, canEdit, t, locale, currency, locations, onReverse, onFollowup }) {
+function LedgerTable({ data, canEdit, canDelete, deleting, t, locale, currency, locations, onReverse, onFollowup, onDelete }) {
   const reversed = new Set((data.receipts || []).filter((row) => row.kind === "reversal").map((row) => row.reverses_id));
   const allocated = new Map();
   for (const row of data.allocations || []) allocated.set(row.receipt_id, (allocated.get(row.receipt_id) || 0) + row.amount_minor);
@@ -205,6 +220,10 @@ function LedgerTable({ data, canEdit, t, locale, currency, locations, onReverse,
       <tbody>{(data.receipts || []).map((receipt) => <tr key={receipt.id}>
         <td><bdi>{receipt.received_at}</bdi></td><td>{kinds[receipt.kind] ? t(...kinds[receipt.kind]) : receipt.kind}</td><td><bdi>{receipt.reference || "—"}</bdi></td><td><Status t={t} value={receipt.status} /></td>
         <td><Money value={receipt.amount} locale={locale} currency={receipt.currency || currency} /></td><td><div className="pc-toolbar">
+          {canEdit && receipt.source !== "payment" && receipt.kind !== "reversal" && !reversed.has(receipt.id) &&
+            <button type="button" onClick={() => onFollowup("edit", receipt)}>{t("تعديل الدفعة", "Edit payment")}</button>}
+          {canDelete && receipt.source !== "payment" && !reversed.has(receipt.id) &&
+            <button type="button" className="danger" disabled={deleting} onClick={() => onDelete(receipt)}>{t("حذف الدفعة", "Delete payment")}</button>}
           {canEdit && !receipt.source && !reversed.has(receipt.id) && receipt.status !== "cleared" && <button type="button" onClick={() => onFollowup("clear", receipt)}>{t("تأكيد التحصيل", "Mark cleared")}</button>}
           {canEdit && !receipt.source && receipt.kind !== "reversal" && !reversed.has(receipt.id) && <>
             {receipt.amount_minor > (allocated.get(receipt.id) || 0) && <button type="button" onClick={() => onFollowup("allocate", receipt)}>{t("توزيع", "Allocate")}</button>}
@@ -221,24 +240,37 @@ function LedgerTable({ data, canEdit, t, locale, currency, locations, onReverse,
   </>;
 }
 
-function ReceiptEditor({ data, project, locations, certificates, t, request, currency, onClose, onSaved, onAccessChanged }) {
+export function ReceiptEditor({ data, project, locations = [], certificates = [], t, request, currency, onClose, onSaved, onAccessChanged }) {
   const [commandKey] = useState(newKey);
   const [draft, setDraft] = useState(() => {
     const today = localDate();
     const actionDate = data.receipt?.received_at > today ? data.receipt.received_at : today;
+    if (data.action === "edit") {
+      const receipt = data.receipt;
+      return {kind:receipt.kind,received_at:receipt.received_at,due_at:receipt.due_at || "",cleared_at:receipt.cleared_at || "",
+        method:receipt.method || "",reference:receipt.reference || "",evidence:receipt.evidence || "",amount:receipt.amount,
+        status:receipt.status,allocations:[]};
+    }
     return { kind: data.kind, received_at: actionDate, allocated_at: actionDate, due_at: "", cleared_at: data.action === "clear" ? actionDate : "", method: "", reference: "", evidence: "", amount: data.receipt?.amount ?? "", status: "received", allocations: data.action === "allocate" ? [{ key: newKey(), amount: "" }] : [] };
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const change = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
   const reverse = draft.kind === "reversal";
-  const followup = data.action;
+  const isEdit = data.action === "edit";
+  const followup = isEdit ? null : data.action;
   const allocationEdit = (key, field, value) => change("allocations", draft.allocations.map((row) => row.key === key ? { ...row, [field]: value } : row));
   async function save(event) {
     event.preventDefault(); setBusy(true); setError(null);
     try {
       const allocations = draft.allocations.map(({ key, amount, ...row }) => ({ ...row, amount: numberText(amount) }));
       const endpoint = `/projects/${project.id}/collections`;
+      if (isEdit) {
+        const {allocations:_, ...changes} = draft;
+        await request(`${endpoint}/${data.receipt.id}`, {method:"PATCH",body:{...changes,amount:numberText(changes.amount)}});
+        onSaved();
+        return;
+      }
       const body = followup
         ? { action: followup, cleared_at: draft.cleared_at, allocated_at: draft.allocated_at, allocations }
         : { ...draft, currency, amount: numberText(draft.amount), reverses_id: data.receipt?.id, allocations };
@@ -249,7 +281,7 @@ function ReceiptEditor({ data, project, locations, certificates, t, request, cur
       if ([401, 403].includes(cause.status)) onAccessChanged?.();
     } finally { setBusy(false); }
   }
-  const title = followup === "clear" ? t("تأكيد التحصيل", "Mark cleared") : followup === "allocate" ? t("توزيع التحصيل", "Allocate receipt") : reverse ? t("عكس تحصيل", "Reverse receipt") : t("تسجيل تحصيل", "Record collection");
+  const title = isEdit ? t("تعديل الدفعة", "Edit payment") : followup === "clear" ? t("تأكيد التحصيل", "Mark cleared") : followup === "allocate" ? t("توزيع التحصيل", "Allocate receipt") : reverse ? t("عكس تحصيل", "Reverse receipt") : t("تسجيل تحصيل", "Record collection");
   return <Dialog title={title} t={t} onClose={() => { if (!busy) onClose(); }}>
     <form className="pc-stack" onSubmit={save}>
       {followup === "clear" && <Field label={t("تاريخ التحصيل", "Clearance date")}><input type="date" dir="ltr" value={draft.cleared_at} min={data.receipt.received_at} required onChange={(event) => change("cleared_at", event.target.value)} /></Field>}
@@ -265,7 +297,7 @@ function ReceiptEditor({ data, project, locations, certificates, t, request, cur
         <Field label={t("المرجع", "Reference")}><input dir="auto" value={draft.reference} required={reverse} onChange={(event) => change("reference", event.target.value)} /></Field>
         <Field label={t("مرجع المستند المؤيد", "Supporting evidence reference")}><input dir="auto" value={draft.evidence} onChange={(event) => change("evidence", event.target.value)} /></Field>
       </div>}
-      {!reverse && followup !== "clear" && <fieldset>
+      {!isEdit && !reverse && followup !== "clear" && <fieldset>
         <legend>{t("توزيع المبلغ", "Allocations")}</legend>
         {draft.allocations.map((row, index) => <div className="pc-form" key={row.key}>
           <Field label={t("الموقع", "Location")}><select value={row.location_id || ""} onChange={(event) => allocationEdit(row.key, "location_id", event.target.value)}><option value="">{t("المشروع بالكامل", "Project-wide")}</option>{locations.map((location) => <option key={location.id} value={location.id}>{optionLabel(location)}</option>)}</select></Field>
@@ -276,7 +308,7 @@ function ReceiptEditor({ data, project, locations, certificates, t, request, cur
         <button type="button" onClick={() => change("allocations", [...draft.allocations, { key: newKey(), amount: "" }])}><Plus size={16} />{t("إضافة توزيع", "Add allocation")}</button>
       </fieldset>}
       <Problem error={error} t={t} />
-      <div><button className="primary" type="submit" disabled={busy || followup === "allocate" && !draft.allocations.length}>{followup ? t("حفظ التغيير", "Save change") : reverse ? t("تأكيد العكس", "Confirm reversal") : t("حفظ التحصيل", "Save receipt")}</button></div>
+      <div><button className="primary" type="submit" disabled={busy || followup === "allocate" && !draft.allocations.length}>{followup || isEdit ? t("حفظ التغيير", "Save change") : reverse ? t("تأكيد العكس", "Confirm reversal") : t("حفظ التحصيل", "Save receipt")}</button></div>
     </form>
   </Dialog>;
 }

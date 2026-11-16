@@ -55,10 +55,22 @@ async function renderCertificatePdf(model) {
 
 function addWorksheet(workbook, model, name, columns, rows) {
   const sheet = workbook.addWorksheet(name, { views: [{ rightToLeft: model.direction === 'rtl', state: 'frozen', ySplit: 1 }] });
+  const color = (value, fallback) => {
+    const hex = (value || fallback).slice(1);
+    return { argb: 'FF' + (hex.length === 3 ? hex.split('').map((character) => character.repeat(2)).join('') : hex).toUpperCase() };
+  };
+  const style = model.style || {};
+  const bodyFont = (style.bodyFont || 'Arial').split(',')[0].replace(/"/g,'');
+  const fill = (value, fallback) => ({ type: 'pattern', pattern: 'solid', fgColor: color(value,fallback) });
+  const border = model.direction === 'rtl' ? 'right' : 'left';
+  const formatters = {money:new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
+    value:new Intl.NumberFormat('en-US',{maximumFractionDigits:6})};
   sheet.columns = columns.map((column) => ({
     header: column.label,
     key: column.key,
-    width: Math.max(column.weight + 4, Math.min(28, column.label.length + 2)),
+    width: Math.max(column.weight + 4, Math.min(28, column.label.length + 2),
+      ...rows.map((row) => column.kind !== 'text' && row[column.key] != null
+        ? formatters[column.kind === 'money' ? 'money' : 'value'].format(row[column.key]).length + 4 : 0)),
     style: { alignment: { vertical: 'top', wrapText: column.kind === 'text' },
       ...(column.kind === 'money' ? { numFmt: '#,##0.00;[Red]-#,##0.00' } : {}),
       ...(column.kind === 'percent' ? { numFmt: '0.######"%"' } : {}),
@@ -66,11 +78,23 @@ function addWorksheet(workbook, model, name, columns, rows) {
   }));
   sheet.getRow(1).height = 32;
   sheet.getRow(1).eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: 'FF183148' } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5EEF1' } };
+    cell.font = { name:bodyFont, bold: true, color: color(style.tableHeaderText,'#183148') };
+    cell.fill = fill(style.tableHeaderBg,'#e5eef1');
+    cell.border = {bottom:{style:'thin',color:color(style.lineColor,'#265e68')}};
     cell.alignment = { wrapText: true, vertical: 'middle' };
   });
-  for (const row of rows) sheet.addRow(row);
+  for (const row of rows) {
+    const entry = sheet.addRow(row.groupName ? [row.groupName] : row);
+    if (row.groupName) sheet.mergeCells(entry.number,1,entry.number,columns.length);
+    for (let index = 1; index <= columns.length; index++) {
+      const cell = entry.getCell(index);
+      cell.font = { name:bodyFont, color:color(style.tableBodyText,'#183148'), bold:Boolean(row.groupName || row.subtotal) };
+      cell.fill = entry.number % 2 ? fill(style.tableOddBg,'#ffffff') : fill(style.tableEvenBg,'#f8fafb');
+      cell.border = {bottom:{style:'hair', color:color(style.lineColor,'#265e68')}};
+    }
+    if (row.band) entry.getCell(1).border = { ...entry.getCell(1).border,
+      [border]:{style:row.band === 'unit' ? 'medium' : 'thin',color:color(style.lineColor,'#265e68') } };
+  }
   return sheet;
 }
 
@@ -89,7 +113,12 @@ async function writeCertificateXlsx(model) {
   if (model.issuer.website) identity.addRow([model.issuer.website, model.issuer.shortName]);
   if (model.appVersion) identity.addRow([`EasyCommercial ${model.appVersion}`]);
   const type = { key: 'work_type', label: model.labels.work_type, weight: 18, kind: 'text' };
-  const detail = model.detailGroups?.flatMap((group) => [
+  const detail = model.detailBands?.map(({kind,path,line,totals}) => {
+    const band = path.some((group) => group.kind === 'unit') ? 'unit' : path.some((group) => group.kind === 'building') ? 'building' : '';
+    if (kind === 'group') return {groupName:path.at(-1).name,band};
+    if (kind === 'subtotal') return {description:model.labels.subtotal,subtotal:true,...totals,band};
+    return {...line,band};
+  }) ?? model.detailGroups?.flatMap((group) => [
     ...group.lines,
     ...(model.showGroupSubtotals && group.name ? [{description:`${model.labels.subtotal} · ${group.name}`,...group.totals}] : []),
   ]) ?? model.lines;

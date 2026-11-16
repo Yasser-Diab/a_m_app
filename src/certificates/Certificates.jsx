@@ -79,7 +79,7 @@ export default function ProgressCertificates({ api, apiBase, session, access, ui
         }}
         onBackToSearch={editor.id ? () => searchRef.current?.focus() : undefined} />}
     </div>}
-    {tab === "collections" && can("view_collections") && <Collections request={request} canEdit={can("manage_collections")} locale={uiLanguage} t={t} onAccessChanged={onAccessChanged} />}
+    {tab === "collections" && can("view_collections") && <Collections request={request} canEdit={can("manage_collections")} canDelete={access.can_delete_documents} locale={uiLanguage} t={t} onAccessChanged={onAccessChanged} />}
     {tab === "reports" && <Reports request={request} t={t} locale={uiLanguage} onOpen={(project) => { setListProject(project); setTab("open"); }} />}
     {tab === "settings" && <ProjectSettings request={request} canManage={can("manage_settings")} t={t} />}
   </div>;
@@ -105,7 +105,7 @@ function CertificateList({ request, revision, t, locale, project, setProject, se
       <div className="pc-table-scroll"><table className="pc-table">
         <thead><tr><th>{t("المستخلص", "Certificate")}</th><th>{t("العميل", "Customer")}</th><th>{t("المشروع", "Project")}</th><th>{t("تاريخ قطع الأعمال", "Work cutoff")}</th><th>{t("الحالة", "Status")}</th><th>{t("قيمة الأعمال", "Work value")}</th></tr></thead>
         <tbody>{items.map((item) => <tr key={item.id}>
-          <th scope="row"><button type="button" className="pc-name" aria-current={String(selectedId) === String(item.id) ? "true" : undefined} onClick={() => onOpen(item.id)}><bdi>{item.official_number || item.legacy_number || `#${item.id}`}</bdi>{item.revision > 1 && <span className="pc-caption">{t("مراجعة", "Rev.")} <bdi>{item.revision}</bdi></span>}</button></th>
+          <th scope="row"><button type="button" className="pc-name" aria-current={String(selectedId) === String(item.id) ? "true" : undefined} onClick={() => onOpen(item.id)}><bdi>{item.certificate_number ?? item.official_number ?? item.legacy_number ?? t("مسودة", "Draft")}</bdi>{item.revision > 1 && <span className="pc-caption">{t("مراجعة", "Rev.")} <bdi>{item.revision}</bdi></span>}</button></th>
           <td><bdi>{item.customer_name}</bdi></td><td><bdi>{item.project_name}</bdi></td><td><bdi>{item.work_to || "—"}</bdi></td><td><Status t={t} value={item.status} /></td>
           <td><Money value={item.current} locale={locale} currency={item.header?.currency} /></td>
         </tr>)}</tbody>

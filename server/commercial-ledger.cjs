@@ -48,18 +48,25 @@ function priorPayments(database, project) {
       received_at:String(row.received_at || "").slice(0, 10), source:"payment"}));
 }
 
+function workbookReceipt(row) {
+  const entry = parse(row.data_json);
+  const date = String(entry.date || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !row.amount_minor) return null;
+  const status = entry.status || "cleared";
+  return {id:`receipt-import-${row.rowid}`, received_at:date, cleared_at:entry.cleared_at ?? (status === "cleared" ? date : null),
+    due_at:entry.due_date, kind:entry.kind === "advance" ? "advance" : "receipt", status, amount_minor:row.amount_minor,
+    reference:entry.reference || "", location:entry.location, method:entry.method, evidence:entry.evidence,
+    certificate_number:entry.source_number, source:"historical"};
+}
+
 function importedReceipts(database, project, existing = []) {
   const known = new Set(existing.filter((row) => row.reference && row.kind !== "reversal")
     .map((row) => JSON.stringify([lookup(row.reference), row.received_at, row.amount_minor])));
   return database.all(`SELECT rowid, amount_minor, data_json FROM cert_legacy_records
     WHERE project_id=? AND record_type='receipt'`, [project.id]).flatMap((row) => {
-    const entry = parse(row.data_json);
-    const date = String(entry.date || "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !row.amount_minor) return [];
-    if (entry.reference && known.has(JSON.stringify([lookup(entry.reference), date, row.amount_minor]))) return [];
-    return [{id:`receipt-import-${row.rowid}`, received_at:date, cleared_at:date, kind:entry.kind === "advance" ? "advance" : "receipt",
-      status:"cleared", amount_minor:row.amount_minor, reference:entry.reference || "", location:entry.location,
-      certificate_number:entry.source_number, source:"historical"}];
+    const receipt = workbookReceipt(row);
+    if (!receipt || (receipt.reference && known.has(JSON.stringify([lookup(receipt.reference),receipt.received_at,receipt.amount_minor])))) return [];
+    return [receipt];
   });
 }
 
@@ -85,8 +92,12 @@ function projectPaymentRows(database, access, filters) {
   if (!access?.capabilities.includes("view_collections") || (filters.role && filters.role !== "customer")) return [];
   return commercialProjects(database, access, {...filters, hasReceipts:true}).flatMap((project) => {
     const {active, imported} = customerReceipts(database, project);
-    return [...active, ...imported].map((row) => receiptPaymentRow(project, row));
+    const canEdit = access.capabilities.includes("manage_collections");
+    return [...active, ...imported].map((row) => ({...receiptPaymentRow(project,row),
+      can_edit_receipt:canEdit && row.kind !== "reversal",
+      can_delete_receipt:canEdit && access.can_delete_documents,
+      ...(canEdit ? {receipt:{...row,amount:row.amount_minor / 100}} : {})}));
   });
 }
 
-module.exports = {commercialAccess, commercialProjects, customerReceipts, projectPaymentRows};
+module.exports = {commercialAccess, commercialProjects, customerReceipts, projectPaymentRows, workbookReceipt};

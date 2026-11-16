@@ -8,8 +8,8 @@ const {
 } = require("./certificate-access.cjs");
 const {getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, createLocation,
   projectLocations, projectEntrySuggestions, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
-const {allocationLedger, addReceipt, updateReceipt, collectionResponse} = require("./certificate-ledger.cjs");
-const {getRevision, certificateDocumentInput, createDraft, saveDraft, runAction, forAccess, recognizedReceipts} = require("./certificate-revisions.cjs");
+const {allocationLedger, addReceipt, updateReceipt, changeReceipt, collectionResponse} = require("./certificate-ledger.cjs");
+const {getRevision, certificateDocumentInput, certificateNumber, createDraft, saveDraft, runAction, forAccess, recognizedReceipts} = require("./certificate-revisions.cjs");
 const {importLegacyCertificates} = require("./certificate-legacy.cjs");
 const {stageImport, commitImport} = require("./certificate-imports.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
@@ -96,13 +96,14 @@ function certificateList(database, req, access) {
   const joins = "FROM cert_revisions r JOIN cert_projects cp ON r.project_id=cp.id JOIN parties p ON p.id=cp.customer_id LEFT JOIN cert_legacy_workflow lw ON lw.revision_id=r.id";
   const total = database.get(`SELECT count(*) AS total ${joins} WHERE ${where}`,params).total;
   const items = database.all(`
-    SELECT r.id,r.project_id,${displayStatus} AS status,r.pdf_status,r.type,r.revision,r.version,r.official_number,
+    SELECT r.id,r.project_id,r.series_key,r.revises_id,${displayStatus} AS status,r.pdf_status,r.type,r.revision,r.version,r.official_number,
       r.legacy_number,COALESCE(json_extract(lw.edited_json,'$.header.work_to'),r.work_to) AS work_to,r.collection_cutoff,r.issued_at,r.updated_at,r.header_json,
       COALESCE(json_extract(lw.edited_json,'$.totals.current'),json_extract(r.snapshot_json,'$.totals.current')) AS current,
       json_extract(r.snapshot_json,'$.totals.cumulative_payable') AS cumulative_payable,
       cp.name AS project_name,p.display_name AS customer_name
     ${joins} WHERE ${where} ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?
-  `, [...params,pageSize,(page-1)*pageSize]).map(({header_json,...row}) => ({...row,header:parse(header_json)}));
+  `, [...params,pageSize,(page-1)*pageSize]).map(({header_json,series_key,revises_id,...row}) => ({...row,
+    certificate_number:certificateNumber(database,{...row,series_key,revises_id}),header:parse(header_json)}));
   return {items,total,page,limit:pageSize};
 }
 
@@ -435,6 +436,14 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     checked(req,"view_collections",row.id);
     res.json(database.transaction(() => updateReceipt(database,row,idOf(req.params.receiptId),req.body,access.user)));
   });
+  function saveReceiptChange(req,res) {
+    const {project:row,access} = project(req,"manage_collections");
+    checked(req,"view_collections",row.id);
+    const remove = req.method === "DELETE";
+    if (remove && !access.can_delete_documents) fail(403,"Only managers may delete project payments");
+    res.json(database.transaction(() => changeReceipt(database,row,req.params.receiptId,remove ? null : req.body ?? {},access.user)));
+  }
+  router.route("/projects/:projectId/collections/:receiptId").patch(saveReceiptChange).delete(saveReceiptChange);
   router.get("/reports",(req,res) => res.json(reportResponse(database,req,checked(req,"view"))));
 
   router.get("/",(req,res) => res.json(certificateList(database,req,checked(req,"view"))));
@@ -451,7 +460,8 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
   registerCertificateDocumentRoutes(router,{
     database,dataDir,authorize:checked,
     getCertificate:(id) => getRevision(database,id),
-    documentFor:(req,row) => printInput(certificateDocumentInput(database,row),certificateSessionUser(database,req),req.query),
+    documentFor:(req,row) => printInput({...certificateDocumentInput(database,row),certificate_number:certificateNumber(database,row)},
+      certificateSessionUser(database,req),req.query),
     issueAccess:(req,projectId) => checked(req,"issue",projectId),
   });
 

@@ -194,7 +194,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
 
   return <section className="pc-panel pc-editor">
     <div className="pc-toolbar">
-      <h2>{record ? (record.official_number || record.legacy_number ? <>{t("مستخلص", "Certificate")} <bdi>{record.official_number || record.legacy_number}</bdi></> : t("مسودة مستخلص", "Certificate draft")) : t("مستخلص جديد", "New certificate")}</h2>
+      <h2>{record ? <>{t("مستخلص", "Certificate")} <bdi>{record.certificate_number ?? record.official_number ?? record.legacy_number}</bdi></> : t("مستخلص جديد", "New certificate")}</h2>
       {record && <><Status value={record.status} t={t} />{record.revision > 1 && <span className="pc-chip">{t("المراجعة", "Revision")} <bdi>&nbsp;{record.revision}</bdi></span>}</>}
       {record?.pdf_status && <Status value={record.pdf_status} t={t} />}
       {onBackToSearch && <button type="button" onClick={onBackToSearch}>{t("العودة إلى البحث", "Back to search")}</button>}

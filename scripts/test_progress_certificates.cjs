@@ -210,6 +210,11 @@ async function main() {
     assert.equal(statement.totals.net_total,12.5);
     assert.equal(statement.statementRows.find((row) => row.document_type === "progress_certificate").description,"Certificate No. 1");
     assert.equal(statement.statementRows.filter((row) => row.credit === 77).length,1);
+    const advanceRoute = scope + "/collections/" + posted.id;
+    await api(advanceRoute,viewToken,"PATCH",{amount:78},403);
+    await api(advanceRoute,token,"PATCH",{amount:78,reference:"PAY-78"});
+    assert.ok((await api("/payments?party_id=" + customer.id,token)).rows.some((row) => row.collection_amount === 78 && row.can_edit_receipt));
+    assert.equal((await api(reportPath,token)).totals.credit,291);
 
     importLegacyCertificates(db,{fingerprint:"b".repeat(64), source_name:"Test.xlsb",
       customers:[{source_id:"legacy-customer",name:"Legacy Test Customer"}],
@@ -250,6 +255,10 @@ async function main() {
     assert.equal(db.get("SELECT snapshot_json FROM cert_revisions WHERE id=?",[legacy.id]).snapshot_json,original);
     const approved = await api(legacyRoute + "/action",token,"POST",{action:"approve",version:edited.version});
     assert.equal(approved.status,"approved");
+    const legacyPaymentsPath = cert + "/projects/" + legacy.project_id + "/collections";
+    const legacyReceipt = (await api(legacyPaymentsPath,token)).receipts.find((entry) => entry.kind === "advance");
+    assert.equal(legacyReceipt.amount,50);
+    await api(legacyPaymentsPath + "/" + legacyReceipt.id,token,"DELETE",undefined,409);
     await api(legacyRoute,token,"PUT",{version:approved.version,lines:[]},409);
     const correction = await api(legacyRoute + "/action",token,"POST",{action:"revise", reason:"Correct an item",version:approved.version});
     assert.equal(correction.totals.current,0);
@@ -258,6 +267,9 @@ async function main() {
     const stillPosted = await api("/documents/statement?customer=Legacy+Test+Customer&report_language=en",token);
     assert.equal(stillPosted.totals.debit,200);
     await api(cert + "/admin/users/" + settingsAdmin.id,token,"PUT",{capabilities:CAPABILITIES,all_projects:true});
+    await api(advanceRoute,settingsAdmin.certificate_session,"DELETE",undefined,403);
+    await api(advanceRoute,token,"DELETE");
+    assert.equal((await api(reportPath,token)).totals.credit,213);
     await api(legacyRoute,settingsAdmin.certificate_session,"DELETE",{version:approved.version},403);
     const removed = await api(legacyRoute,token,"DELETE",{version:approved.version});
     assert.equal(removed.revisions,2);
@@ -265,17 +277,25 @@ async function main() {
     await api(cert + "/" + correction.id,token,"GET",undefined,404);
     assert.equal(db.get("SELECT COUNT(*) AS n FROM cert_legacy_records WHERE revision_id=?",[legacy.id]).n,0);
     assert.equal((await api("/documents/statement?customer=Legacy+Test+Customer&report_language=en",token)).totals.credit,75);
+    const legacyPaymentRoute = legacyPaymentsPath + "/" + legacyReceipt.id;
+    await api(legacyPaymentRoute,token,"PATCH",{amount:55,reference:"Updated workbook advance"});
+    assert.ok((await api(legacyPaymentsPath,token)).receipts.some((entry) => entry.id === legacyReceipt.id && entry.amount === 55));
+    await api(legacyPaymentRoute,token,"DELETE");
+    assert.equal((await api(legacyPaymentsPath,token)).receipts.some((entry) => entry.id === legacyReceipt.id),false);
 
     const secondProject = cert + "/projects/" + other.id;
     const rule = await api(secondProject + "/settings",token,"PUT",{expected_version:0,effective_at:"2026-01-01",
       settings:{group_by:"unit",show_group_subtotals:true},rules:[{category:"advance_recovery",rate:25}]});
     assert.equal(rule.settings.group_by,"unit");
     const recoverable = await api(secondProject + "/collections",token,"POST",{kind:"advance",amount:100,received_at:date},201);
+    db.run("INSERT INTO cert_series (project_id,reference,next_number) VALUES (?,'',4)",[other.id]);
     const multiPlace = await api(cert,token,"POST",{header,project_id:other.id,lines:[
       {description:"Work A",mode:"direct",quantity:1,unit:"m",rate:120,building_unit:"Tower 1",floor_apartment:"Apartment 3"},
       {description:"Work B",mode:"direct",quantity:1,unit:"m",rate:160,building_unit:"Tower 1",floor_apartment:"Apartment 4"},
       {description:"Work C",mode:"direct",quantity:1,unit:"m",rate:120,building_unit:"Tower 2",floor_apartment:"Apartment 3"},
     ]},201);
+    assert.equal(multiPlace.certificate_number,1);
+    assert.equal((await api(cert + "?project_id=" + other.id,token)).items[0].certificate_number,1);
     assert.equal(multiPlace.totals.advance_recovery,100);
     assert.equal(multiPlace.totals.advance_remaining,0);
     assert.equal(multiPlace.header.group_by,"unit");
@@ -284,6 +304,7 @@ async function main() {
     ]);
     const toApprove = cert + "/" + multiPlace.id + "/action";
     const approvedMulti = await api(toApprove,token,"POST",{action:"approve",version:multiPlace.version});
+    await api(secondProject + "/collections/" + recoverable.id,token,"DELETE",undefined,409);
     assert.equal(db.get("SELECT amount_minor FROM cert_advance_recoveries WHERE advance_id=?",[recoverable.id]).amount_minor,10000);
     const clearedDraft = await api(cert,token,"POST",{header,project_id:other.id,lines:[
       {description:"Follow-up work",mode:"direct",quantity:10,unit:"m",rate:100},

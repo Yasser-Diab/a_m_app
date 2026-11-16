@@ -2,7 +2,7 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 4;
+const MODEL_VERSION = 5;
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
 
 const labels = {
@@ -124,21 +124,17 @@ function column(key, weight, kind = 'text') {
   return { key, weight, kind };
 }
 
-function detailColumns(lines, moneyKeys, sharedLocation, translations, separatedLocation) {
+function detailColumns(lines, moneyKeys, translations, dimensionLabel) {
   const area = lines.some((line) => line.mode === 'area');
   const linear = lines.some((line) => line.mode === 'linear');
   const measured = area || linear;
   const pricedQuantity = lines.some((line) => ['area', 'linear', 'count', 'direct'].includes(line.mode));
   const populated = (key) => lines.some((line) => text(line[key]) !== '');
   const columns = [
-    !separatedLocation && !sharedLocation && populated('location') && column('location', 14),
-    separatedLocation && populated('building_unit') && column('building_unit', 12),
-    separatedLocation && populated('floor_apartment') && column('floor_apartment', 12),
     populated('work_item') && column('work_item', 12),
-    column('description', 27),
-    measured && { ...column('width', 8, 'number'), label: translations[area ? 'width' : 'length'] },
-    area && column('height', 8, 'number'),
-    measured && populated('dimension_unit') && column('dimension_unit', 7),
+    column('description', 38),
+    measured && { ...column('width', 8, 'number'), label: `${translations[area ? 'width' : 'length']} (${dimensionLabel})` },
+    area && { ...column('height', 8, 'number'), label: `${translations.height} (${dimensionLabel})` },
     measured && lines.some((line) => ['area', 'linear'].includes(line.mode) && number(line.count) !== null) && column('count', 7, 'number'),
     (pricedQuantity || populated('billed_quantity')) && column('billed_quantity', 10, 'number'),
     (pricedQuantity || populated('unit')) && column('unit', 7),
@@ -152,11 +148,64 @@ function detailColumns(lines, moneyKeys, sharedLocation, translations, separated
   return columns.filter(Boolean).map((entry) => ({ label: translations[entry.key], ...entry }));
 }
 
+const unitTranslations = [
+  ['م²','m²',/^(?:m\^?2|m²|م2|م²|sqm|square met(?:re|er)s?|متر مربع|متر مسطح)$/i],
+  ['م.ط','lm',/^(?:lm|l\.m\.?|long met(?:re|er)s?|linear met(?:re|er)s?|م\.?\s*ط\.?|متر طولي)$/i],
+  ['م','m',/^(?:m|met(?:re|er)s?|م|متر)$/i],
+  ['م³','m³',/^(?:m\^?3|m³|م3|م³|cbm|cubic met(?:re|er)s?|متر مكعب)$/i],
+  ['عدد','Pcs',/^(?:pcs?\.?|ea|each|count|pieces?|units?|nos?\.?|عدد|وحد[ةه]|قطع[ةه])$/i],
+  ['كجم','kg',/^(?:kg|k\.g\.?|kgs|kilograms?|كجم|كغ|كيلو(?:\s?جرام|\s?غرام)?)$/i],
+  ['جم','g',/^(?:g|grams?|جم|جرام|غرام)$/i],
+  ['طن','t',/^(?:t|tons?|tonnes?|طن)$/i],
+  ['لتر','L',/^(?:l|lit(?:re|er)s?|لتر)$/i],
+  ['مقطوعية','Lump sum',/^(?:ls|lump sum|مقطوعي[ةه]|مقطوعيه)$/i],
+];
+
+function pricedUnit(value, locale, mode) {
+  const unit = text(value);
+  if (!unit) {
+    const defaults = {area:'m²',linear:'lm',count:'pcs'};
+    return defaults[mode] ? pricedUnit(defaults[mode],locale) : '';
+  }
+  const translated = unitTranslations.find(([, , pattern]) => pattern.test(unit));
+  return translated?.[locale === 'ar' ? 0 : 1] ?? unit;
+}
+
+const dimensionFactors = {mm:0.001,cm:0.01,m:1};
+const dimensionNames = {mm:'مم',cm:'سم',m:'م'};
+
+function detailBands(lines, groupBy, subtotal, moneyKeys) {
+  const root = {items:[],children:new Map(),lines:[]};
+  for (const line of lines) {
+    const path = [['building',line.building_unit],['unit',line.floor_apartment],
+      ['work_type',groupBy === 'work_type' ? line.work_type : '']].filter(([,name]) => name);
+    let parent = root;
+    for (const [kind,name] of path) {
+      const key = `${kind}:${name.toLocaleLowerCase()}`;
+      if (!parent.children.has(key)) {
+        const sub = {kind,name,items:[],children:new Map(),lines:[]};
+        parent.children.set(key,sub);
+        parent.items.push(sub);
+      }
+      parent = parent.children.get(key);
+      parent.lines.push(line);
+    }
+    parent.items.push({kind:'line',line});
+  }
+  function flatten(node, ancestors) {
+    if (node.kind === 'line') return [{...node,path:ancestors}];
+    const path = node.kind ? [...ancestors,{kind:node.kind,name:node.name}] : ancestors;
+    return [...(node.kind ? [{kind:'group',path}] : []), ...node.items.flatMap((item) => flatten(item,path)),
+      ...(subtotal && node.kind === groupBy ? [{kind:'subtotal',path,totals:financialRollup(node.lines,moneyKeys)}] : [])];
+  }
+  return flatten(root,[]);
+}
+
 function quantitySummary(lines) {
   const totals = new Map();
   for (const line of lines) {
     if (line.billed_quantity == null || !line.unit) continue;
-    const unit = /^(m2|m²|م2|م²|sqm|متر مربع)$/i.test(line.unit) ? 'm²' : line.unit;
+    const unit = line.unit;
     totals.set(unit, (totals.get(unit) || 0) + line.billed_quantity);
   }
   const format = new Intl.NumberFormat('en-US',{maximumFractionDigits:6});
@@ -201,26 +250,32 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const issuerName = issuerEn || nameForPrint(issuer, 'en') || issuerAr || text(issuer.companyName || issuer.company_name);
   const issuerAlternate = issuerAr;
   const choices = header.optional_fields;
-  const officialNumber = text(input.official_number ?? (historical ? input.legacy_number : ''));
+  const officialNumber = text(input.official_number ?? input.legacy_number ?? input.certificate_number);
   const watermark = input.show_status_watermark === false ? '' : approved ? 'APPROVED' : 'UNAPPROVED';
   const certificateType = t[`${header.type || 'progress'}_type`] || t.progress_type;
   const currency = /^[A-Z]{3}$/.test(text(header.currency)) ? text(header.currency) : 'EGP';
   const totals = input.totals || {};
   const comparable = totals.last_current != null && (input.baseline != null || input.status === 'issued');
-  const locations = new Set((input.lines || []).map((line) => text(line.location)));
-  const commonLocation = text(header.location || header.location_name || (locations.size === 1 ? [...locations][0] : ''));
+  const commonLocation = text(header.location || header.location_name);
   const choiceAllowsLocation = Array.isArray(choices) ? choices.includes('location') : choices?.location !== false;
   const sharedLocation = choiceAllowsLocation ? commonLocation : '';
+  const dimensionUnits = new Set((input.lines || []).filter((line) => ['area','linear'].includes(line.mode))
+    .map((line) => Object.hasOwn(dimensionFactors,line.dimension_unit) ? line.dimension_unit : 'cm'));
+  const dimensionUnit = dimensionUnits.size === 1 ? [...dimensionUnits][0] : 'm';
+  const dimensionLabel = locale === 'ar' ? dimensionNames[dimensionUnit] : dimensionUnit;
   const lines = (input.lines || []).map((line) => {
     const measured = line.mode === 'area' || line.mode === 'linear';
+    const factor = (dimensionFactors[line.dimension_unit] || dimensionFactors.cm) / dimensionFactors[dimensionUnit];
+    const dimension = (value) => number(value) == null ? null : number(value) * factor;
+    const names = certificateLocationFields(line);
     return {
       id: text(line.id), mode: text(line.mode), work_type: text(line.work_type),
-      work_item: text(line.work_item), location: text(line.location), description: text(line.description), ...certificateLocationFields(line),
-      width: measured ? number(line.width) : null,
-      height: line.mode === 'area' ? number(line.height) : null,
-      dimension_unit: measured ? text(line.dimension_unit) : '',
+      work_item: text(line.work_item), description: text(line.description),
+      building_unit:text(names.building_unit), floor_apartment:text(names.floor_apartment),
+      width: measured ? dimension(line.width) : null,
+      height: line.mode === 'area' ? dimension(line.height) : null,
       count: measured ? number(line.count) : null,
-      billed_quantity: number(line.billed_quantity ?? line.quantity), unit: text(line.unit),
+      billed_quantity: number(line.billed_quantity ?? line.quantity), unit: pricedUnit(line.unit,locale,line.mode),
       rate: number(line.rate), agreed_amount: number(line.agreed_amount),
       previous_progress: Object.hasOwn(line,'previous_progress') ? number(line.previous_progress) :
         (line.previous ? progressAtAmount(line,money(line.previous)) : 0),
@@ -231,8 +286,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     };
   });
   const moneyKeys = comparable ? ['last_current', 'previous', 'current', 'cumulative'] : ['previous', 'current', 'cumulative'];
-  const separatedLocation = (input.lines || []).some((line) => Object.hasOwn(line,'building_unit') || Object.hasOwn(line,'floor_apartment'));
-  const columns = detailColumns(lines, moneyKeys, locations.size < 2 && sharedLocation && [...locations].every((name) => !name || name === sharedLocation), t, separatedLocation);
+  const columns = detailColumns(lines, moneyKeys, t, dimensionLabel);
   const groupBy = header.group_by ?? (header.group_work_types ? 'work_type' : 'none');
   const showGroupSubtotals = groupBy !== 'none' && Boolean(header.show_group_subtotals);
   const groups = new Map();
@@ -343,6 +397,12 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const outputMode = outputAliases[header.output_mode] || header.output_mode || 'auto';
   const measured = lines.some((line) => line.mode === 'area' || line.mode === 'linear');
 
+  const palette = {companyNameColor:'#183148',lineColor:'#265e68',tableHeaderBg:'#e5eef1',tableHeaderText:'#183148',
+    tableBodyText:'#183148',tableOddBg:'#ffffff',tableEvenBg:'#f8fafb'};
+  for (const key of Object.keys(palette)) {
+    if (/^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(issuer[key])) palette[key] = issuer[key];
+  }
+  const font = (value) => /^[a-z0-9 ,"'-]+$/i.test(value || '') ? value : 'Arial,Tahoma,sans-serif';
   return {
     modelVersion: MODEL_VERSION, locale, direction: locale === 'ar' ? 'rtl' : 'ltr', labels: t,
     variant, issued, historical, approved, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',
@@ -357,6 +417,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
         ? (issuer.logo_data_url || issuer.logoDataUrl || issuer.logoDataUri) : '',
     },
     preparedBy: text(input.prepared_by), preparedAt: text(input.prepared_at), appVersion: text(input.app_version),
+    style: {...palette, headingFont:font(issuer.headingFontStack), bodyFont:font(issuer.bodyFontStack)},
     qr: certificateQr({issuer:issuerName,shortName,issuedOn:issueDate,quantity,due:totals.cumulative_payable,currency,
       customer:customerName,project:projectName}),
     signatures: (input.rule_settings?.signatures || []).map((person) => ({ name: text(person.name), title: text(person.title) })).filter((person) => person.name),
@@ -364,7 +425,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     groupLabel: t[groupBy === 'building' ? 'building_unit' : groupBy === 'unit' ? 'floor_apartment' : 'work_type'],
     identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
-    detailGroups,
+    detailGroups, detailBands:detailBands(lines,groupBy,showGroupSubtotals,moneyKeys),
     coverRows: showGroupSubtotals || (header.group_by == null && header.group_work_types)
       ? detailGroups.filter(({name}) => name).map(({name,totals}) => ({name,...totals})) : [],
     workTotals: financialRollup(lines, moneyKeys), financeRows,
@@ -372,7 +433,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
 }
 
 function documentFilename(model, extension) {
-  const name = [model.issued ? model.officialNumber || 'Certificate' : 'Draft', model.identities.project,
+  const name = [model.issued ? model.officialNumber || 'Certificate' : ['Draft',model.officialNumber].filter(Boolean).join(' '), model.identities.project,
     model.revision === '' ? '' : `R${model.revision}`, model.variant === 'internal' ? 'Internal' : '']
     .map(text).filter(Boolean).join(' - ').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 145).toWellFormed();
   return `${name || 'Certificate'}.${extension}`;

@@ -60,6 +60,10 @@
 .pc-grid-scroll { max-block-size: min(58vh, 650px); grid-template-columns: minmax(0, 1fr); overscroll-behavior-inline: contain; }
 .pc-grid { table-layout: fixed; width: max-content; min-inline-size: 100%; }
 .pc-grid td, .pc-grid th { border-inline-end: 1px solid var(--line); border-block-end: 1px solid var(--line); padding: 4px 6px; text-align: start; background: var(--surface); }
+.pc-grid td[data-column] { height:42px; cursor:cell; user-select:none; touch-action:manipulation; vertical-align:middle; }
+.pc-grid-cell-value { display:block; padding:4px 5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-grid td[data-column]:focus { outline:2px solid var(--accent); outline-offset:-2px; }
+.pc-grid td[data-column] input { user-select:text; cursor:text; }
 .pc-grid tbody tr:nth-child(even) td, .pc-grid tbody tr:nth-child(even) th { background: var(--surface-2); }
 .pc-grid thead th { position: sticky; inset-block-start: 0; z-index: 3; padding: 8px 6px; background: var(--surface-2); }
 .pc-grid .pc-grid-index { position: sticky; inset-inline-start: 0; z-index: 2; min-inline-size: 47px; text-align: center; }
