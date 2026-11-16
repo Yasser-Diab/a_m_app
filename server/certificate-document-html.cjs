@@ -1,4 +1,4 @@
-const {reportColors} = require('./certificate-document-model.cjs');
+const {reportColors, subtotalLabelParts} = require('./certificate-document-model.cjs');
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -32,7 +32,8 @@ function tableOpening(columns) {
 
 function subtotalRow(values, columns, moneyKeys, title, attributes = '') {
   const firstNumeric = columns.findIndex((column) => moneyKeys.includes(column.key));
-  return `<tr ${attributes} class="subtotal"><th scope="row" colspan="${firstNumeric}">${escapeHtml(title)}</th>${columns.slice(firstNumeric).map(({ key }) => `<td class="number" data-number="${key}">${amount(values[key])}</td>`).join('')}</tr>`;
+  const caption = Array.isArray(title) ? title.map((part) => `<bdi dir="auto">${escapeHtml(part)}</bdi>`).join(' ') : escapeHtml(title);
+  return `<tr ${attributes} class="subtotal"><th scope="row" colspan="${firstNumeric}">${caption}</th>${columns.slice(firstNumeric).map(({ key }) => `<td class="number" data-number="${key}">${amount(values[key])}</td>`).join('')}</tr>`;
 }
 
 function identityValue(field) {
@@ -134,7 +135,7 @@ function detailRows(model) {
   return [...bands.flatMap(({kind,path,line,totals},index) => {
     const attributes = `data-path="${escapeHtml(JSON.stringify(path))}" ${bandAttributes(path)}`;
     if (kind === 'group') return [`<tr class="group group-${path.at(-1).kind}" ${attributes} data-group-row="true" data-keep-next="true"><th scope="rowgroup" colspan="${columns.length}"><bdi dir="auto">${escapeHtml(path.at(-1).name)}</bdi></th></tr>`];
-    if (kind === 'subtotal') return [subtotalRow(totals,columns,moneyKeys,labels[`${path.at(-1).kind}_subtotal`] || labels.subtotal,attributes + (bands[index+1]?.kind === 'subtotal' ? ' data-keep-next="true"' : ''))];
+    if (kind === 'subtotal') return [subtotalRow(totals,columns,moneyKeys,subtotalLabelParts(model,path.at(-1)),attributes + (bands[index+1]?.kind === 'subtotal' ? ' data-keep-next="true"' : ''))];
     const fragments = splitWideLine(line,columns,landscape);
     return fragments.map((fragment,i) => `<tr ${attributes}${i === fragments.length-1 && bands[index+1]?.kind === 'subtotal' ? ' data-keep-next="true"' : ''}>${rowCells(fragment,columns)}</tr>`);
   }), subtotalRow(workTotals, columns, moneyKeys, labels.total)];

@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
 const { AppDatabase } = require('../server/db.cjs');
+const { buildCertificateHtml } = require('../server/certificate-document-html.cjs');
 const {
   buildCertificateDocument, renderCertificatePdf, writeCertificateXlsx, initializeCertificateArtifacts,
   enqueueCertificateRender, processCertificateRender,
@@ -79,7 +80,7 @@ async function main() {
     components: [{ kind: 'vat', basis: 'current_work', base: 3400, amount: 476, cumulative: 576 }],
   }, {
     status: 'issued', official_number: 'PC-014', issued_at: '2026-11-15T09:00:00Z', baseline: { id: 5 },
-    receipts: [{ id: 100, amount: 300, reference: 'PRIVATE-RECEIPT-100' }],
+    receipts: [{ id: 100, amount: 300, reference: 'RCPT-100', method: 'INTERNAL-PAYMENT-METHOD' }],
   });
   issued.header.group_work_types = true;
   issued.issuer = {companyNameEn:'Example Contracting', companyNameAr:'المثال للمقاولات', website:'example.test', companyAbbreviation:'EC'};
@@ -103,11 +104,23 @@ async function main() {
   assert.equal(buildCertificateDocument({...issued,show_status_watermark:false}).watermark,'');
   assert.equal(arabicModel.issuer.name, 'Example Contracting');
   assert.equal(arabicModel.signatures[0].name, 'Prepared Person');
-  assert.equal(JSON.stringify(arabicModel).includes('PRIVATE-RECEIPT-100'), false);
-  assert.equal(buildCertificateDocument(issued, { variant: 'internal' }).receipts[0].reference, 'PRIVATE-RECEIPT-100');
+  assert.equal(JSON.stringify(arabicModel).includes('RCPT-100'), false);
+  const internalPayments = buildCertificateDocument(issued, { variant:'internal' });
+  assert.equal(internalPayments.receipts[0].reference,'RCPT-100');
+  assert.equal(internalPayments.receipts[0].method,'INTERNAL-PAYMENT-METHOD');
   const customerPayments = buildCertificateDocument({...issued, include_receipts:true});
   assert.equal(customerPayments.receipts[0].amount, 300);
-  assert.equal(JSON.stringify(customerPayments).includes('PRIVATE-RECEIPT-100'), false);
+  assert.equal(customerPayments.receipts[0].reference,'RCPT-100');
+  assert.deepEqual(customerPayments.receiptColumns.map(({key}) => key),['received_date','receipt_type','reference','amount']);
+  const customerPaymentsHtml = buildCertificateHtml(customerPayments);
+  assert.ok(customerPaymentsHtml.includes('>المرجع</th>'));
+  assert.ok(customerPaymentsHtml.includes('>RCPT-100</bdi>'));
+  assert.equal(customerPaymentsHtml.includes('INTERNAL-PAYMENT-METHOD'),false);
+  const paymentsWorkbook = new ExcelJS.Workbook();
+  await paymentsWorkbook.xlsx.load(await writeCertificateXlsx(customerPayments));
+  const payments = paymentsWorkbook.getWorksheet(customerPayments.labels.receipts);
+  const referenceColumn = payments.getRow(1).values.indexOf(customerPayments.labels.reference);
+  assert.equal(payments.getRow(2).getCell(referenceColumn).value,'RCPT-100');
   const arabic = await verifyPdf(arabicModel);
 
   const workbook = new ExcelJS.Workbook();
@@ -162,6 +175,26 @@ async function main() {
   assert.deepEqual(unitSummary.coverRows.map(({name,current}) => [name,current]),[['Apartment 1',300],['Apartment 2',300]]);
   assert.deepEqual(unitSummary.detailBands.filter(({kind}) => kind === 'subtotal').map(({path}) => path.at(-1).kind),
     ['work_type','unit','work_type','unit']);
+
+  for (const locale of ['ar','en']) {
+    const arabic = locale === 'ar';
+    const unit = arabic ? 'جانبية شمال' : 'North Side';
+    const named = buildCertificateDocument({...fixture(locale,[{...lump,building_unit:'12',floor_apartment:unit}],{}),
+      report_options:{show_building_subtotals:true,show_unit_subtotals:true}});
+    const html = buildCertificateHtml(named);
+    const exported = new ExcelJS.Workbook();
+    await exported.xlsx.load(await writeCertificateXlsx(named));
+    const detail = exported.getWorksheet(named.labels.detail);
+    const captionColumn = detail.getRow(1).values.indexOf(named.labels.description);
+    const captions = detail.getColumn(captionColumn).values;
+    for (const name of [unit,'12']) {
+      const parts = arabic ? ['إجمالي',name] : [name,'Total'];
+      assert.ok(html.includes(parts.map((part) => `<bdi dir="auto">${part}</bdi>`).join(' ')));
+      const rowNumber = captions.indexOf(parts.join(' '));
+      assert.ok(rowNumber > 0);
+      assert.equal(detail.getRow(rowNumber).getCell(captionColumn).alignment.readingOrder,named.direction);
+    }
+  }
 
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'certificate-document-test-'));
   const schema = path.join(directory, 'schema.sql');

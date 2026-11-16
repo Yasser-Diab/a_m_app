@@ -2,7 +2,7 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 7;
+const MODEL_VERSION = 8;
 const reportColors = {text:'#183148', muted:'#3c5266', header:'#e5eef1', headerLine:'#b5cbd1', group:'#f3f7f8', groupText:'#26525a',
   subtotal:'#edf4f5', building:'#98c3e0', unit:'#acd3ac', workType:'#a2cbc6'};
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
@@ -253,8 +253,6 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     building_unit: locale === 'ar' ? 'المبنى' : 'Building',
     floor_apartment: locale === 'ar' ? 'الوحدة / الشقة' : 'Unit / apartment',
     subtotal: locale === 'ar' ? 'الإجمالي الفرعي' : 'Subtotal',
-    building_subtotal: locale === 'ar' ? 'إجمالي المبنى' : 'Building subtotal',
-    unit_subtotal: locale === 'ar' ? 'إجمالي الوحدة' : 'Unit subtotal',
     work_type_subtotal: locale === 'ar' ? 'إجمالي نوع الأعمال' : 'Work type subtotal',
     advance_remaining: locale === 'ar' ? 'متبقي الدفعة المقدمة' : 'Advance remaining',
   };
@@ -367,12 +365,14 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
 
   const receiptColumns = [
     column('received_date', 11), column('receipt_type', 10),
-    ...(variant === 'internal' ? [column('method', 10), column('reference', 20), column('status', 10)] : []),
+    ...(variant === 'internal' ? [column('method', 10)] : []), column('reference', 24),
+    ...(variant === 'internal' ? [column('status', 10)] : []),
     column('amount', 11, 'money'),
   ].map((entry) => ({ ...entry, label: t[entry.key] }));
   const receipts = (input.include_receipts ?? variant === 'internal') ? (input.receipts || []).map((receipt) => ({
     received_date: text(receipt.received_date || receipt.received_at || receipt.date).slice(0, 10),
-    ...(variant === 'internal' ? {method:text(t[receipt.method] || receipt.method), reference:text(receipt.reference)} : {}),
+    reference: text(receipt.reference),
+    ...(variant === 'internal' ? {method:text(t[receipt.method] || receipt.method)} : {}),
     amount: money(receipt.amount), receipt_type: text(t[receipt.kind || receipt.type] || receipt.kind || receipt.type),
     status: text(t[receipt.status] || receipt.status),
     allocation: number(receipt.allocated_amount ?? receipt.allocation),
@@ -456,6 +456,13 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   };
 }
 
+function subtotalLabelParts(model, {kind, name}) {
+  if (name && (kind === 'building' || kind === 'unit')) {
+    return model.locale === 'ar' ? ['إجمالي', name] : [name, 'Total'];
+  }
+  return [model.labels[`${kind}_subtotal`] || model.labels.subtotal];
+}
+
 function documentFilename(model, extension) {
   const name = [model.issued ? model.officialNumber || 'Certificate' : ['Draft',model.officialNumber].filter(Boolean).join(' '), model.identities.project,
     model.revision === '' ? '' : `R${model.revision}`, model.variant === 'internal' ? 'Internal' : '']
@@ -463,4 +470,4 @@ function documentFilename(model, extension) {
   return `${name || 'Certificate'}.${extension}`;
 }
 
-module.exports = { buildCertificateDocument, certificateReportOptions, documentFilename, MODEL_VERSION, reportColors };
+module.exports = { buildCertificateDocument, certificateReportOptions, documentFilename, MODEL_VERSION, reportColors, subtotalLabelParts };

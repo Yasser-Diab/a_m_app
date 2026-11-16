@@ -6,7 +6,7 @@ const path = require('node:path');
 const { promisify } = require('node:util');
 const electron = require('electron');
 const ExcelJS = require('exceljs');
-const { buildCertificateDocument, documentFilename, reportColors } = require('./certificate-document-model.cjs');
+const { buildCertificateDocument, documentFilename, reportColors, subtotalLabelParts } = require('./certificate-document-model.cjs');
 const { buildCertificateHtml } = require('./certificate-document-html.cjs');
 
 const execFileAsync = promisify(execFile);
@@ -89,6 +89,7 @@ function addWorksheet(workbook, model, name, columns, rows) {
       const cell = entry.getCell(index);
       cell.font = { name:'Arial',color:color(row.groupName ? reportColors.groupText : reportColors.text),bold:Boolean(row.groupName || row.subtotal) };
       if (row.groupName || row.subtotal) cell.fill = fill(row.groupName ? reportColors.group : reportColors.subtotal);
+      if (row.subtotal && columns[index - 1].key === 'description') cell.alignment = {...cell.alignment,readingOrder:model.direction};
     }
     if (row.band) {
       const first = entry.getCell(1);
@@ -127,7 +128,7 @@ async function writeCertificateXlsx(model) {
     const band = path.some((group) => group.kind === 'unit') ? 'unit' : path.some((group) => group.kind === 'building') ? 'building' : '';
     const workBand = path.some((group) => group.kind === 'work_type');
     if (kind === 'group') return {groupName:path.at(-1).name,band,workBand};
-    if (kind === 'subtotal') return {description:model.labels[`${path.at(-1).kind}_subtotal`] || model.labels.subtotal,subtotal:true,...totals,band,workBand};
+    if (kind === 'subtotal') return {description:subtotalLabelParts(model,path.at(-1)).join(' '),subtotal:true,...totals,band,workBand};
     return {...line,band,workBand};
   }) ?? model.detailGroups?.flatMap((group) => [
     ...group.lines,
