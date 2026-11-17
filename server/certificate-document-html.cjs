@@ -242,7 +242,7 @@ function buildCertificateHtml(model) {
     h2 { font-size: 11pt; margin: 2mm 0 1.4mm; }
     h2 span { font-size: 8pt; font-weight: 400; margin-inline-start: 2mm; color:${reportColors.muted}; }
     table { width: 100%; table-layout: fixed; border: 0; border-collapse: collapse; font-size: 9pt; }
-    th, td { padding:.9mm 1.5mm; vertical-align:top; text-align:start; }
+    th, td { padding:.9mm 1.5mm; vertical-align:top; text-align:start; border:0; box-shadow:none; outline:0; }
     thead th { background:${reportColors.header}; border-block-end:1px solid ${reportColors.headerLine}; color:${reportColors.text}; font-weight:700; font-size:8pt; overflow-wrap:normal; }
     table .number { font-variant-numeric: tabular-nums; text-align: end; }
     table td.number, .finance td bdi { white-space:nowrap; overflow-wrap:normal; font-size:var(--value-size,9pt); }
@@ -256,7 +256,11 @@ function buildCertificateHtml(model) {
     tr[data-band-building] > :first-child::before { background:var(--building-band); }
     tr[data-band-unit] > :first-child::after { background:var(--unit-band); }
     tr[data-band-building][data-band-unit] > :first-child::after { inset-inline-start:3px; }
-    tr[data-band-work-type] > :last-child { box-shadow:inset var(--opposite-x) 0 var(--work-band); }
+    tr[data-band-work-type] > :last-child { position:relative; }
+    tr[data-band-work-type] > :last-child::after {
+      content:""; position:absolute; inset-block:0; inset-inline-end:0; inline-size:1px;
+      background:var(--work-band); pointer-events:none;
+    }
     .subtotal { color:#255363; font-weight:700; }
     .detail .subtotal:last-child, .cover .subtotal { background:${reportColors.subtotal}; }
     .empty { color:${reportColors.muted}; padding-block:4mm; text-align:center; }

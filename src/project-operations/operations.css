@@ -1,0 +1,53 @@
+.ops-workspace h2,.ops-workspace h3 { margin:0 }
+.ops-workspace .pc-panel>.pc-toolbar h3 { margin-inline-end:auto }
+.ops-record-diff { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px }
+.ops-json { direction:ltr;white-space:pre-wrap;overflow-wrap:anywhere;max-block-size:26rem;overflow:auto }
+.ops-section { border:1px solid var(--line);border-radius:12px;padding:12px;min-inline-size:0 }
+.ops-options { display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center }
+.ops-preview { display:block;border:1px solid var(--line);width:100%;height:min(68vh,880px);background:white;border-radius:6px }
+.ops-fields { display:grid;gap:14px }
+.ops-spec-fields { border-block-start:1px solid var(--line);padding-block-start:12px }
+.ops-drawing img { max-width:100%;max-height:55vh;object-fit:contain }
+.ops-empty-inline { color:var(--muted) }
+.ops-line-choice { border-block-end:1px solid var(--line);padding:6px 0 }
+.ops-status-row {display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ops-workspace [hidden] { display:none }
+.ops-project-meta { display:flex;gap:12px 28px;flex-wrap:wrap;margin:0 }
+.ops-project-meta dt { color:var(--muted) }
+.ops-project-meta dd { margin:4px 0 0;font-weight:600 }
+.ops-document-bar { display:flex;align-items:end;gap:8px 14px;flex-wrap:wrap }
+.ops-document-bar .pc-field { max-inline-size:min(100%,30rem) }
+.ops-quick-spec { margin-block-start:10px }
+.ops-quick-spec>.pc-field { max-inline-size:54rem }
+.ops-quick-heading { display:flex;gap:12px;align-items:start;justify-content:space-between }
+.ops-quick-heading p { margin-block:6px!important;overflow-wrap:anywhere }
+.ops-quick-heading small,.ops-sides>span { color:var(--muted) }
+.ops-quick-heading button { flex-shrink:0 }
+.ops-paper-fields legend,.ops-paper-details summary { font-weight:600 }
+.ops-paper-details fieldset { margin-block-start:8px }
+.ops-quick-measurements input { inline-size:100%;min-inline-size:72px;padding:5px 8px;min-block-size:32px }
+.ops-quick-measurements td { min-inline-size:92px }
+.ops-conflict { border:1px solid var(--line-strong);border-radius:9px;padding:10px 12px;background:var(--surface-2) }
+.ops-stage-buttons { display:flex;flex-wrap:wrap;gap:8px }
+.ops-stage-buttons button[aria-pressed=true] { border-color:var(--accent);background:color-mix(in srgb,var(--accent) 15%,var(--surface)) }
+.ops-spec-grid { min-inline-size:0 }
+.ops-grid-tools { justify-content:flex-start }
+.ops-grid-full { position:fixed;inset:0;z-index:260000;background:var(--surface, var(--panel, Canvas));padding:16px;align-content:start;overflow:auto }
+.ops-spec-scroll { max-block-size:60vh;overflow:auto }
+.ops-grid-full .ops-spec-scroll { max-block-size:calc(100dvh - 105px) }
+.ops-grid-table { min-inline-size:100%;inline-size:max-content;user-select:none }
+.ops-grid-table thead th { position:sticky;inset-block-start:0;z-index:2 }
+.ops-grid-table td[data-ops-cell] { min-inline-size:88px;max-inline-size:235px;position:relative;cursor:cell;outline-offset:-2px }
+.ops-grid-table td[data-ops-cell]:focus { outline:2px solid var(--accent,#298f90) }
+.ops-grid-table td[aria-selected=true] { background:color-mix(in srgb,var(--accent,#298f90) 20%,transparent) }
+.ops-grid-table .ops-grid-readonly { color:var(--muted) }
+.ops-grid-table .ops-description { min-inline-size:220px;max-inline-size:310px;white-space:normal;overflow-wrap:anywhere }
+.ops-grid-table .ops-description small { display:block;color:var(--muted);margin-block-start:4px }
+.ops-cell-editor input { width:100%;min-inline-size:80px }
+.ops-cell-options { position:fixed;z-index:260010;
+  max-block-size:200px;overflow:auto;border:1px solid var(--line);background:var(--panel,Canvas);border-radius:8px;display:grid }
+.ops-cell-options button { text-align:start;white-space:normal;border-radius:0 }
+.ops-cell-options button[aria-current=true] { outline:2px solid var(--accent,#298f90);outline-offset:-2px }
+.ops-column-picker:not([open]) { inline-size:max-content }
+.ops-column-picker[open] { flex-basis:100% }
+.ops-column-picker .ops-options { max-block-size:175px;overflow:auto;margin-block:6px }

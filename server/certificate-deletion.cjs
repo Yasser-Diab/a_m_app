@@ -1,5 +1,5 @@
 const {audit, certificateIdWatermark, fail, setSetting} = require("./certificate-access.cjs");
-const {requireVersion} = require("./certificate-revisions.cjs");
+const {requireVersion,certificateNumber} = require("./certificate-revisions.cjs");
 
 function deleteArchivedFiles(database,row,user,version) {
   requireVersion(row,version);
@@ -26,7 +26,7 @@ function deleteCertificate(database,row,user,version) {
          r.legacy_number<>'' AND r.legacy_number NOT GLOB '*[^0-9]*' AND CAST(r.legacy_number AS INTEGER)>CAST(prior.legacy_number AS INTEGER))))
     LIMIT 1`,[row.project_id,row.series_key,...ids,...ids]);
   const dependent = blocking || historical;
-  if (dependent) fail(409,`Certificate ${dependent.official_number || dependent.legacy_number || '#' + dependent.id} has an approved balance that uses this certificate`);
+  if (dependent) fail(409,`Certificate ${certificateNumber(database,database.get("SELECT * FROM cert_revisions WHERE id=?",[dependent.id]))} has an approved balance that uses this certificate`);
 
   const members = database.all("SELECT id,official_number,legacy_number FROM cert_revisions WHERE id=? OR root_id=? ORDER BY id DESC",ids);
   const links = members.map(({id}) => id);

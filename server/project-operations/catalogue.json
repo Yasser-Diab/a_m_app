@@ -1,0 +1,3132 @@
+{
+  "source": "HGAD_Manufacturing_Specifications_Master.xlsx",
+  "categories": [
+    {
+      "id": "windows",
+      "ar": "النوافذ",
+      "en": "Windows",
+      "systems": [
+        {
+          "id": "windows-1",
+          "ar": "ثابت",
+          "en": "Fixed",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-2",
+          "ar": "مفصلي جانبي للداخل",
+          "en": "Inward side-hung",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-3",
+          "ar": "مفصلي جانبي للخارج",
+          "en": "Outward side-hung",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-4",
+          "ar": "قلّاب سفلي للداخل",
+          "en": "Bottom-hung tilt",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-5",
+          "ar": "مفصلي علوي للخارج",
+          "en": "Outward top-hung",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-6",
+          "ar": "Tilt & Turn",
+          "en": "Tilt & Turn",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-7",
+          "ar": "Tilt Before Turn",
+          "en": "Tilt Before Turn",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-8",
+          "ar": "جرار أفقي",
+          "en": "Horizontal sliding",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-9",
+          "ar": "جرار رأسي",
+          "en": "Vertical sliding",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-10",
+          "ar": "رفع وجرار Lift & Slide",
+          "en": "Lift & Slide",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-11",
+          "ar": "ميل وجرار Tilt & Slide",
+          "en": "Tilt & Slide",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-12",
+          "ar": "جرار متوازي PSK",
+          "en": "Parallel Sliding (PSK)",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-13",
+          "ar": "أكورديون Folding",
+          "en": "Folding",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-14",
+          "ar": "محوري رأسي Pivot",
+          "en": "Vertical pivot",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-15",
+          "ar": "محوري أفقي Pivot",
+          "en": "Horizontal pivot",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-16",
+          "ar": "Projected / Awning",
+          "en": "Projected / Awning",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-17",
+          "ar": "Top Swing",
+          "en": "Top Swing",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-18",
+          "ar": "Parallel Opening",
+          "en": "Parallel Opening",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-19",
+          "ar": "شباك ركنة Corner",
+          "en": "Corner window",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-20",
+          "ar": "قوس Arch",
+          "en": "Arched window",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-21",
+          "ar": "شباك سقفي / Roof Window",
+          "en": "Roof window",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-22",
+          "ar": "ثابت + متحرك مركب",
+          "en": "Combined fixed and opening",
+          "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
+          "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        }
+      ],
+      "fields": [
+        {
+          "key": "leaves",
+          "ar": "عدد الضلف",
+          "en": "Leaves",
+          "type": "number"
+        },
+        {
+          "key": "tracks",
+          "ar": "عدد مسارات الجرار",
+          "en": "Sliding tracks",
+          "type": "number"
+        },
+        {
+          "key": "fixed_panels",
+          "ar": "عدد الثوابت",
+          "en": "Fixed panels",
+          "type": "number"
+        },
+        {
+          "key": "top_fixed_height",
+          "ar": "ارتفاع الثابت العلوي مم",
+          "en": "Upper fixed height (mm)",
+          "type": "number"
+        },
+        {
+          "key": "bottom_fixed_height",
+          "ar": "ارتفاع الثابت السفلي مم",
+          "en": "Lower fixed height (mm)",
+          "type": "number"
+        },
+        {
+          "key": "divider_width",
+          "ar": "عرض قطاع التقسيم مم",
+          "en": "Divider profile width (mm)",
+          "type": "number"
+        },
+        {
+          "key": "hinge_side",
+          "ar": "جهة المفصلات",
+          "en": "Hinge side",
+          "options": [
+            "يمين",
+            "يسار",
+            "بدون"
+          ]
+        },
+        {
+          "key": "opening_direction",
+          "ar": "اتجاه الفتح للداخل/الخارج",
+          "en": "Opening direction",
+          "options": [
+            "للداخل",
+            "للخارج",
+            "لا ينطبق"
+          ]
+        },
+        {
+          "key": "slide_direction",
+          "ar": "اتجاه الجرار",
+          "en": "Sliding direction",
+          "options": [
+            "يسار",
+            "يمين",
+            "متقابل",
+            "متباعد",
+            "لا ينطبق"
+          ]
+        },
+        {
+          "key": "screen",
+          "ar": "السلك / الناموسية",
+          "en": "Insect screen",
+          "options": [
+            "لا",
+            "ثابت",
+            "ضلفة مستقلة",
+            "رول",
+            "بليسيه"
+          ]
+        },
+        {
+          "key": "screen_type",
+          "ar": "نوع السلك",
+          "en": "Screen type"
+        },
+        {
+          "key": "handle",
+          "ar": "مقبض التشغيل",
+          "en": "Operating handle"
+        },
+        {
+          "key": "hinge",
+          "ar": "نوع المفصلات",
+          "en": "Hinge type"
+        },
+        {
+          "key": "roller",
+          "ar": "نوع البكر / الرولمان",
+          "en": "Roller / bearing"
+        },
+        {
+          "key": "child_safety",
+          "ar": "مانع فتح / أمان أطفال",
+          "en": "Child safety restriction"
+        },
+        {
+          "key": "drainage",
+          "ar": "تصريف المياه",
+          "en": "Drainage",
+          "options": [
+            "فتحات تصريف",
+            "نظام مخفي",
+            "غير مطلوب"
+          ]
+        },
+        {
+          "key": "ventilation",
+          "ar": "تجهيز التهوية",
+          "en": "Ventilation"
+        },
+        {
+          "key": "glass_type",
+          "ar": "نوع الزجاج",
+          "en": "Glass type"
+        },
+        {
+          "key": "glazing",
+          "ar": "نوع التزجيج",
+          "en": "Glazing",
+          "options": [
+            "Single",
+            "Double",
+            "Triple"
+          ]
+        },
+        {
+          "key": "reflective",
+          "ar": "زجاج عاكس",
+          "en": "Reflective glass",
+          "type": "boolean"
+        },
+        {
+          "key": "coating_direction",
+          "ar": "اتجاه الطلاء",
+          "en": "Coating direction"
+        },
+        {
+          "key": "georgian",
+          "ar": "بارات جورجيان",
+          "en": "Georgian bars",
+          "type": "boolean"
+        },
+        {
+          "key": "georgian_configuration",
+          "ar": "تكوين بارات جورجيان",
+          "en": "Georgian bar arrangement"
+        },
+        {
+          "key": "perimeter",
+          "ar": "جوانب حلية المحيط",
+          "en": "Perimeter beading",
+          "type": "sides"
+        },
+        {
+          "key": "interlock_right",
+          "ar": "تكوين التداخل يمينًا",
+          "en": "Right interlock specification"
+        },
+        {
+          "key": "interlock_right_mm",
+          "ar": "عرض التداخل يمينًا مم",
+          "en": "Right interlock width (mm)",
+          "type": "number"
+        },
+        {
+          "key": "interlock_left",
+          "ar": "تكوين التداخل يسارًا",
+          "en": "Left interlock specification"
+        },
+        {
+          "key": "interlock_left_mm",
+          "ar": "عرض التداخل يسارًا مم",
+          "en": "Left interlock width (mm)",
+          "type": "number"
+        },
+        {
+          "key": "tilt_mode",
+          "ar": "تكوين القلاب",
+          "en": "Tilt mechanism",
+          "options": [
+            "Tilt only",
+            "Tilt and hinged"
+          ]
+        },
+        {
+          "key": "tilt_fixed",
+          "ar": "موضع الثابت",
+          "en": "Fixed panel arrangement",
+          "options": [
+            "Upper",
+            "Lower"
+          ]
+        },
+        {
+          "key": "tilt_arm",
+          "ar": "نوع ذراع الدعم",
+          "en": "Supporting arm"
+        },
+        {
+          "key": "tilt_arm_45",
+          "ar": "ذراع 45 درجة",
+          "en": "45° arm",
+          "type": "boolean"
+        },
+        {
+          "key": "tilt_hinges",
+          "ar": "مفصلات القلاب",
+          "en": "Tilt hinges"
+        },
+        {
+          "key": "fixed_position",
+          "ar": "مكان الجزء الثابت",
+          "en": "Fixed panel position",
+          "options": [
+            "Upper",
+            "Lower"
+          ]
+        },
+        {
+          "key": "vent_opening",
+          "ar": "فتحة تهوية / شفط",
+          "en": "Ventilation opening",
+          "type": "boolean"
+        },
+        {
+          "key": "vent_position",
+          "ar": "موضع فتحة التهوية",
+          "en": "Vent position",
+          "options": [
+            "Right",
+            "Left",
+            "Top",
+            "Bottom",
+            "Other"
+          ]
+        },
+        {
+          "key": "vent_width",
+          "ar": "عرض فتحة التهوية مم",
+          "en": "Vent width (mm)",
+          "type": "number"
+        },
+        {
+          "key": "vent_height",
+          "ar": "ارتفاع فتحة التهوية مم",
+          "en": "Vent height (mm)",
+          "type": "number"
+        },
+        {
+          "key": "vent_direction",
+          "ar": "اتجاه فتح التهوية",
+          "en": "Vent opening direction"
+        },
+        {
+          "key": "screen_material",
+          "ar": "خامة السلك",
+          "en": "Screen material",
+          "options": [
+            "Fiberglass",
+            "Other"
+          ]
+        },
+        {
+          "key": "screen_configuration",
+          "ar": "تفصيلة السلك",
+          "en": "Screen configuration"
+        }
+      ]
+    },
+    {
+      "id": "doors",
+      "ar": "الأبواب",
+      "en": "Doors",
+      "systems": [
+        {
+          "id": "doors-1",
+          "ar": "مفصلي ضلفة واحدة",
+          "en": "Single-leaf hinged",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-2",
+          "ar": "مفصلي ضلفتين",
+          "en": "Double-leaf hinged",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-3",
+          "ar": "مفصلي مع ثابت جانبي",
+          "en": "Hinged with fixed sidelight",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-4",
+          "ar": "مفصلي مع ثابت علوي",
+          "en": "Hinged with fixed fanlight",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-5",
+          "ar": "باب زجاج سيكوريت مفصلي",
+          "en": "Tempered glass hinged",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-6",
+          "ar": "جرار ضلفة واحدة",
+          "en": "Single-panel sliding",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-7",
+          "ar": "جرار ضلفتين",
+          "en": "Double-panel sliding",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-8",
+          "ar": "جرار جيب Pocket",
+          "en": "Pocket sliding",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-9",
+          "ar": "رفع وجرار",
+          "en": "Lift & Slide",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-10",
+          "ar": "تلسكوبي منزلق",
+          "en": "Telescopic sliding",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-11",
+          "ar": "أكورديون Folding / Bi-fold",
+          "en": "Folding / Bi-fold",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-12",
+          "ar": "Pivot محوري",
+          "en": "Pivot",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-13",
+          "ar": "باب أوتوماتيك منزلق",
+          "en": "Automatic sliding",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-14",
+          "ar": "باب أوتوماتيك متأرجح",
+          "en": "Automatic swing",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-15",
+          "ar": "باب دوار Revolving",
+          "en": "Revolving",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-16",
+          "ar": "باب طوارئ Panic",
+          "en": "Panic exit",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-17",
+          "ar": "باب حريق معتمد",
+          "en": "Certified fire-rated",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-18",
+          "ar": "باب فراملس زجاج",
+          "en": "Frameless glass",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-19",
+          "ar": "باب هيدروليك أرضي",
+          "en": "Floor-spring hydraulic",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-20",
+          "ar": "باب فلش / لوفر",
+          "en": "Flush / louver",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-21",
+          "ar": "باب كراج قطاعي",
+          "en": "Sectional garage",
+          "source": "https://www.schueco.com/de-en/home-owners/products/windows",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
+          "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        }
+      ],
+      "fields": [
+        {
+          "key": "leaves",
+          "ar": "عدد الضلف",
+          "en": "Leaves",
+          "type": "number"
+        },
+        {
+          "key": "active_leaf",
+          "ar": "الضلفة النشطة",
+          "en": "Active leaf"
+        },
+        {
+          "key": "opening_direction",
+          "ar": "اتجاه الفتح",
+          "en": "Opening direction",
+          "options": [
+            "للداخل",
+            "للخارج",
+            "جرار",
+            "دوران",
+            "لا ينطبق"
+          ]
+        },
+        {
+          "key": "hinge_side",
+          "ar": "جهة المفصلات",
+          "en": "Hinge side",
+          "options": [
+            "يمين",
+            "يسار",
+            "مزدوج",
+            "لا ينطبق"
+          ]
+        },
+        {
+          "key": "opening_angle",
+          "ar": "زاوية الفتح °",
+          "en": "Opening angle (°)",
+          "type": "number"
+        },
+        {
+          "key": "frame",
+          "ar": "نوع الإطار / الحلق",
+          "en": "Frame type"
+        },
+        {
+          "key": "threshold",
+          "ar": "نوع العتبة",
+          "en": "Threshold",
+          "options": [
+            "مسطحة",
+            "مرتفعة",
+            "غاطسة",
+            "بدون"
+          ]
+        },
+        {
+          "key": "threshold_height",
+          "ar": "ارتفاع العتبة مم",
+          "en": "Threshold height (mm)",
+          "type": "number"
+        },
+        {
+          "key": "hinge",
+          "ar": "مفصلة / هيدروليك",
+          "en": "Hinge / hydraulic mechanism"
+        },
+        {
+          "key": "handle",
+          "ar": "مقبض / سحب",
+          "en": "Handle / pull"
+        },
+        {
+          "key": "lock",
+          "ar": "نوع القفل",
+          "en": "Lock type"
+        },
+        {
+          "key": "lock_brand",
+          "ar": "ماركة القفل",
+          "en": "Lock manufacturer"
+        },
+        {
+          "key": "master_key",
+          "ar": "مفتاح / ماستر",
+          "en": "Key / master key"
+        },
+        {
+          "key": "cylinder",
+          "ar": "كالون / اسطوانة",
+          "en": "Cylinder"
+        },
+        {
+          "key": "closer",
+          "ar": "Door Closer",
+          "en": "Door closer",
+          "options": [
+            "علوي",
+            "مخفي",
+            "أرضي",
+            "بدون"
+          ]
+        },
+        {
+          "key": "panic_bar",
+          "ar": "Panic Bar",
+          "en": "Panic bar"
+        },
+        {
+          "key": "access_control",
+          "ar": "Access Control",
+          "en": "Access control"
+        },
+        {
+          "key": "electric_lock",
+          "ar": "قفل كهربائي",
+          "en": "Electric lock"
+        },
+        {
+          "key": "motor",
+          "ar": "حساس / محرك",
+          "en": "Sensor / motor"
+        },
+        {
+          "key": "stopper",
+          "ar": "مانع اصطدام",
+          "en": "Door stopper"
+        },
+        {
+          "key": "fire_seal",
+          "ar": "شريط سداد دخان / حريق",
+          "en": "Smoke / fire seal"
+        },
+        {
+          "key": "fire_rating",
+          "ar": "تصنيف الحريق",
+          "en": "Fire rating",
+          "options": [
+            "غير مطلوب",
+            "EI30",
+            "EI60",
+            "EI90",
+            "EI120",
+            "حسب الاعتماد"
+          ]
+        },
+        {
+          "key": "escape_direction",
+          "ar": "اتجاه الهروب",
+          "en": "Escape direction"
+        }
+      ]
+    },
+    {
+      "id": "curtain_walls",
+      "ar": "الحوائط الستائرية",
+      "en": "Curtain walls",
+      "systems": [
+        {
+          "id": "curtain_walls-1",
+          "ar": "Stick Capped",
+          "en": "Stick Capped",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-2",
+          "ar": "Stick Semi-Structural",
+          "en": "Stick Semi-Structural",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-3",
+          "ar": "Stick 2-Sided Structural",
+          "en": "Stick 2-Sided Structural",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-4",
+          "ar": "Stick 4-Sided Structural",
+          "en": "Stick 4-Sided Structural",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-5",
+          "ar": "Unitized / Modular",
+          "en": "Unitized / Modular",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-6",
+          "ar": "Unitized Structural",
+          "en": "Unitized Structural",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-7",
+          "ar": "Point-Supported / Spider",
+          "en": "Point-Supported / Spider",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-8",
+          "ar": "Cable-Net",
+          "en": "Cable-Net",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-9",
+          "ar": "Glass Fin Supported",
+          "en": "Glass Fin Supported",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-10",
+          "ar": "Double-Skin Facade",
+          "en": "Double-Skin Facade",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-11",
+          "ar": "Closed-Cavity Facade",
+          "en": "Closed-Cavity Facade",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-12",
+          "ar": "Sloped Glazing",
+          "en": "Sloped Glazing",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-13",
+          "ar": "Atrium / Skylight",
+          "en": "Atrium / Skylight",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-14",
+          "ar": "Window Wall",
+          "en": "Window Wall",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-15",
+          "ar": "Segmented Facade",
+          "en": "Segmented Facade",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-16",
+          "ar": "Curved Facade",
+          "en": "Curved Facade",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-17",
+          "ar": "Vertical Fins",
+          "en": "Vertical Fins",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-18",
+          "ar": "Louvered Facade",
+          "en": "Louvered Facade",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "curtain_walls-19",
+          "ar": "BIPV / PV Integrated",
+          "en": "BIPV / PV Integrated",
+          "source": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الحوائط الستائرية",
+          "decision": "مواقع الأنكر / الزجاج / التقسيم / الضغط والتصريف / firestop",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        }
+      ],
+      "fields": [
+        {
+          "key": "method",
+          "ar": "نظام التنفيذ Stick/Unitized",
+          "en": "Execution system",
+          "options": [
+            "Stick",
+            "Unitized",
+            "Semi-Unitized",
+            "Point-Supported",
+            "أخرى"
+          ]
+        },
+        {
+          "key": "division",
+          "ar": "التقسيم أفقي / رأسي",
+          "en": "Horizontal / vertical division"
+        },
+        {
+          "key": "modules",
+          "ar": "عدد الموديولات",
+          "en": "Modules",
+          "type": "number"
+        },
+        {
+          "key": "mullion_spacing",
+          "ar": "تباعد القوائم مم",
+          "en": "Mullion spacing (mm)",
+          "type": "number"
+        },
+        {
+          "key": "transom_spacing",
+          "ar": "تباعد العوارض مم",
+          "en": "Transom spacing (mm)",
+          "type": "number"
+        },
+        {
+          "key": "cap",
+          "ar": "غطاء كاب خارجي",
+          "en": "External cap",
+          "options": [
+            "Capped",
+            "Semi-Capped",
+            "Capless",
+            "Structural"
+          ]
+        },
+        {
+          "key": "cap_size",
+          "ar": "مقاس الكاب مم",
+          "en": "Cap dimensions (mm)"
+        },
+        {
+          "key": "thermal_break",
+          "ar": "العازل الحراري",
+          "en": "Thermal break"
+        },
+        {
+          "key": "spider",
+          "ar": "العنكبوت / Spider",
+          "en": "Spider system"
+        },
+        {
+          "key": "structural_silicone",
+          "ar": "نوع السيليكون الإنشائي",
+          "en": "Structural silicone"
+        },
+        {
+          "key": "backer_rod",
+          "ar": "Backer Rod",
+          "en": "Backer rod"
+        },
+        {
+          "key": "gasket",
+          "ar": "نوع الجوانات",
+          "en": "Gasket"
+        },
+        {
+          "key": "drainage",
+          "ar": "Drainage / Pressure Equalization",
+          "en": "Drainage / pressure equalization"
+        },
+        {
+          "key": "anchor",
+          "ar": "نوع الأنكر",
+          "en": "Anchor type"
+        },
+        {
+          "key": "anchor_position",
+          "ar": "موقع الأنكر",
+          "en": "Anchor position"
+        },
+        {
+          "key": "steel_support",
+          "ar": "قطاعات دعم صلب",
+          "en": "Steel support profiles"
+        },
+        {
+          "key": "floor_barrier",
+          "ar": "حاجز دخان / حريق بين الأدوار",
+          "en": "Inter-floor fire / smoke barrier"
+        },
+        {
+          "key": "spandrel",
+          "ar": "Spandrel / Shadow Box",
+          "en": "Spandrel / shadow box",
+          "options": [
+            "Vision",
+            "Spandrel",
+            "Shadow Box",
+            "Mix"
+          ]
+        },
+        {
+          "key": "opening_unit",
+          "ar": "وحدة فتح مدمجة",
+          "en": "Integrated opening unit"
+        },
+        {
+          "key": "opening_type",
+          "ar": "نوع وحدة الفتح",
+          "en": "Opening unit type"
+        },
+        {
+          "key": "inclination",
+          "ar": "زاوية ميل الواجهة",
+          "en": "Facade angle (°)",
+          "type": "number"
+        },
+        {
+          "key": "loads",
+          "ar": "متطلبات الرياح / الأحمال",
+          "en": "Wind / structural loads"
+        },
+        {
+          "key": "expansion_joint",
+          "ar": "فاصل التمدد",
+          "en": "Expansion joint"
+        },
+        {
+          "key": "firestop",
+          "ar": "تفاصيل Firestop",
+          "en": "Firestop details"
+        }
+      ]
+    },
+    {
+      "id": "railings",
+      "ar": "الهاندريل والدرابزين",
+      "en": "Handrails and railings",
+      "systems": [
+        {
+          "id": "railings-1",
+          "ar": "ستانلس بقوائم",
+          "en": "Stainless steel with posts",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-2",
+          "ar": "ألومنيوم بقوائم",
+          "en": "Aluminum with posts",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-3",
+          "ar": "حديد مشغول",
+          "en": "Wrought iron",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-4",
+          "ar": "زجاج Frameless Base Shoe",
+          "en": "Frameless glass with base shoe",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-5",
+          "ar": "زجاج بقوائم",
+          "en": "Glass with posts",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-6",
+          "ar": "زجاج بنقاط تثبيت Standoff",
+          "en": "Standoff-mounted glass",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-7",
+          "ar": "زجاج Spider",
+          "en": "Spider-supported glass",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-8",
+          "ar": "زجاج مثبت جانبيًا",
+          "en": "Side-mounted glass",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-9",
+          "ar": "حاجز ببار علوي فقط",
+          "en": "Top-rail-only barrier",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-10",
+          "ar": "درابزين خشبي",
+          "en": "Wooden railing",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-11",
+          "ar": "درابزين سلالم",
+          "en": "Stair railing",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-12",
+          "ar": "درابزين شرفات",
+          "en": "Balcony railing",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-13",
+          "ar": "درابزين رامب",
+          "en": "Ramp railing",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-14",
+          "ar": "حاجز حماية Roof Parapet",
+          "en": "Roof parapet protection",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-15",
+          "ar": "Handrail جداري",
+          "en": "Wall-mounted handrail",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-16",
+          "ar": "كابلات ستانلس Cable",
+          "en": "Stainless steel cables",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-17",
+          "ar": "قضبان أفقية / رأسية",
+          "en": "Horizontal / vertical bars",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "railings-18",
+          "ar": "درابزين منحني",
+          "en": "Curved railing",
+          "source": "https://www.glass.org/architect",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الهاندريل والدرابزين",
+          "decision": "نوع قاعدة التثبيت / ارتفاع الحماية / نوع الزجاج / الأحمال",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        }
+      ],
+      "fields": [
+        {
+          "key": "use",
+          "ar": "مكان الاستخدام",
+          "en": "Place of use",
+          "options": [
+            "درج",
+            "بلكونة",
+            "تراس",
+            "رامب",
+            "ميزانين",
+            "سقف",
+            "فاصل داخلي"
+          ]
+        },
+        {
+          "key": "railing_height",
+          "ar": "ارتفاع الدرابزين مم",
+          "en": "Railing height (mm)",
+          "type": "number"
+        },
+        {
+          "key": "track_length",
+          "ar": "طول المسار متر",
+          "en": "Track length (m)",
+          "type": "number"
+        },
+        {
+          "key": "sections",
+          "ar": "عدد المقاطع",
+          "en": "Sections",
+          "type": "number"
+        },
+        {
+          "key": "base_shoe",
+          "ar": "نوع القاعدة / Base Shoe",
+          "en": "Base shoe"
+        },
+        {
+          "key": "base_size",
+          "ar": "مقاس القاعدة مم",
+          "en": "Base shoe dimensions (mm)"
+        },
+        {
+          "key": "mounting",
+          "ar": "تثبيت أعلى / جانبي",
+          "en": "Top / side mounting",
+          "options": [
+            "Top Mount",
+            "Side Mount",
+            "Embedded",
+            "Wall Mount"
+          ]
+        },
+        {
+          "key": "posts",
+          "ar": "عدد القوائم",
+          "en": "Posts",
+          "type": "number"
+        },
+        {
+          "key": "post_spacing",
+          "ar": "تباعد القوائم مم",
+          "en": "Post spacing (mm)",
+          "type": "number"
+        },
+        {
+          "key": "post_profile",
+          "ar": "قطاع / قطر القائم",
+          "en": "Post profile / diameter"
+        },
+        {
+          "key": "handrail_profile",
+          "ar": "قطاع / قطر المسكة",
+          "en": "Handrail profile / diameter"
+        },
+        {
+          "key": "handrail_shape",
+          "ar": "شكل المسكة",
+          "en": "Handrail shape",
+          "options": [
+            "دائري",
+            "مربع",
+            "مستطيل",
+            "U Channel",
+            "بدون"
+          ]
+        },
+        {
+          "key": "termination",
+          "ar": "نهايات المسكة",
+          "en": "Handrail terminations"
+        },
+        {
+          "key": "anchors",
+          "ar": "المثبتات / Anchor",
+          "en": "Anchors"
+        },
+        {
+          "key": "gaskets",
+          "ar": "جوانات / Wedges",
+          "en": "Gaskets / wedges"
+        },
+        {
+          "key": "glass_height",
+          "ar": "ارتفاع الزجاج مم",
+          "en": "Glass height (mm)",
+          "type": "number"
+        },
+        {
+          "key": "railing_glass_thickness",
+          "ar": "سمك زجاج الدرابزين مم",
+          "en": "Glass thickness (mm)",
+          "type": "number"
+        },
+        {
+          "key": "joints",
+          "ar": "توزيع وصلات المسكة",
+          "en": "Handrail joints"
+        },
+        {
+          "key": "curves",
+          "ar": "منحنيات / زوايا",
+          "en": "Curves / angles"
+        },
+        {
+          "key": "loads",
+          "ar": "متطلبات الحمل التصميمي",
+          "en": "Design loads"
+        },
+        {
+          "key": "classification",
+          "ar": "تصنيف الموقع",
+          "en": "Location classification"
+        },
+        {
+          "key": "edge_frame",
+          "ar": "إطار حماية الحافة",
+          "en": "Edge protection frame"
+        }
+      ]
+    },
+    {
+      "id": "cladding",
+      "ar": "الكلادينج والكسوات",
+      "en": "Cladding and coverings",
+      "systems": [
+        {
+          "id": "cladding-1",
+          "ar": "ACP Cassette / Tray",
+          "en": "ACP Cassette / Tray",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-2",
+          "ar": "ACP Routed & Folded",
+          "en": "ACP Routed & Folded",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-3",
+          "ar": "ACP Riveted",
+          "en": "ACP Riveted",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-4",
+          "ar": "ACP Screwed",
+          "en": "ACP Screwed",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-5",
+          "ar": "ACP Concealed Fixing",
+          "en": "ACP Concealed Fixing",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-6",
+          "ar": "Solid Aluminium Panels",
+          "en": "Solid Aluminium Panels",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-7",
+          "ar": "Perforated Aluminium",
+          "en": "Perforated Aluminium",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-8",
+          "ar": "Aluminium Louvers",
+          "en": "Aluminium Louvers",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-9",
+          "ar": "Vertical Fins / Baffles",
+          "en": "Vertical Fins / Baffles",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-10",
+          "ar": "Aluminium Honeycomb",
+          "en": "Aluminium Honeycomb",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-11",
+          "ar": "HPL Rainscreen",
+          "en": "HPL Rainscreen",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-12",
+          "ar": "Fiber Cement",
+          "en": "Fiber Cement",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-13",
+          "ar": "GRC / GFRC",
+          "en": "GRC / GFRC",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-14",
+          "ar": "Terracotta",
+          "en": "Terracotta",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-15",
+          "ar": "Porcelain / Ceramic",
+          "en": "Porcelain / Ceramic",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-16",
+          "ar": "Natural Stone Dry Fix",
+          "en": "Natural Stone Dry Fix",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-17",
+          "ar": "Metal Sheet / Steel",
+          "en": "Metal Sheet / Steel",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-18",
+          "ar": "Expanded Mesh",
+          "en": "Expanded Mesh",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-19",
+          "ar": "WPC",
+          "en": "WPC",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-20",
+          "ar": "Glass Cladding",
+          "en": "Glass Cladding",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-21",
+          "ar": "ACP Soffit / Ceiling",
+          "en": "ACP Soffit / Ceiling",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-22",
+          "ar": "Column Cladding",
+          "en": "Column Cladding",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-23",
+          "ar": "Canopy / Fascia",
+          "en": "Canopy / Fascia",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "cladding-24",
+          "ar": "Curved Cladding",
+          "en": "Curved Cladding",
+          "source": "https://www.3acomposites.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الكلادينج والكسوات",
+          "decision": "نوع اللوح / نظام الشاسيه / الفاصل / الحريق / التمدد",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        }
+      ],
+      "fields": [
+        {
+          "key": "use",
+          "ar": "موقع الكسوة",
+          "en": "Cladding location",
+          "options": [
+            "واجهة",
+            "عمود",
+            "سقف معلق",
+            "Soffit",
+            "Canopy",
+            "فاشيا",
+            "داخلي"
+          ]
+        },
+        {
+          "key": "panel",
+          "ar": "خامة اللوح",
+          "en": "Panel material"
+        },
+        {
+          "key": "panel_brand",
+          "ar": "الماركة / الكود",
+          "en": "Manufacturer / code"
+        },
+        {
+          "key": "panel_thickness",
+          "ar": "سمك اللوح مم",
+          "en": "Panel thickness (mm)",
+          "type": "number"
+        },
+        {
+          "key": "face_thickness",
+          "ar": "سمك الألمنيوم الوجه مم",
+          "en": "Aluminum face thickness (mm)",
+          "type": "number"
+        },
+        {
+          "key": "fire_rating",
+          "ar": "درجة مقاومة الحريق",
+          "en": "Fire classification"
+        },
+        {
+          "key": "orientation",
+          "ar": "اتجاه تركيب الألواح",
+          "en": "Panel installation direction",
+          "options": [
+            "أفقي",
+            "رأسي",
+            "مائل",
+            "مختلط"
+          ]
+        },
+        {
+          "key": "grain",
+          "ar": "اتجاه خطوط / عروق",
+          "en": "Grain direction"
+        },
+        {
+          "key": "joint_width",
+          "ar": "عرض الفاصل مم",
+          "en": "Joint width (mm)",
+          "type": "number"
+        },
+        {
+          "key": "joint_type",
+          "ar": "نوع الفاصل Open/Sealed",
+          "en": "Joint type",
+          "options": [
+            "Open Joint",
+            "Sealed Joint",
+            "Butt Joint"
+          ]
+        },
+        {
+          "key": "fixing_system",
+          "ar": "نظام التثبيت",
+          "en": "Fixing system"
+        },
+        {
+          "key": "fasteners",
+          "ar": "المسامير / Rivets",
+          "en": "Screws / rivets"
+        },
+        {
+          "key": "cassette",
+          "ar": "تفصيلة الكاسيت",
+          "en": "Cassette detail"
+        },
+        {
+          "key": "cassette_depth",
+          "ar": "عمق الكاسيت مم",
+          "en": "Cassette depth (mm)",
+          "type": "number"
+        },
+        {
+          "key": "chassis",
+          "ar": "هيكل الشاسيه",
+          "en": "Supporting chassis"
+        },
+        {
+          "key": "chassis_section",
+          "ar": "مقاس قطاع الشاسيه",
+          "en": "Chassis section"
+        },
+        {
+          "key": "chassis_thickness",
+          "ar": "سمك قطاع الشاسيه مم",
+          "en": "Chassis thickness (mm)",
+          "type": "number"
+        },
+        {
+          "key": "chassis_spacing",
+          "ar": "تباعد الشاسيه مم",
+          "en": "Chassis spacing (mm)",
+          "type": "number"
+        },
+        {
+          "key": "membrane",
+          "ar": "مادة العزل / Membrane",
+          "en": "Insulation / membrane"
+        },
+        {
+          "key": "anchors",
+          "ar": "نوع الأنكر",
+          "en": "Anchor type"
+        },
+        {
+          "key": "corners",
+          "ar": "زوايا / ركن",
+          "en": "Corner details"
+        },
+        {
+          "key": "service_openings",
+          "ar": "فتحات خدمة / إضاءة",
+          "en": "Service openings / lighting"
+        },
+        {
+          "key": "edges",
+          "ar": "تفصيل الحواف",
+          "en": "Edge details"
+        },
+        {
+          "key": "expansion_joint",
+          "ar": "موقع فاصل التمدد",
+          "en": "Expansion joint position"
+        }
+      ]
+    },
+    {
+      "id": "glass",
+      "ar": "أعمال الزجاج",
+      "en": "Glass works",
+      "systems": [
+        {
+          "id": "glass-1",
+          "ar": "زجاج مفرد Monolithic",
+          "en": "Monolithic glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-2",
+          "ar": "زجاج مقسّى Tempered",
+          "en": "Tempered glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-3",
+          "ar": "زجاج مقوّى حرارياً Heat-Strengthened",
+          "en": "Heat-strengthened glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-4",
+          "ar": "زجاج مصفح Laminated",
+          "en": "Laminated glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-5",
+          "ar": "DGU مزدوج معزول",
+          "en": "Double glazing (DGU)",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-6",
+          "ar": "TGU ثلاثي معزول",
+          "en": "Triple glazing (TGU)",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-7",
+          "ar": "زجاج عازل مفرغ VIG",
+          "en": "Vacuum insulated glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-8",
+          "ar": "زجاج منخفض الانبعاث Low-E",
+          "en": "Low-E glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-9",
+          "ar": "Solar Control",
+          "en": "Solar control",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-10",
+          "ar": "زجاج عاكس Reflective",
+          "en": "Reflective glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-11",
+          "ar": "زجاج مصنفر / Sandblasted",
+          "en": "Sandblasted glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-12",
+          "ar": "زجاج مطبوع / Fritted",
+          "en": "Fritted glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-13",
+          "ar": "زجاج ملون Tinted",
+          "en": "Tinted glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-14",
+          "ar": "زجاج Low-Iron",
+          "en": "Low-iron glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-15",
+          "ar": "زجاج Spandrel",
+          "en": "Spandrel glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-16",
+          "ar": "زجاج مقاوم للحريق معتمد",
+          "en": "Certified fire-rated glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-17",
+          "ar": "زجاج صوتي Acoustic",
+          "en": "Acoustic glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-18",
+          "ar": "زجاج أمني / مقاوم اقتحام",
+          "en": "Security glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-19",
+          "ar": "زجاج منحني Bent",
+          "en": "Bent glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-20",
+          "ar": "زجاج ديكوري / Patterned",
+          "en": "Patterned glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-21",
+          "ar": "زجاج ذكي Switchable",
+          "en": "Switchable glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-22",
+          "ar": "زجاج شمسي BIPV",
+          "en": "BIPV glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-23",
+          "ar": "مرايا",
+          "en": "Mirrors",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-24",
+          "ar": "شاور سيكوريت",
+          "en": "Tempered shower glass",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-25",
+          "ar": "قاطع زجاجي / Partition",
+          "en": "Glass partition",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-26",
+          "ar": "باب زجاج Frameless",
+          "en": "Frameless glass door",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-27",
+          "ar": "مظلة زجاجية",
+          "en": "Glass canopy",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-28",
+          "ar": "أرضية / درج زجاجي",
+          "en": "Glass floor / stair",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "glass-29",
+          "ar": "زعانف زجاجية Fins",
+          "en": "Glass fins",
+          "source": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة أعمال الزجاج",
+          "decision": "تكوين الطبقات / معالجة حرارية / أوجه الطلاء / الحواف / الثقوب",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        }
+      ],
+      "fields": [
+        {
+          "key": "layers",
+          "ar": "عدد الألواح / Layers",
+          "en": "Layers",
+          "type": "number"
+        },
+        {
+          "key": "outside_glass",
+          "ar": "تكوين الزجاج الخارجي",
+          "en": "External glass composition"
+        },
+        {
+          "key": "outside_thickness",
+          "ar": "سمك الزجاج الخارجي مم",
+          "en": "Outer glass thickness (mm)",
+          "type": "number"
+        },
+        {
+          "key": "spacer_thickness",
+          "ar": "سمك الفاصل Spacer مم",
+          "en": "Spacer thickness (mm)",
+          "type": "number"
+        },
+        {
+          "key": "cavity",
+          "ar": "نوع الغاز / التجويف",
+          "en": "Gas / cavity",
+          "options": [
+            "Air",
+            "Argon",
+            "Krypton",
+            "Vacuum",
+            "لا ينطبق"
+          ]
+        },
+        {
+          "key": "inside_glass",
+          "ar": "تكوين الزجاج الداخلي",
+          "en": "Internal glass composition"
+        },
+        {
+          "key": "inside_thickness",
+          "ar": "سمك الزجاج الداخلي مم",
+          "en": "Inner glass thickness (mm)",
+          "type": "number"
+        },
+        {
+          "key": "interlayer",
+          "ar": "نوع وسمك PVB / SGP",
+          "en": "PVB / SGP type and thickness"
+        },
+        {
+          "key": "coating_surface",
+          "ar": "مكان الطلاء / Surface #",
+          "en": "Coated surface number"
+        },
+        {
+          "key": "heat_treatment",
+          "ar": "معالجة حرارية",
+          "en": "Heat treatment",
+          "options": [
+            "Annealed",
+            "Heat Strengthened",
+            "Fully Tempered",
+            "Heat Soak Tempered"
+          ]
+        },
+        {
+          "key": "heat_soak",
+          "ar": "Heat Soak Test",
+          "en": "Heat soak test",
+          "options": [
+            "نعم",
+            "لا",
+            "حسب الاعتماد"
+          ]
+        },
+        {
+          "key": "edge_finish",
+          "ar": "نوع الحافة / Edge Finish",
+          "en": "Edge finish"
+        },
+        {
+          "key": "holes",
+          "ar": "ثقوب / Holes",
+          "en": "Holes"
+        },
+        {
+          "key": "notches",
+          "ar": "شقوق / Notches",
+          "en": "Notches"
+        },
+        {
+          "key": "cutouts",
+          "ar": "زوايا / Cutouts",
+          "en": "Cutouts"
+        },
+        {
+          "key": "bend_radius",
+          "ar": "نصف قطر الانحناء مم",
+          "en": "Bending radius (mm)",
+          "type": "number"
+        },
+        {
+          "key": "printing",
+          "ar": "طباعة / نقش",
+          "en": "Printing / engraving"
+        },
+        {
+          "key": "spacer",
+          "ar": "نوع السبيسر",
+          "en": "Spacer type"
+        },
+        {
+          "key": "sealant",
+          "ar": "نوع السيليكون / Sealant",
+          "en": "Sealant"
+        },
+        {
+          "key": "coating_direction",
+          "ar": "اتجاه الطلاء",
+          "en": "Coating direction"
+        },
+        {
+          "key": "external_side",
+          "ar": "موضع الجانب الخارجي",
+          "en": "External side identification"
+        },
+        {
+          "key": "glass_fixing",
+          "ar": "نظام التثبيت الزجاجي",
+          "en": "Glass fixing system"
+        },
+        {
+          "key": "safety_approval",
+          "ar": "حاجة لاعتماد السلامة",
+          "en": "Safety approval"
+        },
+        {
+          "key": "cut_before_tempering",
+          "ar": "قص قبل التقسية",
+          "en": "Cut before tempering",
+          "options": [
+            "تم",
+            "قيد المراجعة",
+            "لا ينطبق"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "roofs",
+      "ar": "الأسقف والمظلات",
+      "en": "Roofs and canopies",
+      "systems": [
+        {
+          "id": "roofs-1",
+          "ar": "Skylight Stick",
+          "en": "Skylight Stick",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-2",
+          "ar": "Skylight Unitized",
+          "en": "Skylight Unitized",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-3",
+          "ar": "Roof Lantern",
+          "en": "Roof Lantern",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-4",
+          "ar": "Glass Canopy",
+          "en": "Glass Canopy",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-5",
+          "ar": "ACP Canopy",
+          "en": "ACP Canopy",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-6",
+          "ar": "Aluminium Pergola ثابتة",
+          "en": "Fixed Aluminium Pergola",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-7",
+          "ar": "Pergola Louvers متحركة",
+          "en": "Movable Pergola Louvers",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-8",
+          "ar": "Pergola Fabric متحركة",
+          "en": "Movable Fabric Pergola",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-9",
+          "ar": "Retractable Roof",
+          "en": "Retractable Roof",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-10",
+          "ar": "Polycarbonate Canopy",
+          "en": "Polycarbonate Canopy",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-11",
+          "ar": "Sawtooth Roof",
+          "en": "Sawtooth Roof",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-12",
+          "ar": "Atrium Glazing",
+          "en": "Atrium Glazing",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-13",
+          "ar": "Glass Roof Walkway",
+          "en": "Glass Roof Walkway",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "roofs-14",
+          "ar": "Louvered Sunshade",
+          "en": "Louvered Sunshade",
+          "source": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة الأسقف والمظلات",
+          "decision": "الميول / التصريف / الأحمال / منع التسرب / المحرك",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        }
+      ],
+      "fields": [
+        {
+          "key": "slope",
+          "ar": "زاوية الميل °",
+          "en": "Slope angle (°)",
+          "type": "number"
+        },
+        {
+          "key": "drainage",
+          "ar": "نوع تصريف المطر",
+          "en": "Rainwater drainage"
+        },
+        {
+          "key": "water_path",
+          "ar": "مسار تجميع المياه",
+          "en": "Water collection path"
+        },
+        {
+          "key": "slopes",
+          "ar": "عدد الميول",
+          "en": "Slopes",
+          "type": "number"
+        },
+        {
+          "key": "waterproofing",
+          "ar": "نوع العزل المائي",
+          "en": "Waterproofing"
+        },
+        {
+          "key": "watertightness",
+          "ar": "تصنيف مانع التسرب",
+          "en": "Watertightness classification"
+        },
+        {
+          "key": "motor",
+          "ar": "نوع المحرك",
+          "en": "Motor",
+          "options": [
+            "يدوي",
+            "كهربائي",
+            "هيدروليكي",
+            "بدون"
+          ]
+        },
+        {
+          "key": "control",
+          "ar": "التحكم / ريموت",
+          "en": "Control / remote",
+          "options": [
+            "ريموت",
+            "مفتاح جداري",
+            "تطبيق",
+            "BMS",
+            "يدوي"
+          ]
+        },
+        {
+          "key": "rain_sensor",
+          "ar": "حساس أمطار",
+          "en": "Rain sensor"
+        },
+        {
+          "key": "wind_sensor",
+          "ar": "حساس رياح",
+          "en": "Wind sensor"
+        },
+        {
+          "key": "fabric_blade_color",
+          "ar": "لون قماش / شفرات",
+          "en": "Fabric / blade color"
+        },
+        {
+          "key": "fabric",
+          "ar": "نوع القماش",
+          "en": "Fabric type"
+        },
+        {
+          "key": "load_profiles",
+          "ar": "قطاعات الحمل",
+          "en": "Structural support profiles"
+        },
+        {
+          "key": "fixing_points",
+          "ar": "عدد نقاط التثبيت",
+          "en": "Fixing points",
+          "type": "number"
+        },
+        {
+          "key": "projection",
+          "ar": "بروز المظلة مم",
+          "en": "Canopy projection (mm)",
+          "type": "number"
+        },
+        {
+          "key": "bolts",
+          "ar": "نوع البولتات",
+          "en": "Bolts"
+        },
+        {
+          "key": "flashing",
+          "ar": "نوع الفلاشينج",
+          "en": "Flashing type"
+        },
+        {
+          "key": "bases",
+          "ar": "قواعد تثبيت",
+          "en": "Fixing bases"
+        },
+        {
+          "key": "access",
+          "ar": "فتحات صيانة",
+          "en": "Maintenance access"
+        }
+      ]
+    },
+    {
+      "id": "louvers",
+      "ar": "اللوفر والشيش",
+      "en": "Louvers and shutters",
+      "systems": [
+        {
+          "id": "louvers-1",
+          "ar": "لوفر ثابت أفقي",
+          "en": "Fixed horizontal louvers",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-2",
+          "ar": "لوفر ثابت رأسي",
+          "en": "Fixed vertical louvers",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-3",
+          "ar": "لوفر متحرك يدوي",
+          "en": "Manual movable louvers",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-4",
+          "ar": "لوفر متحرك موتور",
+          "en": "Motorized louvers",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-5",
+          "ar": "لوفر تهوية Acoustic",
+          "en": "Acoustic louvers",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-6",
+          "ar": "لوفر مقاوم مطر Stormproof",
+          "en": "Stormproof louvers",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-7",
+          "ar": "لوفر مقاوم حريق معتمد",
+          "en": "Certified fire-rated louvers",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-8",
+          "ar": "شيش رول يدوي",
+          "en": "Manual roller shutters",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-9",
+          "ar": "شيش رول بموتور",
+          "en": "Motorized roller shutters",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-10",
+          "ar": "شيش حصيرة",
+          "en": "Folding shutters",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-11",
+          "ar": "شبك معدني / Mesh",
+          "en": "Metal mesh",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-12",
+          "ar": "Sun Breakers",
+          "en": "Sun breakers",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-13",
+          "ar": "External Shading",
+          "en": "External shading",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-14",
+          "ar": "Internal Blinds",
+          "en": "Internal blinds",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-15",
+          "ar": "Z-Louvers",
+          "en": "Z-Louvers",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "louvers-16",
+          "ar": "Perforated Screens",
+          "en": "Perforated screens",
+          "source": "https://www.schueco.com/",
+          "definition": "خيار هندسي / تشغيلي ضمن فئة اللوفر والشيش",
+          "decision": "زاوية الشفرات / التهوية / التحكم / مسارات التصريف",
+          "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        }
+      ],
+      "fields": [
+        {
+          "key": "blades",
+          "ar": "عدد الشفرات",
+          "en": "Blades",
+          "type": "number"
+        },
+        {
+          "key": "blade_shape",
+          "ar": "شكل الشفرة",
+          "en": "Blade shape"
+        },
+        {
+          "key": "blade_profile",
+          "ar": "قطاع الشفرة مم",
+          "en": "Blade profile dimensions (mm)"
+        },
+        {
+          "key": "blade_angle",
+          "ar": "زاوية الشفرات °",
+          "en": "Blade angle (°)",
+          "type": "number"
+        },
+        {
+          "key": "blade_spacing",
+          "ar": "المسافة بين الشفرات مم",
+          "en": "Blade spacing (mm)",
+          "type": "number"
+        },
+        {
+          "key": "ventilation_pct",
+          "ar": "حرية التهوية %",
+          "en": "Free ventilation (%)",
+          "type": "number"
+        },
+        {
+          "key": "shading_pct",
+          "ar": "نسبة حجب الشمس %",
+          "en": "Solar shading (%)",
+          "type": "number"
+        },
+        {
+          "key": "blade_orientation",
+          "ar": "اتجاه الشفرات",
+          "en": "Blade orientation",
+          "options": [
+            "أفقي",
+            "رأسي",
+            "مائل"
+          ]
+        },
+        {
+          "key": "motor",
+          "ar": "نوع المحرك",
+          "en": "Motor",
+          "options": [
+            "يدوي",
+            "موتور",
+            "بدون"
+          ]
+        },
+        {
+          "key": "side_guide",
+          "ar": "دليل جانبي",
+          "en": "Side guide"
+        },
+        {
+          "key": "cover_box",
+          "ar": "صندوق تغطية",
+          "en": "Cover box"
+        },
+        {
+          "key": "screen",
+          "ar": "مانع الحشرات",
+          "en": "Insect screen",
+          "options": [
+            "نعم",
+            "لا"
+          ]
+        },
+        {
+          "key": "mesh",
+          "ar": "مقاس شبكة الحشرات",
+          "en": "Insect screen mesh size"
+        },
+        {
+          "key": "water",
+          "ar": "المقاومة للماء",
+          "en": "Water resistance"
+        },
+        {
+          "key": "fire_rating",
+          "ar": "تصنيف الحريق",
+          "en": "Fire rating"
+        },
+        {
+          "key": "acoustic",
+          "ar": "مستوى الصوت",
+          "en": "Acoustic performance"
+        },
+        {
+          "key": "suspension",
+          "ar": "تعليق / تثبيت",
+          "en": "Suspension / fixing"
+        },
+        {
+          "key": "limit_switch",
+          "ar": "مفتاح حد التشغيل",
+          "en": "Limit switch"
+        }
+      ]
+    }
+  ],
+  "common": [
+    {
+      "key": "item_code",
+      "ar": "كود البند",
+      "en": "Item code"
+    },
+    {
+      "key": "project_code",
+      "ar": "كود المشروع",
+      "en": "Project code"
+    },
+    {
+      "key": "customer_code",
+      "ar": "كود العميل",
+      "en": "Customer code"
+    },
+    {
+      "key": "building",
+      "ar": "المبنى / المنطقة",
+      "en": "Building / area"
+    },
+    {
+      "key": "floor",
+      "ar": "الدور",
+      "en": "Floor"
+    },
+    {
+      "key": "room",
+      "ar": "الموقع / الغرفة",
+      "en": "Location / room"
+    },
+    {
+      "key": "tag",
+      "ar": "رقم الفتحة / Tag",
+      "en": "Opening tag"
+    },
+    {
+      "key": "drawing_ref",
+      "ar": "رقم اللوحة / المرجع",
+      "en": "Drawing reference"
+    },
+    {
+      "key": "system",
+      "ar": "نوع النظام / التكوين",
+      "en": "System / configuration"
+    },
+    {
+      "key": "profile",
+      "ar": "القطاع / النظام التجاري",
+      "en": "Commercial profile / system"
+    },
+    {
+      "key": "profile_brand",
+      "ar": "ماركة القطاعات",
+      "en": "Profile manufacturer"
+    },
+    {
+      "key": "quantity",
+      "ar": "العدد",
+      "en": "Quantity",
+      "type": "number"
+    },
+    {
+      "key": "width_mm",
+      "ar": "عرض الفتحة مم",
+      "en": "Width (mm)",
+      "type": "number"
+    },
+    {
+      "key": "height_mm",
+      "ar": "ارتفاع الفتحة مم",
+      "en": "Height (mm)",
+      "type": "number"
+    },
+    {
+      "key": "depth_mm",
+      "ar": "عمق / بروز مم",
+      "en": "Depth / projection (mm)",
+      "type": "number"
+    },
+    {
+      "key": "area",
+      "ar": "المساحة الإجمالية م²",
+      "en": "Estimated area (m²)"
+    },
+    {
+      "key": "color",
+      "ar": "لون القطاعات / RAL",
+      "en": "Profile color / RAL"
+    },
+    {
+      "key": "finish",
+      "ar": "نوع التشطيب",
+      "en": "Finish",
+      "options": [
+        "Antique finish",
+        "Electrostatic Powder Coating",
+        "Anodized",
+        "PVDF",
+        "Mill Finish",
+        "Stainless Satin",
+        "Stainless Mirror",
+        "Brushed",
+        "Painted",
+        "Other"
+      ]
+    },
+    {
+      "key": "viewing",
+      "ar": "وجهة الرؤية / الواجهة",
+      "en": "Viewing direction / facade",
+      "options": [
+        "Inside",
+        "Outside"
+      ]
+    },
+    {
+      "key": "infill",
+      "ar": "تكوين الزجاج / الملء",
+      "en": "Glass / infill configuration"
+    },
+    {
+      "key": "glass_thickness",
+      "ar": "سمك الزجاج الكلي مم",
+      "en": "Total glass thickness (mm)",
+      "type": "number"
+    },
+    {
+      "key": "glass_color",
+      "ar": "الكود / اللون للزجاج",
+      "en": "Glass code / color"
+    },
+    {
+      "key": "extra_specs",
+      "ar": "النوع / المواصفات الإضافية",
+      "en": "Additional specifications"
+    },
+    {
+      "key": "accessories",
+      "ar": "إكسسوارات عامة",
+      "en": "General accessories"
+    },
+    {
+      "key": "fixing",
+      "ar": "نوع التثبيت",
+      "en": "Fixing method",
+      "options": [
+        "براغي / Anchors",
+        "Welded",
+        "Structural Silicone",
+        "Pressure Plate",
+        "Spider",
+        "Base Shoe",
+        "Standoff",
+        "Concealed Bracket",
+        "Rivet",
+        "Cassette",
+        "Other"
+      ]
+    },
+    {
+      "key": "insulation",
+      "ar": "تفاصيل العزل / السيليكون",
+      "en": "Insulation / silicone"
+    },
+    {
+      "key": "site_notes",
+      "ar": "ملاحظات الموقع",
+      "en": "Site remarks"
+    },
+    {
+      "key": "measurement_status",
+      "ar": "حالة اعتماد المقاس",
+      "en": "Measurement approval",
+      "options": [
+        "لم يبدأ",
+        "قيد الرفع",
+        "تم الرفع",
+        "معتمد",
+        "تعديل مطلوب"
+      ]
+    },
+    {
+      "key": "material_status",
+      "ar": "حالة اعتماد الخامات",
+      "en": "Material approval",
+      "options": [
+        "غير محدد",
+        "بانتظار اعتماد",
+        "معتمد",
+        "مرفوض / تعديل"
+      ]
+    },
+    {
+      "key": "manufacturing_status",
+      "ar": "حالة التصنيع",
+      "en": "Manufacturing status",
+      "options": [
+        "لم يبدأ",
+        "جاهز للتصنيع",
+        "جارٍ التصنيع",
+        "مكتمل",
+        "تم التركيب",
+        "موقوف"
+      ]
+    },
+    {
+      "key": "priority",
+      "ar": "أولوية التنفيذ",
+      "en": "Priority",
+      "options": [
+        "عادي",
+        "متوسط",
+        "عاجل",
+        "حرج"
+      ]
+    },
+    {
+      "key": "required_date",
+      "ar": "تاريخ المطلوب",
+      "en": "Required date",
+      "type": "date"
+    },
+    {
+      "key": "responsible",
+      "ar": "المسؤول",
+      "en": "Responsible person"
+    },
+    {
+      "key": "production_ref",
+      "ar": "رقم أمر الإنتاج",
+      "en": "Production order reference"
+    },
+    {
+      "key": "workshop_notes",
+      "ar": "ملاحظات ورشة إضافية",
+      "en": "Workshop notes"
+    }
+  ],
+  "projectStatuses": [
+    "جديد",
+    "رفع مقاسات",
+    "اعتمادات",
+    "تصنيع",
+    "توريد",
+    "تركيب",
+    "مكتمل",
+    "موقوف"
+  ],
+  "qcStages": [
+    "رفع المقاسات",
+    "استلام الخامات",
+    "قص وتجهيز",
+    "تجميع",
+    "تركيب الزجاج",
+    "قبل الشحن",
+    "بعد التركيب",
+    "استلام نهائي"
+  ],
+  "qcChecks": [
+    "مطابقة المقاسات",
+    "تطابق القطاع",
+    "مراجعة التشطيب",
+    "مراجعة الزجاج",
+    "اتجاه الفتح / المقابض",
+    "فحص الإكسسوارات",
+    "فحص العزل والتثبيت",
+    "الحماية والتغليف"
+  ],
+  "references": [
+    {
+      "A": "معيار فتحات",
+      "B": "EN 13126-1:2022",
+      "C": "تصنيف أوضاع فتح النوافذ والأجهزة",
+      "D": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
+      "E": "تحقق من المعيار المطبق محلياً"
+    },
+    {
+      "A": "مصنع أنظمة",
+      "B": "Schüco AWS 50.NI",
+      "C": "تأكيد وجود side hung / tilt turn / projected",
+      "D": "https://www.schueco.com/uk/specifiers/products/windows/aluminium/aws-50-ni",
+      "E": "الأنواع تعتمد على السلسلة"
+    },
+    {
+      "A": "مصنع أنظمة",
+      "B": "Jansen Opening variants",
+      "C": "أنواع pivot / top hung / sliding / folding",
+      "D": "https://www.jansen.com/en/building-systems-profile-systems-steel/topics/design/opening-variants.html",
+      "E": "ليس ترخيصاً بنقل المواصفات"
+    },
+    {
+      "A": "مصنع واجهات",
+      "B": "WICONA WICTEC",
+      "C": "Stick / structural / unitized / closed cavity",
+      "D": "https://assets.ctfassets.net/o4m3rk0gh1ig/25xngdDM5ymhlRUZUb0Xgz/72a556de28e04929a4190278b3c8567b/PB_WIC_wictec-60-ng-03-2021-en-web.pdf",
+      "E": "التصميم الإنشائي حسب الاعتماد"
+    },
+    {
+      "A": "جمعية مهنية",
+      "B": "NGA Describing Architectural Glass",
+      "C": "وصف laminated / IGU / surface numbering",
+      "D": "https://www.glass.org/sites/default/files/2022-04/FB15-07_2022_Describing_Architectural_Glass.pdf",
+      "E": "للطبقات والتكوينات"
+    },
+    {
+      "A": "جمعية مهنية",
+      "B": "NGA Glazing Manual",
+      "C": "فئات glass heat-treated / coated / bent / mirrors",
+      "D": "https://www.glass.org/sites/default/files/2023-01/GANA_Glazing_Manual_2022_pw.pdf",
+      "E": "لا يستبدل تعليمات المورد"
+    },
+    {
+      "A": "جمعية مهنية",
+      "B": "NGA Heat Treated Glass",
+      "C": "التمييز بين heat strengthened و fully tempered",
+      "D": "https://www.glass.org/sites/default/files/2021-08/FB45-14_2019_Recommended_Applications_for_Heat-Treated_Glass_0521_0.pdf",
+      "E": "التصنيع المسبق للثقوب والقص"
+    },
+    {
+      "A": "مصدر عام",
+      "B": "NGA Technical Resources",
+      "C": "مراجع الزجاج المستخدم في الدرابزين",
+      "D": "https://www.glass.org/architect",
+      "E": "الأحمال والحد الأدنى للكود"
+    },
+    {
+      "A": "تعليمات",
+      "B": "وحدة القياس",
+      "C": "الأبعاد: مم | المساحات: م² | الكميات: عدد",
+      "E": "المساحة مرجعية فقط"
+    },
+    {
+      "A": "تعليمات",
+      "B": "تعريف الاتجاه",
+      "C": "سجّل جهة الرؤية من الداخل / الخارج وأنت تنظر للفتحة قبل تحديد يمين أو يسار",
+      "E": "تجنب اللبس في handedness"
+    },
+    {
+      "A": "تعليمات",
+      "B": "حقول بلا تطبيق",
+      "C": "اتركها فارغة بدل كتابة بيانات غير صحيحة",
+      "E": "التخصيص حسب فئة العمل"
+    },
+    {
+      "A": "تعليمات",
+      "B": "إصدار التصنيع",
+      "C": "يستلزم اعتماد الرفع والقطاع والزجاج والإكسسوارات والتفاصيل",
+      "E": "لا إنتاج بناءً على وصف عام"
+    },
+    {
+      "A": "تعليمات",
+      "B": "أمان الزجاج والدرابزين",
+      "C": "لا تثبت السمك/الارتفاع/الأحمال من قائمة اختيارات فقط",
+      "E": "تتطلب مراجعة إنشائية وتنظيمية"
+    },
+    {
+      "A": "تعليمات",
+      "B": "تنبيه مدخلات المشروع",
+      "C": "أي أسماء أو أرقام لم تُدخل لم تُفترض تلقائياً",
+      "E": "جميع سجلات العملاء والمشروعات فارغة"
+    }
+  ]
+}

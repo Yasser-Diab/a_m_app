@@ -26,7 +26,7 @@ const labels = {
     subtotal: 'Work type subtotal', total: 'Total work', finance: 'Settlement', basis: 'Basis',
     current_payable: 'Current net payable', cumulative_payable: 'Net payable to date',
     current_credit: 'Current credit', cumulative_credit: 'Credit to date',
-    ordinary_collections: 'Ordinary collections', advance_recovery: 'Advance recovery',
+    ordinary_collections: 'Ordinary collections', advance_recovery: 'Advance recovery', advance_remaining: 'Advance balance remaining',
     settled_work: 'Work value', receipts: 'Payment details', advance_receipts: 'Advance payments received',
     collection_received: 'By payment receipt date', collection_cleared: 'By payment clearance date',
     received_date: 'Received', method: 'Method', reference: 'Reference', amount: 'Amount',
@@ -58,7 +58,7 @@ const labels = {
     subtotal: 'إجمالي نوع العمل', total: 'إجمالي الأعمال', finance: 'التسوية المالية', basis: 'الأساس',
     current_payable: 'صافي المستحق للفترة', cumulative_payable: 'صافي المستحق حتى تاريخه',
     current_credit: 'رصيد دائن للفترة', cumulative_credit: 'رصيد دائن حتى تاريخه',
-    ordinary_collections: 'التحصيلات العادية', advance_recovery: 'استرداد الدفعة المقدمة',
+    ordinary_collections: 'التحصيلات العادية', advance_recovery: 'استرداد الدفعة المقدمة', advance_remaining: 'الرصيد المتبقي للدفعة المقدمة',
     settled_work: 'قيمة الأعمال', receipts: 'تفاصيل الدفعات', advance_receipts: 'الدفعات المقدمة المستلمة',
     collection_received: 'حسب تاريخ استلام الدفعة', collection_cleared: 'حسب تاريخ تحصيل الدفعة',
     received_date: 'تاريخ الاستلام', method: 'طريقة التحصيل', reference: 'المرجع', amount: 'المبلغ',
@@ -331,6 +331,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const detailGroups = [...groups.values()].map(({name,lines:groupLines}) =>
     ({name,lines:groupLines,totals:workRollup(groupLines,moneyKeys)}));
   const components = totals.components || [];
+  const advanceComponent=components.find((entry)=>(entry.category||entry.kind)==='advance_recovery');
   const recordedCollections = [
     ...(totals.advance_receipts ? [{key:'advance_receipts',
       previous:historical ? -money(totals.previous_advance_receipts) : null,
@@ -358,7 +359,8 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       key: 'advance_recovery',
       current: -money(totals.advance_recovery),
       cumulative: totals.cumulative_advance_recovery == null ? null : -money(totals.cumulative_advance_recovery),
-      basis: text(t[components.find((entry) => (entry.category || entry.kind) === 'advance_recovery')?.basis]),
+      basis: [advanceComponent?.rate==null?'':text(advanceComponent.rate)+'%',
+        text(t[advanceComponent?.basis==='work'?'gross':advanceComponent?.basis])].filter(Boolean).join(' × '),
     }]),
     ...(totals.advance_remaining == null ? [] : [{key:'advance_remaining',cumulative:money(totals.advance_remaining)}]),
     ...(totals.reversed_advance_recovery || totals.current_reversed_advance_recovery ? [{
@@ -436,13 +438,21 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     if (/^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(issuer[key])) palette[key] = issuer[key];
   }
   const font = (value) => /^[a-z0-9 ,"'-]+$/i.test(value || '') ? value : 'Arial,Tahoma,sans-serif';
-  const coverKind = ['building','unit','work_type'].find((kind) => subtotals.some(({path}) => path.at(-1).kind === kind));
-  const workTypeSummary = groupBy === 'work_type' && (coverKind === 'work_type' ||
-    (!coverKind && header.group_by == null && grouping.group_work_types));
-  const coverRows = workTypeSummary
-    ? detailGroups.filter(({name}) => name).map(({name,totals}) => ({name,path:[{kind:'work_type',name}],...totals}))
-    : subtotals.filter(({path}) => path.at(-1).kind === coverKind)
-      .map(({path,totals}) => ({name:path.map(({name}) => name).join(' / '),path,...totals}));
+  // The cover is a complete work-type summary. Detail display preferences must
+  // never hide its totals or add nested totals that count the same work twice.
+  const coverKind = buildings.size ? 'building' : units.size ? 'unit' : 'work_type';
+  const summaryGroups = new Map();
+  for (const line of lines) {
+    const location = coverKind === 'building' ? line.building_unit : coverKind === 'unit' ? line.floor_apartment : '';
+    const workType = line.work_type || t.description;
+    const key = JSON.stringify([location.toLowerCase(),workType.toLowerCase()]);
+    if (!summaryGroups.has(key)) summaryGroups.set(key,{path:[
+      ...(location ? [{kind:coverKind,name:location}] : []),{kind:'work_type',name:workType}],lines:[]});
+    summaryGroups.get(key).lines.push(line);
+  }
+  const coverRows = [...summaryGroups.values()].map(({path,lines:groupLines}) => ({
+    name:path.map(({name}) => name).join(' / '),path,...workRollup(groupLines,moneyKeys),
+  }));
   return {
     modelVersion: MODEL_VERSION, locale, direction: locale === 'ar' ? 'rtl' : 'ltr', labels: t,
     variant, issued, historical, approved, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',

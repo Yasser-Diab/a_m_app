@@ -55,6 +55,7 @@ const DESKTOP_SETTINGS_DEFAULTS = {
   openAtLogin: false,
   reportSaveDirectory: '',
   lastReportSaveDirectory: '',
+  lastOperationsReportSaveDirectory: '',
   openPdfAfterSaving: false,
   window: {
     width: 1320,
@@ -615,6 +616,7 @@ function normalizeDesktopSettings(settings = {}) {
     openAtLogin: !!settings.openAtLogin,
     reportSaveDirectory: String(settings.reportSaveDirectory || ''),
     lastReportSaveDirectory: String(settings.lastReportSaveDirectory || ''),
+    lastOperationsReportSaveDirectory: String(settings.lastOperationsReportSaveDirectory || ''),
     openPdfAfterSaving: !!settings.openPdfAfterSaving,
     window: {
       ...DESKTOP_SETTINGS_DEFAULTS.window,
@@ -1413,6 +1415,7 @@ ipcMain.handle('desktop-settings:update', async (_event, patch = {}) => {
 
 function reportFolderForType(type = '') {
   const normalized = String(type || '').toLowerCase();
+  if (normalized === 'project-operations') return 'Project Operations';
   if (normalized.includes('offer')) return 'Price Offers';
   if (normalized.includes('invoice')) return 'Invoices';
   if (normalized.includes('statement')) return 'Account Statements';
@@ -1463,7 +1466,10 @@ ipcMain.handle('save-report-file', async (_event, payload = {}) => {
     fs.mkdirSync(outputDir, { recursive: true });
     savedPath = path.join(outputDir, fileName);
   } else {
-    const initialDir = settings.lastReportSaveDirectory || app.getPath('documents');
+    const operations=payload.reportType==='project-operations';
+    const initialDir = operations?(settings.lastOperationsReportSaveDirectory||path.join(app.getPath('documents'),'Project Operations')):
+      settings.lastReportSaveDirectory || app.getPath('documents');
+    if (operations) fs.mkdirSync(initialDir,{recursive:true});
     const result = await dialog.showSaveDialog(mainWindow, {
       title: 'Save report',
       defaultPath: path.join(initialDir, fileName),
@@ -1476,7 +1482,7 @@ ipcMain.handle('save-report-file', async (_event, payload = {}) => {
     if (result.canceled || !result.filePath) return { canceled: true };
     savedPath = result.filePath;
     updateDesktopSettings(
-      { lastReportSaveDirectory: path.dirname(savedPath) },
+      operations?{lastOperationsReportSaveDirectory:path.dirname(savedPath)}:{lastReportSaveDirectory:path.dirname(savedPath)},
       { apply: false },
     );
   }

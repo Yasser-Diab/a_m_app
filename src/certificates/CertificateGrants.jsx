@@ -14,6 +14,17 @@ const capabilityLabels = {
   export: ["معاينة وتصدير المستخلصات", "Preview and export certificates"],
   view_audit: ["عرض سجل التدقيق", "View audit history"],
 };
+const operationsLabels = {
+  ops_view:["عرض عمليات المشروع","View Project Operations"],
+  ops_edit:["إدخال وتعديل المواصفات","Enter and edit specifications"],
+  ops_approve:["اعتماد التعديلات التشغيلية","Approve operational revisions"],
+  ops_finance:["مراجعة وترحيل تسويات الفواتير","Review and post invoice adjustments"],
+  ops_qc:["تسجيل فحص الجودة","Record quality inspections"],
+  ops_load:["تسجيل التحميل والكميات المنفذة","Record loading and installation"],
+  ops_release:["اعتماد التصنيع والشحن","Release manufacturing and shipment"],
+  ops_export:["طباعة تقارير العمليات","Print operational reports"],
+  ops_catalogue:["إدارة دليل الأنظمة","Manage the system catalogue"],
+};
 
 export default function CertificateGrants({ grant, projects, uiLanguage, onChange }) {
   const t = (ar, en) => uiLanguage === "en" ? en : ar;
@@ -37,6 +48,13 @@ export default function CertificateGrants({ grant, projects, uiLanguage, onChang
           <span>{t(...label)}</span>
         </label>)}
       </div>
+    </fieldset>
+    <fieldset>
+      <legend>{t("صلاحيات عمليات المشروعات","Project Operations permissions")}</legend>
+      <div className="user-certificate-choices">{Object.entries(operationsLabels).map(([key,label])=><label key={key}>
+        <input type="checkbox" checked={draft.capabilities.includes(key)} onChange={event=>toggle("capabilities",key,event.target.checked)}/>
+        <span>{t(...label)}</span>
+      </label>)}</div>
     </fieldset>
     <fieldset>
       <legend>{t("نطاق المشروعات", "Project scope")}</legend>

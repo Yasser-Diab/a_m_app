@@ -36,7 +36,7 @@ function allocationLedger(database, projectId, profile, cutoff, options = {}) {
   const recovered = new Map(database.all(`
     SELECT a.advance_id,SUM(a.amount_minor) AS sum FROM cert_advance_recoveries a
     JOIN cert_revisions r ON r.id=a.certificate_id
-    WHERE a.project_id=? AND r.status='issued' AND r.work_to<=?
+    WHERE a.project_id=? AND r.status IN ('approved','issued') AND r.work_to<=?
       AND (? IS NULL OR r.location_id IS ?) AND (? IS NULL OR r.series_key=?)
     GROUP BY a.advance_id`, [projectId,workCutoff,locationId,locationId,seriesKey,seriesKey]).map((row) => [row.advance_id,row.sum]));
   const recoveredAll = new Map(database.all(`

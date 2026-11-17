@@ -111,7 +111,7 @@ const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, loc
   </tr>;
 });
 
-export default function CertificateGrid({ rows, onChange, readOnly, t, locale, locations = [], suggestions = [], workItems = [], workTypes = [], validation = [], totals, currency, settled }) {
+export default function CertificateGrid({ rows, onChange, readOnly, t, locale, locations = [], suggestions = [], workItems = [], workTypes = [], operationItems = [], validation = [], totals, currency, settled }) {
   const grid = useRef(null);
   const currentRows = useRef(rows);
   const additionRow = useRef(null);
@@ -657,6 +657,14 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
       <div><strong>{t("إجمالي أعمال الفترة", "Current work subtotal")}</strong> <Money value={settled ? totals?.current : null} locale={locale} currency={currency} />{!settled && <small>{t(" يتحدث عند الحفظ", " Updates on save")}</small>}</div>
     </div>
     {menuSource && <Dialog title={t("خيارات البند", "Work row options")} onClose={() => setRowMenu(null)} t={t}>
+      {operationItems.length>0&&<Field label={t("ربط ببند من عمليات المشروع","Link operational item")}>
+        <select value={menuSource.ops_item_id || ""} onChange={(event)=>{
+          edit(rowMenu,"ops_item_id",event.target.value||null);
+          setRowMenu(null);
+        }}>
+          <option value="">—</option>{operationItems.map(({id,code,description})=><option key={id} value={id}>{code} · {description}</option>)}
+        </select>
+      </Field>}
       {workItems.length > 0 && <Field label={t("ربط ببند معتمد", "Link approved work item")}><select defaultValue="" onChange={(event) => {
         const item = workItems.find((value) => String(value.id) === event.target.value);
         if (item) {

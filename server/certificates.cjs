@@ -9,7 +9,7 @@ const {
 const {initializeMasterCodes, getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, updateProject, createLocation,
   projectLookupKeys, projectLocations, projectEntrySuggestions, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, addReceipt, updateReceipt, changeReceipt, collectionResponse} = require("./certificate-ledger.cjs");
-const {getRevision, certificateDocumentInput, certificateNumber, createDraft, saveDraft, runAction, forAccess, recognizedReceipts} = require("./certificate-revisions.cjs");
+const {getRevision, certificateDocumentInput, certificateNumber, createDraft, saveDraft, runAction, forAccess, recognizedReceipts,previewOperationalQuantities} = require("./certificate-revisions.cjs");
 const {importLegacyCertificates} = require("./certificate-legacy.cjs");
 const {stageImport, commitImport} = require("./certificate-imports.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
@@ -21,10 +21,13 @@ const {
   resumeCertificateRenders, registerCertificateDocumentRoutes,
 } = require("./certificate-documents.cjs");
 const {certificateReportOptions} = require("./certificate-document-model.cjs");
+const {initializeCertificateNumbers}=require("./certificate-numbering.cjs");
+const {reconcile:reconcileOperations} = require("./project-operations/finance.cjs");
 
 function initializeCertificates(database) {
   database.transaction(() => {
     database.exec(fs.readFileSync(path.join(__dirname, "certificate-schema.sql"), "utf8"));
+    initializeCertificateNumbers(database);
     if (!database.all("PRAGMA table_info(cert_receipt_allocations)").some(({name}) => name === "allocated_at"))
       database.run("ALTER TABLE cert_receipt_allocations ADD COLUMN allocated_at TEXT");
     initializeSessionSecret(database);
@@ -96,12 +99,12 @@ function certificateList(database, req, access) {
   const where = `${scope.clause} AND (? IS NULL OR r.project_id=?)
     AND (? = '' OR ${displayStatus}=? OR (? = 'historical' AND r.status='historical'))
     AND (? = '' OR cp.search_name LIKE ? OR p.search_name LIKE ? OR r.legacy_number LIKE ?
-      OR CAST(r.official_number AS TEXT) LIKE ?)`;
-  const params = [...scope.params,projectId,projectId,val,val,val,match,like,like,like,like];
+      OR CAST(r.official_number AS TEXT) LIKE ? OR CAST(r.reserved_number AS TEXT) LIKE ?)`;
+  const params = [...scope.params,projectId,projectId,val,val,val,match,like,like,like,like,like];
   const joins = "FROM cert_revisions r JOIN cert_projects cp ON r.project_id=cp.id JOIN parties p ON p.id=cp.customer_id LEFT JOIN cert_legacy_workflow lw ON lw.revision_id=r.id";
   const total = database.get(`SELECT count(*) AS total ${joins} WHERE ${where}`,params).total;
   const items = database.all(`
-    SELECT r.id,r.project_id,r.series_key,r.revises_id,${displayStatus} AS status,r.pdf_status,r.type,r.revision,r.version,r.official_number,
+    SELECT r.id,r.project_id,r.series_key,r.revises_id,${displayStatus} AS status,r.pdf_status,r.type,r.revision,r.version,r.official_number,r.reserved_number,
       r.legacy_number,COALESCE(json_extract(lw.edited_json,'$.header.work_to'),r.work_to) AS work_to,r.collection_cutoff,r.issued_at,r.updated_at,r.header_json,
       COALESCE(json_extract(lw.edited_json,'$.totals.current'),json_extract(r.snapshot_json,'$.totals.current')) AS current,
       json_extract(r.snapshot_json,'$.totals.cumulative_payable') AS cumulative_payable,
@@ -120,16 +123,18 @@ function normalizeListStatus(status) {
 
 function sourceList(database, project) {
   const certificates = database.all(`
-    SELECT id,official_number,legacy_number,revision,work_to,snapshot_json
-    FROM cert_revisions WHERE project_id=? AND status IN ('issued','historical')
+    SELECT id,project_id,series_key,revises_id,reserved_number,official_number,legacy_number,revision,work_to,snapshot_json
+    FROM cert_revisions WHERE project_id=? AND status IN ('approved','issued','historical')
     ORDER BY work_to DESC,id DESC LIMIT 12
-  `, [project.id]).map(({snapshot_json,...row}) => ({
-    ...row,label:`#${row.official_number || row.legacy_number || row.id}${row.revision > 1 ? ` · R${row.revision}` : ""}`,
-    lines:parse(snapshot_json).lines.map(({identity,location_id,location,work_type,work_item,description,mode,
+  `, [project.id]).map(({snapshot_json,...row}) => {
+    const snapshot=snapshot_json?parse(snapshot_json):certificateDocumentInput(database,getRevision(database,row.id));
+    return {...row,label:`#${certificateNumber(database,row)}${row.revision > 1 ? ` · R${row.revision}` : ""}`,
+    lines:snapshot.lines.map(({identity,location_id,location,work_type,work_item,description,mode,
       width,height,dimension_unit,count,quantity,unit,rate,agreed_amount,...fields}) =>
       ({identity,location_id,...certificateLocationFields({...fields,location}),work_type,work_item,description,mode,width,height,dimension_unit,count,quantity,
         unit,rate,agreed_amount,prior_certified:true})),
-  }));
+    };
+  });
   const projectKeys = projectLookupKeys(project);
   const documents = database.all(`SELECT id,operation_no,project,title,entry_date,document_type FROM documents
     WHERE party_id=? AND deleted_at IS NULL AND document_type IN ('price_offer','invoice') AND status='approved' ORDER BY id DESC`,
@@ -422,6 +427,17 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
   router.get("/projects/:projectId/entry-suggestions",(req,res) => {
     const {project:row} = project(req,"view");
     res.json(projectEntrySuggestions(database,row));
+  });
+  router.get("/projects/:projectId/operational-quantities",(req,res)=>{
+    const {project:row,access}=project(req,"view");
+    if (!access.capabilities.includes("ops_view")) fail(403,"Project Operations viewing permission is required");
+    res.json(reconcileOperations(database,row.id,{cutoff:date(req.query.work_to,true)}));
+  });
+  router.post("/projects/:projectId/operational-quantities",(req,res)=>{
+    const {project:row,access}=project(req,"view");
+    if (!access.capabilities.includes("ops_view") || !access.capabilities.includes(req.body.revision_id?"edit_draft":"create"))
+      fail(403,"Project Operations and certificate editing permissions are required");
+    res.json(previewOperationalQuantities(database,row,req.body));
   });
   router.post("/projects/:projectId/locations",(req,res) => {
     const {project:row,access} = project(req,"create_master");

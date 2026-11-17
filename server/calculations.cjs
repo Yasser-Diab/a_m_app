@@ -99,6 +99,13 @@ function composeStatementText(input = {}) {
 }
 
 function calculateItem(input = {}) {
+  if (input.ops_adjustment_sign === -1) {
+    const reversal=calculateItem({...input,ops_adjustment_sign:1});
+    const signed=["quantity","cost","unit_price","gross_total","vat_amount","social_insurance_amount","stamp_amount",
+      "works_insurance_amount","final_insurance_amount","contractor_tax_amount","discount_amount","net_total","area_m2"];
+    for (const key of signed) reversal[key] = reversal[key] ? -reversal[key] : 0;
+    return reversal;
+  }
   const collectionAmount = numberOrZero(input.collection_amount);
   const itemCount = numberOrZero(input.item_count || input.count);
   const widthCm = numberOrZero(input.width_cm);

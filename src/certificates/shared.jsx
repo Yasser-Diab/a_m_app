@@ -137,7 +137,11 @@ export function Problem({ error, t }) {
   if (!error) return null;
   const conflict = error.message === "This code is already assigned" ? t("هذا الرمز مستخدم بالفعل.", "This code is already assigned.")
     : error.message === "A project already uses that name, address and contract for this customer"
-      ? t("يوجد مشروع بهذا الاسم والعنوان والعقد لهذا العميل.", "A project already uses that name, address and contract for this customer.") : null;
+      ? t("يوجد مشروع بهذا الاسم والعنوان والعقد لهذا العميل.", "A project already uses that name, address and contract for this customer.")
+      : error.message === "Issue the previously approved certificate in this scope first"
+        ? t("أصدر المستخلص السابق المعتمد لهذا المشروع قبل اعتماد المستخلص التالي.","Issue the previous approved certificate for this project before approving the next one.")
+        : error.message === "Certificate calculation, baseline or print details changed. Return it to draft and submit again"
+          ? t("تغير حساب المستخلص أو المستخلص السابق. أعد المستخلص إلى المسودة واحفظه ثم أرسله للمراجعة.",error.message) : null;
   const text = error.status === 401 ? t("انتهت جلسة المستخلصات. سجّل الدخول مجددًا.", "Your certificate session ended. Sign in again.")
     : error.status === 403 ? t("الصلاحية المطلوبة غير متوفرة لهذا السجل.", "Your access does not allow this action for the selected record.")
     : error.status === 409 ? conflict || t("تغير السجل أو الإعدادات أثناء العمل. راجع آخر نسخة قبل المتابعة.", "The record or settings changed. Review the latest version before continuing.")

@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS cert_revisions (
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','in_review','approved','issued','historical')),
   pdf_status TEXT,
   official_number INTEGER,
+  reserved_number INTEGER CHECK(reserved_number>0),
   legacy_number TEXT,
   type TEXT NOT NULL DEFAULT 'progress' CHECK(type IN ('progress','final','correction','void','reopen')),
   locale TEXT NOT NULL DEFAULT 'ar' CHECK(locale IN ('ar','en')),

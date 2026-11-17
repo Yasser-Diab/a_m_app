@@ -21,10 +21,11 @@ const {
   authorize: authorizeCertificate,
 } = require("./certificate-access.cjs");
 const {commercialAccess, commercialProjects, projectPaymentRows} = require("./commercial-ledger.cjs");
-const {certificateDocumentInput} = require("./certificate-revisions.cjs");
+const {certificateDocumentInput,certificateNumber} = require("./certificate-revisions.cjs");
 const {legacySnapshot} = require("./certificate-history.cjs");
 const {getProject: getCertificateProject, projectLocations: certificateLocations} = require("./certificate-projects.cjs");
 const {addReceipt: addCertificateReceipt} = require("./certificate-ledger.cjs");
+const {initializeOperations,registerOperations,isAdjustment: isOpsAdjustment} = require("./project-operations/index.cjs");
 const {
   fetchManagerSubscriptionStatus,
   registerManagerGatewayRoutes,
@@ -1610,7 +1611,10 @@ function getOrCreateDocument(database, input, party, existing = {}) {
 
 function normalizeInput(database, body, existing = {}) {
   const item = { ...existing, ...body };
+  delete item.ops_adjustment_sign;
   const linkedDocumentId = normalizeNumber(item.document_id);
+  if (isOpsAdjustment(database,linkedDocumentId) || isOpsAdjustment(database,existing.document_id))
+    throw new Error("Edit this linked invoice adjustment from Project Operations");
   let party = null;
   if (linkedDocumentId) {
     const linkedDocument = database.get(
@@ -2370,6 +2374,7 @@ function accountStatementData(database, query, type, certificateAccess) {
             d.building_unit,
             d.discount_type,
             d.discount_value,
+            EXISTS(SELECT 1 FROM ops_changes oc WHERE oc.adjustment_id=d.id) AS is_ops_adjustment,
             COUNT(wi.id) AS item_count,
             GROUP_CONCAT(DISTINCT NULLIF(wi.work_type, '')) AS work_types,
             GROUP_CONCAT(DISTINCT NULLIF(wi.collection_note, '')) AS collection_notes,
@@ -2411,7 +2416,7 @@ function accountStatementData(database, query, type, certificateAccess) {
     const debit = isPayment
       ? 0
       : roundMoney(Math.max(netBeforeDiscount - discountAmount, 0));
-    const credit = 0;
+    const credit = row.is_ops_adjustment ? roundMoney(Math.max(discountAmount-netBeforeDiscount,0)) : 0;
     if (debit) {
       ledgerRows.push({
         ...row,
@@ -2444,7 +2449,8 @@ function accountStatementData(database, query, type, certificateAccess) {
         discount_amount: 0,
         is_payment: 1,
         entry_date: row.payment_entry_date || row.entry_date || "",
-        description: `${statementPaymentLabel(statementReportLanguage)} - ${docNo}`,
+        description: row.is_ops_adjustment ? `${statementReportLanguage==="ar"?"تسوية فاتورة":"Invoice adjustment"} - ${docNo}`
+          : `${statementPaymentLabel(statementReportLanguage)} - ${docNo}`,
         project_label: row.project || "",
         details:
           statementReportLanguage === "en" && normalizeText(row.collection_notes) === "تحصيل"
@@ -2596,7 +2602,7 @@ function accountStatementData(database, query, type, certificateAccess) {
           .filter((component) => component.category !== "advance_recovery").reduce((sum, component) => sum + numberOrZero(component.amount), 0));
         if (!accrual) continue;
         const project = byId.get(revision.project_id);
-        const number = revision.official_number || revision.legacy_number || (revision.revises_id && model.baseline?.official_number) || `#${revision.id}`;
+        const number = certificateNumber(database,revision);
         const history = revision.status === "historical";
         const progress = (model.lines || []).filter((line) => !line.carried_forward).map((line) => {
           const value = numberOrNull(line.progress) ?? 100;
@@ -4029,6 +4035,26 @@ function resetLocalCompanyAccount(database, { dataDir, dbPath, chatUploadDir } =
     BEGIN TRANSACTION;
     DELETE FROM cert_pdf_artifacts;
     DELETE FROM cert_audit;
+    DELETE FROM ops_audit;
+    DELETE FROM ops_confirmations;
+    DELETE FROM ops_load_lines;
+    DELETE FROM ops_loads;
+    DELETE FROM ops_loading_orders;
+    DELETE FROM ops_inspections;
+    DELETE FROM ops_order_reviews;
+    DELETE FROM ops_order_items;
+    DELETE FROM ops_orders;
+    DELETE FROM ops_attachments;
+    DELETE FROM ops_changes;
+    DELETE FROM ops_item_approvals;
+    DELETE FROM ops_items;
+    DELETE FROM ops_people;
+    DELETE FROM ops_contacts;
+    DELETE FROM ops_sequences;
+    DELETE FROM ops_customer_specs;
+    DELETE FROM ops_project_boqs;
+    DELETE FROM ops_projects;
+    DELETE FROM ops_source_approvals;
     DELETE FROM cert_commands;
     DELETE FROM cert_import_batches;
     DELETE FROM cert_advance_recoveries;
@@ -8500,6 +8526,7 @@ async function createServer(options = {}) {
     ensureControllerTables(database);
     ensureCommercialSettings(database);
     initializeCertificates(database);
+    initializeOperations(database);
     database.exec(`PRAGMA user_version = ${DATABASE_SCHEMA_VERSION}`);
     ensureChatColumns(database);
   });
@@ -8724,6 +8751,18 @@ async function createServer(options = {}) {
   });
 
   registerCertificateRoutes(app, database, dataDir, { branding: () => reportBranding(database), appVersion: APP_VERSION });
+  registerOperations(app,database,{branding:()=>reportBranding(database),renderPdf:async(html,options)=>{
+    const directory=await fs.promises.mkdtemp(path.join(os.tmpdir(),"easycommercial-operations-"));
+    try {
+      const output=await writePdf(html,path.join(directory,"report.pdf"),{...options,branding:reportBranding(database)});
+      return await fs.promises.readFile(output);
+    } finally {
+      await fs.promises.rm(directory,{recursive:true,force:true});
+    }
+  },allocateDocument:()=>{
+    const number=nextAvailableDocumentNo(database);
+    return {number,reference:formatOperationNo(number)};
+  }});
   void resumeCertificateRenders(database).catch((error) =>
     console.warn("Could not resume certificate renders:", error.message));
 
@@ -9592,11 +9631,12 @@ async function createServer(options = {}) {
         AND NOT EXISTS (SELECT 1 FROM cert_legacy_records WHERE project_id = project.id)
         AND NOT EXISTS (SELECT 1 FROM cert_rule_versions WHERE project_id = project.id)
         AND NOT EXISTS (SELECT 1 FROM cert_project_grants WHERE project_id = project.id)
-        AND NOT EXISTS (SELECT 1 FROM cert_audit WHERE project_id = project.id) AS disposable
+        AND NOT EXISTS (SELECT 1 FROM cert_audit WHERE project_id = project.id)
+        AND NOT EXISTS (SELECT 1 FROM ops_projects WHERE project_id = project.id) AS disposable
       FROM cert_projects project WHERE project.customer_id = ?
     `, [id]);
     if (linkedProjects.some((project) => !project.disposable)) {
-      return res.status(409).json({ error: "This customer is assigned to a progress certificate project." });
+      return res.status(409).json({ error: "This customer is assigned to a project with certificate or operational records." });
     }
     database.transaction(() => {
       for (const project of linkedProjects) {
@@ -9902,6 +9942,8 @@ async function createServer(options = {}) {
 
   app.put("/api/documents/:id", (req, res) => {
     const documentId = Number(req.params.id);
+    if (isOpsAdjustment(database,documentId))
+      return res.status(409).json({error:"Review this linked invoice adjustment in Project Operations"});
     const current = database.get("SELECT * FROM documents WHERE id = ?", [
       documentId,
     ]);
@@ -10079,11 +10121,15 @@ async function createServer(options = {}) {
         documentId,
       ],
     );
+    if (updated.status==="approved" && current.status!=="approved" && ["invoice","price_offer"].includes(updated.document_type))
+      database.run("INSERT OR REPLACE INTO ops_source_approvals(document_id,approved_on) VALUES(?,DATE('now'))",[documentId]);
     res.json(updated);
   });
 
   app.delete("/api/documents/:id", (req, res) => {
     const documentId = Number(req.params.id);
+    if (isOpsAdjustment(database,documentId))
+      return res.status(409).json({error:"This linked invoice adjustment is part of the operational audit trail"});
     const current = database.get(
       "SELECT * FROM documents WHERE id = ? AND deleted_at IS NULL",
       [documentId],
@@ -10352,6 +10398,7 @@ async function createServer(options = {}) {
           );
           if (!existing) continue;
           const existingDocumentId = Number(existing.document_id || 0);
+          if (isOpsAdjustment(database,existingDocumentId)) throw new Error("This linked invoice adjustment is locked");
           if (isPaymentEntryRow(existing)) {
             database.run("DELETE FROM work_items WHERE id = ?", [id]);
           } else {
@@ -10506,6 +10553,7 @@ async function createServer(options = {}) {
     );
     if (!existing) return res.status(404).json({ error: "Entry not found" });
     const documentId = Number(existing.document_id || 0);
+    if (isOpsAdjustment(database,documentId)) return res.status(409).json({error:"This linked invoice adjustment is locked"});
     if (isPaymentEntryRow(existing)) {
       database.run("DELETE FROM work_items WHERE id = ?", [id]);
     } else {
@@ -11921,6 +11969,7 @@ async function createServer(options = {}) {
       "certificates",
       "contractor-certificates",
       "progress-certificates",
+      "project-operations",
     ];
     app.get("/", (req, res) => res.redirect("/main"));
     for (const route of webAppRoutes) {

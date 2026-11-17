@@ -15,9 +15,10 @@ const numericLineFields = ["width", "height", "count", "quantity", "rate", "agre
 const actionLabels = {
   submit: ["إرسال للمراجعة", "Submit for review"], approve: ["اعتماد المستخلص", "Approve certificate"], return: ["إرجاع إلى المسودة", "Return to draft"], issue: ["إصدار المستخلص", "Issue certificate"],
   revise: ["إنشاء تصحيح", "Create correction"], void: ["طلب إلغاء", "Request void"], reopen: ["طلب إعادة فتح", "Request reopening"],
+  recover_advance:["تصحيح استرداد الدفعة المقدمة","Correct advance recovery"],
 };
-const approvalRequired = new Set(["approve", "issue", "return", "revise", "void", "reopen"]);
-const needsReason = new Set(["return", "revise", "void", "reopen"]);
+const approvalRequired = new Set(["approve", "issue", "return", "revise", "void", "reopen","recover_advance"]);
+const needsReason = new Set(["return", "revise", "void", "reopen","recover_advance"]);
 const normalizeSaved = (item) => item?.certificate || item;
 
 export default function CertificateEditor({ initial, request, apiBase, session, access, t, locale, defaultReportLanguage, onChange, onAccessChanged, saveNativeReport, shareNativeReport, dirtyRef, onBackToSearch, onDeleted }) {
@@ -31,6 +32,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState(null);
   const [statusText, setStatusText] = useState("");
+  const [claimReview, setClaimReview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [master, setMaster] = useState(null);
   const [pendingScope, setPendingScope] = useState(null);
@@ -58,6 +60,8 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const projects = useResource(request, canWrite && !record && customer?.id ? `/projects${queryString({ customer_id: customer.id, q: projectQuery })}` : null, projectRevision);
   const context = useResource(request, project?.id ? `/projects/${project.id}${queryString({ work_to: header.work_to })}` : null, projectRevision);
   const suggested = useResource(request, canWrite && project?.id ? `/projects/${project.id}/entry-suggestions` : null, projectRevision);
+  const operationItems=useResource(request,can("ops_view")&&project?.id?
+    `/projects/${project.id}/operational-quantities${queryString({work_to:header.work_to})}`:null,projectRevision);
   const locations = useMemo(() => locationOptions(context.data?.locations), [context.data?.locations]);
   const validation = error?.payload?.validation || record?.validation || [];
   const activeLocation = locations.find((entry) => String(entry.id) === String(header.location_id));
@@ -73,7 +77,11 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
     return () => { cancelled = true; clearInterval(timer); };
   }, [record?.id, record?.pdf_status, record?.status, request]);
 
-  const changeHeader = (key, value) => { setHeader((current) => ({ ...current, [key]: value })); setDirty(true); setStatusText(""); };
+  const changeHeader = (key, value) => {
+    setHeader((current) => ({...current,[key]:value,...(key==="work_to"&&
+      (!current.collection_cutoff||current.collection_cutoff===current.work_to)?{collection_cutoff:value}:{})}));
+    setDirty(true);setStatusText("");
+  };
   const changeRows = useCallback((next) => { setRows(next); setDirty(true); setStatusText(""); }, []);
 
   function refreshContext() { setProjectRevision((current) => current + 1); }
@@ -90,7 +98,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
     const different = project?.id !== nextProject?.id;
     setCustomer(nextCustomer); setProject(nextProject); setPendingScope(null);
     if (different) {
-      setRows((current) => current.map(({ work_item_id, source, location, ...line }) => ({ ...line, location_id: "", location_name: "" })));
+      setRows((current) => current.map(({ work_item_id, ops_item_id, source, location, ...line }) => ({ ...line, location_id: "", location_name: "" })));
       setGridGeneration((current) => current + 1);
     }
     setHeader((current) => different ? { ...current, contract_ref: nextProject?.contract_ref || "", location_id: "", output_mode: "" } : current);
@@ -127,13 +135,20 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
     }));
   }
 
-  async function save({ announce = true } = {}) {
-    if (record && !dirty) return record;
+  async function reviewClaims() {
+    const data=await request(`/projects/${project.id}/operational-quantities`,{
+      method:"POST",body:{header,lines:payloadLines(),revision_id:record?.id},
+    });
+    setClaimReview({data,header,rows});
+  }
+
+  async function save({ announce = true, refreshProjectRules = false } = {}) {
+    if (record && !dirty && !refreshProjectRules) return record;
     if (!project?.id) throw new Error(t("اختر العميل والمشروع أولًا.", "Select a customer and project first."));
     setError(null);
     const body = { header, lines: can("edit_draft") ? payloadLines() : [] };
     const result = await request(record ? `/${record.id}` : "/", record
-      ? { method: "PUT", body: { ...body, version:record.version, ...(refreshRules.current ? {refresh_rules:true} : {}) } }
+      ? { method: "PUT", body: { ...body, version:record.version, ...(refreshRules.current||refreshProjectRules ? {refresh_rules:true} : {}) } }
       : { method: "POST", body: { ...body, project_id: project.id } });
     const saved = applySaved(result);
     if (announce) setStatusText(t("تم حفظ المسودة وحساب القيم.", "Draft saved and amounts calculated."));
@@ -151,14 +166,16 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       if (!target) return;
       const slot = `${target.id}-${target.version}-${nextAction}`;
       if (!commands.current.has(slot)) commands.current.set(slot, newKey());
-      const result = await request(`/${target.id}/action`, { method: "POST", body: { version: target.version, action: nextAction, reason, command_key: commands.current.get(slot) } });
-      const refreshed = applySaved(result, !["revise", "void", "reopen"].includes(nextAction));
+      const result = await request(`/${target.id}/action`, { method: "POST", body: { version: target.version,
+        action:nextAction==="recover_advance"?"revise":nextAction,recover_advance:nextAction==="recover_advance",reason,command_key:commands.current.get(slot) } });
+      const refreshed = applySaved(result, !["revise", "void", "reopen","recover_advance"].includes(nextAction));
       setAction(null); setActionReason(""); setShowReview(refreshed.status !== "draft");
     });
   }
 
   function showAction(nextAction) {
-    if (approvalRequired.has(nextAction)) { setAction(nextAction); setActionReason(""); }
+    if (approvalRequired.has(nextAction)) { setAction(nextAction); setActionReason(nextAction==="recover_advance"?
+      t(`تطبيق استرداد الدفعة المقدمة بنسبة ${record.advance_recovery_correction.rate}%`,`Apply ${record.advance_recovery_correction.rate}% advance recovery`):""); }
     else workflow(nextAction);
   }
 
@@ -204,6 +221,11 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       {showDocument && <button type="button" onClick={openDocument} disabled={busy || !project || !record && !canWrite}><Eye size={17} />{t("معاينة وتصدير", "Preview and export")}</button>}
       {dirty && <span className="pc-caption" role="status">{t("تعديلات غير محفوظة", "Unsaved changes")}</span>}
     </div>
+    {record?.advance_recovery_correction&&<div className="pc-toolbar" role="status">
+      <p>{t("لم تُحتسب نسبة استرداد الدفعة المقدمة في المستخلص المعتمد.","The approved certificate is missing its advance recovery.")}
+        {" "}<Money value={record.advance_recovery_correction.amount} currency={currency} locale={locale}/></p>
+      <button type="button" className="primary" disabled={busy} onClick={()=>showAction("recover_advance")}>{t(...actionLabels.recover_advance)}</button>
+    </div>}
     {availableActions.length > 0 && <div className="pc-toolbar">
       {availableActions.filter((operation) => can(permissionFor(operation))).map((operation) => <button type="button" key={operation}
         className={operation === "issue" || operation === "approve" || operation === "submit" ? "primary" : undefined} disabled={busy} onClick={() => showAction(operation)}>{t(...actionLabels[operation])}</button>)}
@@ -242,11 +264,18 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       {project && <button type="button" onClick={() => setSettingsOpen(true)}><Settings2 size={16} />{t("إعدادات المشروع", "Project settings")}</button>}
       {record?.baseline && <span className="pc-caption">{t("المرجع السابق", "Prior baseline")} <bdi>{record.baseline.official_number} · {record.baseline.work_to}</bdi></span>}
       {project && <span className="pc-caption">{t("إصدار القواعد", "Rules version")} <bdi>{record?.rule_version ?? context.data?.settings?.version ?? "—"}</bdi></span>}
+      {record&&canWrite&&can("manage_settings")&&<button type="button" disabled={busy}
+        onClick={()=>run(()=>save({refreshProjectRules:true}))}>{t("تطبيق إعدادات المشروع الحالية","Apply current project settings")}</button>}
     </div>
-    <CertificateGrid key={`${record?.id || "new"}-${gridGeneration}`} rows={rows} onChange={changeRows} readOnly={!canWrite || !can("edit_draft") || busy} t={t} locale={locale}
+    <CertificateGrid key={`${record?.id || "new"}-${gridGeneration}`} rows={rows} onChange={changeRows} readOnly={!canWrite || !can("edit_draft") || busy || header.recover_advance} t={t} locale={locale}
       locations={locations} suggestions={suggested.data || []}
+      operationItems={operationItems.data || []}
       workItems={context.data?.work_items || []} workTypes={context.data?.work_types || []}
       validation={validation} totals={record?.totals} currency={currency} settled={Boolean(record) && !dirty} />
+    {(operationItems.data?.length>0 || record?.operational_quantities?.length>0)&&
+      <OperationalQuantities quantities={(claimReview?.header===header&&claimReview?.rows===rows?claimReview.data:null)
+        ||record?.operational_quantities||operationItems.data} t={t}
+        onReview={canWrite&&dirty?()=>run(reviewClaims):null} busy={busy}/>}
     <div className="pc-toolbar">
       {canWrite && <button type="button" className="primary" onClick={() => run(() => save())} disabled={busy || !project || record && !dirty}><Save size={17} />{t("حفظ المسودة", "Save draft")}</button>}
       {canWrite && !historical && record?.status !== "in_review" && can("edit_draft") && can("import") && <button type="button" onClick={openImport} disabled={!project || busy}><ClipboardList size={17} />{t("استخراج / استيراد", "Extract / import")}</button>}
@@ -313,6 +342,8 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       <form className="pc-stack" onSubmit={(event) => { event.preventDefault(); workflow(action, actionReason); }}>
         {action === "approve" && <p>{t("يؤدي الاعتماد إلى قفل هذا المستخلص. تُسجل التغييرات اللاحقة في مستخلص تصحيح.", "Approval locks this certificate. Later changes are recorded in a correction.")}</p>}
         {action === "issue" && <p>{t("سيتم تخصيص رقم رسمي وحفظ البيانات المعتمدة وإعداد النسخة المؤرشفة.", "Issuance assigns an official number, freezes the approved data, and prepares the archived document.")}</p>}
+        {action === "recover_advance" && <p>{t("يُنشئ هذا تصحيحًا لاسترداد الدفعة المقدمة مع الاحتفاظ بالكميات وتواريخ المستخلص المعتمد. راجع التصحيح ثم اعتمده.",
+          "This creates an advance recovery correction using the approved quantities and dates. Review and approve the correction.")}</p>}
         {needsReason.has(action) && <Field label={t("السبب", "Reason")}><textarea required rows={3} dir="auto" value={actionReason} onChange={(event) => setActionReason(event.target.value)} /></Field>}
         <Problem error={error} t={t} />
         <div><button type="submit" className="primary" disabled={busy}>{t("تأكيد", "Confirm")}</button></div>
@@ -323,6 +354,34 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
     }} />}
     {preview && <CertificatePreview certificate={preview} apiBase={apiBase} session={session} t={t} canInternal={can("view_collections")} onClose={() => setPreview(null)} onAccessChanged={onAccessChanged} saveNativeReport={saveNativeReport} shareNativeReport={shareNativeReport} />}
   </section>;
+}
+
+function OperationalQuantities({quantities,t,onReview,busy}) {
+  const warningLabels={
+    excess:["يتجاوز المؤكد","Exceeds confirmed quantity"],
+    duplicate:["احتمال تكرار المطالبة","Possible duplicate claim"],
+    loaded_unclaimed:["محمل ولم يطالب به","Loaded and unclaimed"],
+    incomplete:["لم تؤكد الكمية المنفذة / المستحقة","Installation / claimable quantity pending"],
+    unit_mismatch:["وحدة البند مختلفة عن وحدة العقد","Unit differs from contractual unit"],
+    loading_excess:["المطالبة تتجاوز التحميل المسجل","Claim exceeds recorded loading"],
+  };
+  const rows=quantities.filter((row)=>row.current||row.loaded||row.unclaimed||row.previous||Object.values(row.warning).some(Boolean));
+  if (!rows.length&&!onReview) return null;
+  return <details open={rows.some((row)=>row.current&&Object.values(row.warning).some(Boolean))||undefined}>
+    <summary>{t("مراجعة كميات عمليات المشروع","Operational quantity reconciliation")}</summary>
+    {onReview&&<div className="pc-toolbar"><button type="button" disabled={busy} onClick={onReview}>
+      {t("مقارنة الكميات المدخلة","Compare entered quantities")}</button></div>}
+    {rows.length>0&&<div className="pc-table-scroll"><table className="pc-table">
+      <thead><tr>{[t("البند","Item"),t("الوحدة","Unit"),t("التحميل","Loaded panels"),t("التركيب المؤكد","Confirmed installed"),
+        t("الكمية المستحقة المؤكدة","Confirmed claimable"),
+        t("المطالب سابقًا","Previously claimed"),t("الحالي","Current claim"),t("غير مطالب به","Unclaimed"),t("تنبيهات","Warnings")]
+        .map((name)=><th key={name}>{name}</th>)}</tr></thead>
+      <tbody>{rows.map((row)=><tr key={row.id}><th scope="row">{row.code}</th><td>{row.unit}</td>
+        {[row.loaded,row.installed,row.claimable,row.previous,row.current,row.unclaimed].map((value,index)=><td key={index}><bdi>{value}</bdi></td>)}
+        <td>{Object.entries(row.warning).filter(([,value])=>value).map(([key,value])=><div key={key}>
+          {t(...warningLabels[key])}{typeof value==="number"&&<> · <bdi>{value}</bdi></>}</div>)}</td></tr>)}</tbody>
+    </table></div>}
+  </details>;
 }
 
 function CalculationReview({ record, currency, t, locale, dirty }) {

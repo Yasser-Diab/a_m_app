@@ -181,7 +181,7 @@ function calculateLine(line, before, settings) {
   };
 }
 
-function calculateValuation(lines, baseline, profile, ledger) {
+function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=false} = {}) {
   const prior = new Map((baseline?.lines || []).map((line) => [line.identity, line]));
   const ordered = lines.filter((line) => !line.carried_forward);
   const active = new Set(ordered.map((line) => line.identity));
@@ -214,8 +214,11 @@ function calculateValuation(lines, baseline, profile, ledger) {
   const components = [];
   const recoveries = [];
   for (const rule of profile.rules) {
-    if (!rule.enabled || (rule.category === "advance_recovery" && net <= 0n)) continue;
-    const base = rule.basis === "running" ? net : current;
+    if (!rule.enabled || (recoverAdvance&&rule.category!=="advance_recovery")) continue;
+    const priorWork=recoverAdvance?BigInt(toMinor(baseline?.totals?.current)||0):0n;
+    const recoveryCapacity=net+(recoverAdvance?BigInt(toMinor(baseline?.totals?.current_earned)||0):0n);
+    if (rule.category==="advance_recovery"&&recoveryCapacity<=0n) continue;
+    const base = rule.basis === "running" ? net : current+priorWork;
     let value = rule.amount === null
       ? divide(multiply(base * (SCALE / 100n), decimal(rule.rate) ?? 0n), 100n)
       : decimal(rule.amount) || 0n;
@@ -226,7 +229,8 @@ function calculateValuation(lines, baseline, profile, ledger) {
       if (delta < -cap) delta = -cap;
     }
     if (rule.category === "advance_recovery") {
-      let target = delta > net ? net : delta;
+      if (recoverAdvance) delta-=BigInt(toMinor(baseline?.totals?.advance_recovery)||0);
+      let target = delta > recoveryCapacity ? recoveryCapacity : delta;
       delta = 0n;
       for (const advance of ledger.advances) {
         if (target <= 0n) break;

@@ -6,6 +6,8 @@ const {allocationLedger, DATE_FLOOR} = require("./certificate-ledger.cjs");
 const {calculateValuation, MODES, decimal, money, toMinor} = require("./certificate-valuation.cjs");
 const {legacySnapshot, legacyLines, legacyCertificateInput} = require("./certificate-history.cjs");
 const {certificateLocationFields} = require("./document-locations.cjs");
+const {reconcile: reconcileOperations} = require("./project-operations/finance.cjs");
+const {nextSeriesNumber,certificateNumber}=require("./certificate-numbering.cjs");
 
 function normalizeHeader(input = {}, project, profile, originalType) {
   const type = originalType && !["progress", "final"].includes(originalType) ? originalType :
@@ -24,6 +26,7 @@ function normalizeHeader(input = {}, project, profile, originalType) {
     show_group_subtotals: input.show_group_subtotals ?? profile.settings.show_group_subtotals ?? false,
     optional_fields: {},
   };
+  if (type==="correction"&&input.recover_advance===true) header.recover_advance=true;
   if (["none","building","unit","work_type"].includes(input.group_by ?? profile.settings.group_by))
     header.group_by = input.group_by ?? profile.settings.group_by;
   for (const key of ["show_building_subtotals", "show_unit_subtotals", "show_work_type_subtotals"]) {
@@ -92,6 +95,12 @@ function normalizeLines(database, project, header, candidates) {
     for (const key of ["width","height","count","quantity","rate","agreed_amount","progress","claim_amount","adjustment_amount","override_quantity"]) {
       line[key] = row[key] == null || row[key] === "" ? null : str(row[key], 60);
     }
+    if (row.ops_item_id) {
+      const opsId=idOf(row.ops_item_id);
+      if (!opsId || !database.get("SELECT 1 FROM ops_items WHERE id=? AND project_id=?",[opsId,project.id]))
+        fail(400,"The linked operational item is outside this project");
+      line.ops_item_id=opsId;
+    }
     return line;
   });
 }
@@ -123,13 +132,14 @@ function scopeBaseline(database, row, header) {
   if (row.revises_id) {
     const parent = getRevision(database, row.revises_id);
     if (parent.status === "historical") return legacyCertificateInput(database,parent,{useEdits:false});
-    if (parent.status === "approved") return certificateDocumentInput(database,parent);
+    if (["approved","issued"].includes(parent.status)) return certificateDocumentInput(database,parent);
   }
   const prior = database.get(`
     SELECT snapshot_json FROM cert_revisions WHERE project_id=? AND series_key=? AND location_id IS ?
-      AND id<>? AND status='issued' AND work_to<=?
-    ORDER BY work_to DESC,issued_at DESC,id DESC LIMIT 1
-  `, [row.project_id, scopeKey(header), header.location_id, row.id, header.work_to]);
+      AND id<>? AND status IN ('approved','issued') AND snapshot_json IS NOT NULL AND work_to<=?
+      AND (work_to<? OR COALESCE(root_id,id)<COALESCE(?,?))
+    ORDER BY work_to DESC,COALESCE(root_id,id) DESC,revision DESC,issued_at DESC,id DESC LIMIT 1
+  `, [row.project_id, scopeKey(header), header.location_id, row.id, header.work_to,header.work_to,row.root_id,row.id]);
   if (prior) return parse(prior.snapshot_json);
   const earlier = header.location_id == null && database.get(`SELECT * FROM cert_revisions
     WHERE project_id=? AND series_key=? AND status='historical' AND work_to<=?
@@ -147,42 +157,59 @@ function certificateDocumentInput(database, row, lines = null) {
   const header = parse(row.header_json);
   const project = getProject(database, row.project_id);
   const customer = getCustomer(database, project.customer_id);
-  const profile = getProfile(database, project.id, header.work_to, row.rules_version);
+  const profile = getProfile(database, project.id, row.rules_version == null ? today() : header.work_to, row.rules_version);
   if (header.rule_override) profile.rules = header.rule_override;
   const baseline = scopeBaseline(database, row, header);
+  if (header.recover_advance) {
+    profile.rules=profile.rules.filter(({category})=>category==="advance_recovery");
+    profile.settings={...profile.settings,collections_basis:baseline?.rule_settings?.collections_basis||profile.settings.collections_basis};
+  }
   const ledger = allocationLedger(database,project.id,profile,header.collection_cutoff,{workCutoff:header.work_to,
     previousCutoff:baseline?.header?.collection_cutoff ?? DATE_FLOOR,locationId:header.location_id,revisionId:row.id,seriesKey:row.series_key});
-  const calculated = calculateValuation(lines || getLines(database, row.id), baseline, profile, ledger);
+  const calculated = calculateValuation(lines || getLines(database, row.id), baseline, profile, ledger,{recoverAdvance:header.recover_advance===true});
   const validation = [...calculated.errors];
-  if (row.revises_id && getRevision(database,row.revises_id).status === "approved")
-    validation.push({field:"revises_id",message:"Issue the original certificate before approving the correction"});
-  if (!calculated.lines.some((line) => !line.carried_forward) && row.type !== "reopen")
+  if (!calculated.lines.some((line) => !line.carried_forward) && row.type !== "reopen"&&!header.recover_advance)
     validation.push({field:"lines", message:"Enter at least one work row"});
   if (baseline?.header?.collection_cutoff > header.collection_cutoff)
     validation.push({field:"collection_cutoff", message:"Collections cutoff precedes the prior issued cutoff"});
   const incompatible = database.get(`SELECT 1 FROM cert_revisions WHERE project_id=? AND series_key=?
-    AND status='issued' AND ((location_id IS NULL) <> (? IS NULL)) LIMIT 1`, [project.id,row.series_key,header.location_id]);
+    AND status IN ('approved','issued') AND ((location_id IS NULL) <> (? IS NULL)) LIMIT 1`, [project.id,row.series_key,header.location_id]);
   if (incompatible) validation.push({field:"location_id", message:"The series already uses a different project or location valuation scope"});
   const newer = database.get(`SELECT 1 FROM cert_revisions WHERE project_id=? AND series_key=?
-    AND location_id IS ? AND status='issued' AND work_to>? LIMIT 1`, [project.id, row.series_key, header.location_id, header.work_to]);
+    AND location_id IS ? AND status IN ('approved','issued') AND work_to>? LIMIT 1`, [project.id, row.series_key, header.location_id, header.work_to]);
   if (newer) validation.push({field:"work_to", message:"Work cutoff precedes a later issued certificate in this scope"});
   const receipts = recognizedReceipts(ledger);
   const actualLocation = projectLocations(database, project.id).find((entry) => entry.id === header.location_id);
+  const operations = reconcileOperations(database,project.id,{lines:calculated.lines,revisionId:row.id,cutoff:header.work_to});
   const issuerProfile = parse(setting(database, "company_profile", "{}"), {});
   const branding = parse(setting(database,"report_branding","{}"), {});
   return {
-    id: row.id, project_id: row.project_id, status: row.status, revision: row.revision,
+    id: row.id, project_id: row.project_id, status: row.status, revision: row.revision,certificate_number:certificateNumber(database,row),
     version: row.version, revises_id: row.revises_id, type: row.type, locale: row.locale,
     official_number: row.official_number, issued_at: row.issued_at, updated_at:row.updated_at,
     header: {...header, location: actualLocation?.label || ""}, project, customer,
     issuer: {company_name:issuerProfile.company_name, address:issuerProfile.address, website:issuerProfile.website,
       phone:issuerProfile.phone,email:issuerProfile.email,logo_data_url:branding.logoDataUri},
     pdf_status: row.pdf_status, lines: calculated.lines, totals: calculated.totals,
-    validation, recoveries: calculated.recoveries, receipts,
+    validation, recoveries: calculated.recoveries, receipts, operational_quantities: operations,
     applied_rules: profile.rules, rule_version: profile.version, rule_settings: profile.settings,
-    baseline: baseline ? {id: baseline.id, official_number: baseline.official_number, revision: baseline.revision,
+    baseline: baseline ? {id: baseline.id, official_number: baseline.official_number||baseline.certificate_number||
+      certificateNumber(database,getRevision(database,baseline.id)), revision: baseline.revision,
       work_to: baseline.header.work_to, collection_cutoff: baseline.header.collection_cutoff} : null,
   };
+}
+
+function previewOperationalQuantities(database,project,body) {
+  const revisionId=idOf(body.revision_id);
+  const revision=revisionId?getRevision(database,revisionId):null;
+  if (revision && revision.project_id!==project.id) fail(404,"Certificate not found");
+  const profile=getProfile(database,project.id,date(body.header?.work_to,true)||today(),revision?.rules_version);
+  const header=normalizeHeader(body.header,project,profile,revision?.type);
+  const lines=normalizeLines(database,project,header,body.lines||[]);
+  const baseline=revision?scopeBaseline(database,revision,header):null;
+  const {lines:calculated}=calculateValuation(lines,baseline,{...profile,rules:[]},
+    {ordinary_minor:0,period_ordinary_minor:0,advances:[]});
+  return reconcileOperations(database,project.id,{lines:calculated,revisionId,cutoff:header.work_to});
 }
 
 function recognizedReceipts(ledger) {
@@ -195,20 +222,24 @@ function recognizedReceipts(ledger) {
 function createDraft(database, project, body, user, revision = {}) {
   if (project.historical_only && !revision.revisesId) fail(409, "Add the missing project details before creating a new certificate");
   const supplied = body.header || {};
-  const profile = getProfile(database, project.id, date(supplied.work_to, true) || today());
+  const profile = getProfile(database, project.id);
   const header = normalizeHeader(supplied, project, profile, revision.type);
   const seriesKey = scopeKey(header);
   const series = database.get("SELECT final_revision_id FROM cert_series WHERE project_id=? AND reference=?", [project.id, seriesKey]);
   if (series?.final_revision_id && !revision.revisesId) fail(409, "The series was finalized. Issue an authorized reopening before starting new work");
+  if (!revision.revisesId&&database.get(`SELECT 1 FROM cert_revisions WHERE project_id=? AND series_key=?
+    AND type='final' AND status='approved' LIMIT 1`,[project.id,seriesKey]))
+    fail(409,"The final certificate is approved. Reopen its series before starting new work");
   checkedLocation(database, project.id, header.location_id);
   const rows = normalizeLines(database, project, header, body.lines || []);
   const id = nextCertificateId(database);
   database.run(`
     INSERT INTO cert_revisions
-      (id,project_id,series_key,root_id,revises_id,revision,type,locale,location_id,work_to,collection_cutoff,header_json,rules_version,created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      (id,project_id,series_key,root_id,revises_id,revision,type,locale,location_id,work_to,collection_cutoff,header_json,rules_version,created_by,reserved_number)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   [id, project.id, seriesKey, revision.rootId || null, revision.revisesId || null, revision.number || 1,
-    header.type, header.locale, header.location_id, header.work_to, header.collection_cutoff, encode(header), profile.version, user.id]);
+    header.type, header.locale, header.location_id, header.work_to, header.collection_cutoff, encode(header), profile.version, user.id,
+    revision.revisesId?null:nextSeriesNumber(database,{project_id:project.id,series_key:seriesKey})]);
   if (!revision.rootId) database.run("UPDATE cert_revisions SET root_id=id WHERE id=?", [id]);
   replaceLines(database, id, rows);
   audit(database, user, "draft_created", {projectId: project.id, revisionId: id, reason: revision.reason});
@@ -225,12 +256,14 @@ function saveDraft(database, row, body, user, grant) {
   if (!["draft","in_review"].includes(row.status)) fail(409, "Approved certificates require a correction");
   requireVersion(row, body.version);
   const old = parse(row.header_json);
+  if (body.header?.recover_advance!==undefined&&body.header.recover_advance!==Boolean(old.recover_advance))
+    fail(400,"Create an advance recovery correction from the approved certificate");
   const project = getProject(database, row.project_id);
   const changes = {...old, ...body.header};
-  const version = body.refresh_rules ? null : row.rules_version;
+  const version = body.refresh_rules ? getProfile(database,project.id).version : row.rules_version;
   if (body.refresh_rules && !grant.capabilities.includes("manage_settings"))
     fail(403, "Certificate financial settings permission is required");
-  const profile = getProfile(database, project.id, date(changes.work_to, true) || today(), version);
+  const profile = getProfile(database, project.id, version == null ? today() : date(changes.work_to, true) || today(), version);
   const header = normalizeHeader(changes, project, profile, row.type);
   checkedLocation(database, project.id, header.location_id);
   if (row.revises_id && (scopeKey(header) !== row.series_key || header.location_id !== row.location_id))
@@ -238,10 +271,12 @@ function saveDraft(database, row, body, user, grant) {
   if (encode(old.rule_override || null) !== encode(header.rule_override || null) && !grant.capabilities.includes("manage_settings"))
     fail(403, "Certificate financial settings permission is required");
   const rows = normalizeLines(database, project, header, body.lines === undefined ? getLines(database, row.id) : body.lines);
+  if (header.recover_advance&&rows.length) fail(400,"An advance recovery correction keeps the approved work quantities");
   const reference = scopeKey(header);
   database.run(`UPDATE cert_revisions SET series_key=?,type=?,locale=?,location_id=?,work_to=?,collection_cutoff=?,
-    header_json=?,rules_version=?,status='draft',approved_json=NULL,baseline_id=NULL,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-  [reference,header.type,header.locale,header.location_id,header.work_to,header.collection_cutoff,encode(header),profile.version,row.id]);
+    header_json=?,rules_version=?,reserved_number=?,status='draft',approved_json=NULL,baseline_id=NULL,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+  [reference,header.type,header.locale,header.location_id,header.work_to,header.collection_cutoff,encode(header),profile.version,
+    !row.revises_id&&reference!==row.series_key?nextSeriesNumber(database,{project_id:project.id,series_key:reference}):row.reserved_number,row.id]);
   replaceLines(database, row.id, rows);
   audit(database, user, "draft_saved", {projectId: project.id, revisionId: row.id,
     reason: header.override_reason, details: {row_count:rows.length}});
@@ -294,30 +329,28 @@ function validateReview(input) {
   if (input.validation.length) fail(422, "Resolve the certificate validation errors", {validation: input.validation});
 }
 
-const liveNumberSql = `MAX(CASE WHEN official_number IS NOT NULL THEN official_number
-  WHEN legacy_number <> '' AND legacy_number NOT GLOB '*[^0-9]*' THEN CAST(legacy_number AS INTEGER) ELSE 0 END)`;
-
-function nextSeriesNumber(database, row) {
-  const params = [row.project_id, row.series_key];
-  const {number} = database.get(`SELECT ${liveNumberSql} AS number FROM cert_revisions
-    WHERE project_id=? AND series_key=?`, params);
-  if (!number) return 1;
-  const series = database.get("SELECT next_number FROM cert_series WHERE project_id=? AND reference=?", params);
-  return Math.max(number + 1, series?.next_number ?? 1);
+function missingAdvanceRecovery(database,row,source) {
+  if (!["approved","issued"].includes(row.status)||source.legacy||!["progress","final"].includes(row.type)||
+      !(source.totals.current>0)||source.totals.advance_recovery>0) return null;
+  if (database.get("SELECT 1 FROM cert_revisions WHERE root_id=? AND revision>? LIMIT 1",[row.root_id||row.id,row.revision])) return null;
+  const profile=getProfile(database,row.project_id);
+  const rule=profile.rules.find((entry)=>entry.enabled&&entry.category==="advance_recovery"&&entry.basis==="work"&&Number(entry.rate)>0);
+  if (!rule) return null;
+  profile.rules=[rule];
+  profile.settings={...profile.settings,collections_basis:source.rule_settings?.collections_basis||profile.settings.collections_basis};
+  const ledger=allocationLedger(database,row.project_id,profile,source.header.collection_cutoff,
+    {workCutoff:source.header.work_to,previousCutoff:source.header.collection_cutoff,locationId:source.header.location_id,seriesKey:row.series_key});
+  const preview=calculateValuation([],source,profile,ledger,{recoverAdvance:true});
+  return preview.totals.advance_recovery>0?{rate:Number(rule.rate),amount:preview.totals.advance_recovery,payable:preview.totals.cumulative_payable}:null;
 }
 
-function certificateNumber(database, row) {
-  if (row.official_number || row.legacy_number) return row.official_number || row.legacy_number;
-  const previous = row.revises_id ? getRevision(database,row.revises_id) : null;
-  const previousNumber = previous?.official_number ?? Number(previous?.legacy_number);
-  return Number.isSafeInteger(previousNumber) && previousNumber > 0 ? previousNumber : nextSeriesNumber(database,row);
-}
-
-function makeRevision(database, row, action, reason, user) {
+function makeRevision(database, row, action, reason, user, recoverAdvance=false) {
   const source = certificateDocumentInput(database,row);
   if (!["approved","issued"].includes(source.status) || (action !== "revise" && row.status === "approved"))
     fail(409, "Approve the certificate before creating a correction");
   if (!reason) fail(400, "A reason is required for this request");
+  const advanceFix=recoverAdvance&&action==="revise"?missingAdvanceRecovery(database,row,source):null;
+  if (recoverAdvance&&!advanceFix) fail(409,"This certificate has no outstanding advance recovery to correct");
   const project = getProject(database, row.project_id);
   const root = row.root_id || row.id;
   const latest = database.get("SELECT * FROM cert_revisions WHERE root_id=? ORDER BY revision DESC LIMIT 1", [root]);
@@ -327,10 +360,10 @@ function makeRevision(database, row, action, reason, user) {
     const series = database.get("SELECT final_revision_id FROM cert_series WHERE project_id=? AND reference=?", [row.project_id, row.series_key]);
     if (series?.final_revision_id !== row.id) fail(409, "Select the final certificate closing this series");
   }
-  const workTo = today() > source.header.work_to ? today() : source.header.work_to;
-  const collectionCutoff = workTo > source.header.collection_cutoff ? workTo : source.header.collection_cutoff;
-  const header = {...source.header, type, work_from:null, work_to:workTo, collection_cutoff:collectionCutoff,
-    rule_override:null, override_reason:null};
+  const workTo = advanceFix?source.header.work_to:today() > source.header.work_to ? today() : source.header.work_to;
+  const collectionCutoff = advanceFix?source.header.collection_cutoff:workTo > source.header.collection_cutoff ? workTo : source.header.collection_cutoff;
+  const header = {...source.header, type, work_from:advanceFix?source.header.work_from:null, work_to:workTo, collection_cutoff:collectionCutoff,
+    rule_override:null, override_reason:null,recover_advance:Boolean(advanceFix)};
   const lines = type === "void" || row.status === "historical" ? source.lines.filter((line) => !line.carried_forward).map((line) =>
     ({...line, mode:"adjustment", adjustment_amount:type === "void" ? -line.current : 0, recognition:"incremental", reason})) : [];
   return createDraft(database, project, {header, lines}, user, {type,rootId:root,revisesId:row.id,number:row.revision+1,reason});
@@ -351,7 +384,7 @@ function runAction(database, row, body, user, enqueueRender) {
   requireVersion(row, body.version);
   let result = row;
   if (["revise","void","reopen"].includes(action)) {
-    result = makeRevision(database, row, action, reason, user);
+    result = makeRevision(database, row, action, reason, user,body.recover_advance===true);
   } else if (action === "submit") {
     if (row.status !== "draft") fail(409, "Only drafts can be submitted");
     const model = certificateDocumentInput(database, row);
@@ -379,10 +412,6 @@ function runAction(database, row, body, user, enqueueRender) {
       [row.id,encode({...model,status:"approved",approval_at:approvedAt}),approvedAt,user.id]);
       database.run("UPDATE cert_revisions SET version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?",[row.id]);
     } else if (action === "approve") {
-      const awaitingIssue = database.get(`SELECT 1 FROM cert_revisions
-        WHERE project_id=? AND series_key=? AND location_id IS ? AND status='approved' AND id<>?`,
-      [row.project_id,row.series_key,row.location_id,row.id]);
-      if (awaitingIssue) fail(409,"Issue the previously approved certificate in this scope first");
       database.run(`UPDATE cert_revisions SET status='approved',approved_json=?,baseline_id=?,snapshot_json=?,version=version+1,
         updated_at=CURRENT_TIMESTAMP WHERE id=?`,[approvalKey(model),model.baseline?.id ?? null,encode({...model,status:"approved"}),row.id]);
       for (const movement of model.recoveries) database.run("INSERT INTO cert_advance_recoveries VALUES (?,?,?,?)",
@@ -393,11 +422,11 @@ function runAction(database, row, body, user, enqueueRender) {
       if (series.final_revision_id && !row.revises_id) fail(409, "The series has been finalized");
       if (row.type === "reopen" && series.final_revision_id !== row.revises_id) fail(409, "The final certificate changed");
       const nextAvailable = nextSeriesNumber(database,row);
-      const number = row.revises_id ? certificateNumber(database,row) : nextAvailable;
+      const number = certificateNumber(database,row);
       const timestamp = now();
       const frozen = {...model, official_number:number, issued_at:timestamp, status:"issued",pdf_status:"pending",version:row.version+1};
       database.run(`UPDATE cert_series SET next_number=?,final_revision_id=? WHERE project_id=? AND reference=?`,
-        [number === nextAvailable ? number + 1 : series.next_number, row.type === "final" ? row.id : row.type === "reopen" ? null : series.final_revision_id,
+        [Math.max(Number(number)+1,nextAvailable), row.type === "final" ? row.id : row.type === "reopen" ? null : series.final_revision_id,
           row.project_id,row.series_key]);
       database.run(`UPDATE cert_revisions SET status='issued',official_number=?,issued_at=?,pdf_status='pending',
         snapshot_json=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`, [number,timestamp,encode(frozen),row.id]);
@@ -419,6 +448,7 @@ function forAccess(database, row, access) {
   const raw = certificateDocumentInput(database, row);
   const result = {...raw, certificate_number:certificateNumber(database,row),
     report_options:certificateReportOptions(raw.header,getProfile(database,row.project_id).settings)};
+  if (access.capabilities.includes("revise")) result.advance_recovery_correction=missingAdvanceRecovery(database,row,raw);
   if (row.status === "approved" && !row.snapshot_json) result.can_return_legacy_approval = true;
   const collectionAccess = access.capabilities.includes("view_collections");
   const auditAccess = access.capabilities.includes("view_audit");
@@ -426,6 +456,7 @@ function forAccess(database, row, access) {
     delete result.recoveries;
     delete result.receipts;
   }
+  if (!access.capabilities.includes("ops_view")) delete result.operational_quantities;
   if (auditAccess) {
     result.history = database.all(`SELECT a.id,a.actor_id,u.display_name AS actor,a.action,a.reason,a.created_at,a.details_json
       FROM cert_audit a LEFT JOIN users u ON u.id=a.actor_id WHERE revision_id=? ORDER BY a.id DESC`, [row.id])
@@ -446,4 +477,4 @@ function forAccess(database, row, access) {
 }
 
 module.exports = {getRevision, getLines, replaceLines, scopeBaseline, certificateDocumentInput, certificateNumber,
-  createDraft, requireVersion, saveDraft, runAction, forAccess, recognizedReceipts};
+  createDraft, requireVersion, saveDraft, runAction, forAccess, recognizedReceipts,previewOperationalQuantities};

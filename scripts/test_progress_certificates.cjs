@@ -343,6 +343,86 @@ async function main() {
     await api(cert + "/" + multiPlace.id,token,"DELETE",{version:approvedMulti.version});
     assert.equal(db.get("SELECT 1 FROM cert_receipts WHERE id=?",[recoverable.id]) != null,true);
     assert.equal((await api(cert + "/" + clearedDraft.id,token)).totals.advance_recovery,100);
+    const backdatedProject=await api(cert+"/projects",token,"POST",{customer_id:customer.id,name:"Backdated recovery",contract_date:"2026-03-01"},201);
+    const backdatedScope=cert+"/projects/"+backdatedProject.id;
+    const currentDate=new Date().toISOString().slice(0,10);
+    await api(backdatedScope+"/settings",token,"PUT",{expected_version:0,effective_at:currentDate,
+      rules:[{category:"advance_recovery",rate:40}],settings:{}});
+    await api(backdatedScope+"/collections",token,"POST",{kind:"advance",amount:1015415,received_at:"2026-03-10"},201);
+    await api(backdatedScope+"/collections",token,"POST",{kind:"receipt",amount:849640,received_at:"2026-05-19"},201);
+    const backdatedHeader={work_from:"2026-04-07",work_to:"2026-06-01",collection_cutoff:"2026-06-01"};
+    const backdatedDraft=await api(cert,token,"POST",{project_id:backdatedProject.id,header:backdatedHeader,
+      lines:[{description:"Work",mode:"direct",quantity:1,unit:"Pcs",rate:600008.56}]},201);
+    assert.equal(backdatedDraft.rule_version,1);
+    assert.equal(backdatedDraft.totals.advance_recovery,240003.42);
+    assert.equal(backdatedDraft.totals.ordinary_collections,849640);
+    assert.equal(backdatedDraft.totals.cumulative_payable,-489634.86);
+    await api(backdatedScope+"/settings",token,"PUT",{expected_version:1,effective_at:currentDate,
+      rules:[{category:"advance_recovery",rate:50}],settings:{}});
+    assert.equal((await api(cert+"/"+backdatedDraft.id,token)).totals.advance_recovery,240003.42);
+    const refreshed=await api(cert+"/"+backdatedDraft.id,token,"PUT",{version:backdatedDraft.version,refresh_rules:true,header:backdatedHeader});
+    assert.equal(refreshed.rule_version,2);
+    assert.equal(refreshed.totals.advance_recovery,300004.28);
+    db.run("UPDATE cert_revisions SET rules_version=NULL WHERE id=?",[backdatedDraft.id]);
+    assert.equal((await api(cert+"/"+backdatedDraft.id,token)).totals.advance_recovery,300004.28);
+    const frozenProject=await api(cert+"/projects",token,"POST",{customer_id:customer.id,name:"Frozen advance recovery",contract_date:"2026-03-01"},201);
+    const frozenScope=cert+"/projects/"+frozenProject.id;
+    await api(frozenScope+"/collections",token,"POST",{kind:"advance",amount:1015415,received_at:"2026-03-10"},201);
+    const frozenDraft=await api(cert,token,"POST",{project_id:frozenProject.id,
+      header:{work_to:"2026-05-01",collection_cutoff:"2026-05-01"},
+      lines:[{description:"Approved work",mode:"direct",quantity:1,unit:"Pcs",rate:600008.56}]},201);
+    const frozen=await api(cert+"/"+frozenDraft.id+"/action",token,"POST",{action:"approve",version:frozenDraft.version});
+    const frozenBytes=db.get("SELECT snapshot_json FROM cert_revisions WHERE id=?",[frozen.id]).snapshot_json;
+    await api(frozenScope+"/settings",token,"PUT",{expected_version:0,effective_at:currentDate,
+      rules:[{category:"advance_recovery",rate:40}],settings:{}});
+    const stale=await api(cert+"/"+frozen.id,token);
+    assert.equal(stale.totals.cumulative_payable,600008.56);
+    assert.deepEqual(stale.advance_recovery_correction,{rate:40,amount:240003.42,payable:360005.14});
+    const correctionBody={action:"revise",recover_advance:true,version:frozen.version,reason:"Apply configured advance recovery",command_key:"recovery-fix"};
+    const recoveryFix=await api(cert+"/"+frozen.id+"/action",token,"POST",correctionBody);
+    assert.equal((await api(cert+"/"+frozen.id+"/action",token,"POST",correctionBody)).id,recoveryFix.id);
+    assert.equal(recoveryFix.certificate_number,frozen.certificate_number);
+    assert.equal(recoveryFix.header.work_to,"2026-05-01");
+    assert.equal(recoveryFix.header.collection_cutoff,"2026-05-01");
+    assert.deepEqual(recoveryFix.validation,[]);
+    assert.equal(recoveryFix.totals.current,0);
+    assert.equal(recoveryFix.totals.cumulative,600008.56);
+    assert.equal(recoveryFix.totals.advance_recovery,240003.42);
+    assert.equal(recoveryFix.totals.cumulative_payable,360005.14);
+    assert.equal(recoveryFix.totals.advance_remaining,775411.58);
+    const approvedFix=await api(cert+"/"+recoveryFix.id+"/action",token,"POST",{action:"approve",version:recoveryFix.version});
+    assert.equal(approvedFix.totals.cumulative_payable,360005.14);
+    assert.equal(db.get("SELECT SUM(amount_minor) AS amount FROM cert_advance_recoveries WHERE certificate_id=?",[approvedFix.id]).amount,24000342);
+    assert.equal(db.get("SELECT snapshot_json FROM cert_revisions WHERE id=?",[frozen.id]).snapshot_json,frozenBytes);
+    assert.equal((await api(cert+"/"+frozen.id,token)).advance_recovery_correction,null);
+    const numberedProject=await api(cert+"/projects",token,"POST",{customer_id:customer.id,name:"Sequential certificates"},201);
+    const numberedHeader={work_to:"2026-06-01",collection_cutoff:"2026-06-01"};
+    const numberedLine={id:"stable-opening",identity:"stable-opening",mode:"direct",recognition:"cumulative",description:"Opening",unit:"Pcs",quantity:1,rate:100};
+    const one=await api(cert,token,"POST",{project_id:numberedProject.id,header:numberedHeader,lines:[numberedLine]},201);
+    const two=await api(cert,token,"POST",{project_id:numberedProject.id,header:{...numberedHeader,work_to:"2026-07-01"},
+      lines:[{...numberedLine,quantity:2}]},201);
+    assert.equal(one.certificate_number,1);assert.equal(two.certificate_number,2);
+    assert.equal((await api(cert+"/"+one.id,token)).certificate_number,1);
+    const approvedOne=await api(cert+"/"+one.id+"/action",token,"POST",{action:"approve",version:one.version});
+    const nextValuation=await api(cert+"/"+two.id,token);
+    assert.equal(nextValuation.baseline.id,one.id);
+    assert.equal(nextValuation.totals.previous,100);assert.equal(nextValuation.totals.current,100);
+    assert.equal(nextValuation.totals.cumulative,200);
+    const approvedTwo=await api(cert+"/"+two.id+"/action",token,"POST",{action:"approve",version:two.version});
+    const numberedStatement=await api("/documents/statement?party_id="+customer.id+"&report_language=en",token);
+    assert.equal(numberedStatement.statementRows.find(row=>row.document_id==="certificate-"+two.id).document_no,2);
+    const sameNumber=await api(cert+"/"+two.id+"/action",token,"POST",{action:"revise",version:approvedTwo.version,reason:"Correct opening"});
+    assert.equal(sameNumber.certificate_number,2);
+    const changedTwo=await api(cert+"/"+sameNumber.id,token,"PUT",{version:sameNumber.version,
+      header:{work_to:"2026-07-01",collection_cutoff:"2026-07-01"},lines:[{...numberedLine,quantity:3}]});
+    await api(cert+"/"+sameNumber.id+"/action",token,"POST",{action:"approve",version:changedTwo.version});
+    const issuedOne=await api(cert+"/"+one.id+"/action",token,"POST",{action:"issue",version:approvedOne.version});
+    const issuedTwo=await api(cert+"/"+two.id+"/action",token,"POST",{action:"issue",version:approvedTwo.version});
+    assert.equal(issuedOne.official_number,1);assert.equal(issuedTwo.official_number,2);
+    const more=await Promise.all(["2026-08-01","2026-09-01"].map(work_to=>api(cert,token,"POST",{
+      project_id:numberedProject.id,header:{...numberedHeader,work_to},lines:[{...numberedLine,quantity:3}]},201)));
+    assert.deepEqual(more.map(({certificate_number})=>certificate_number).sort(),[3,4]);
+    assert.equal(more[0].totals.previous,300);
     await api("/auth/logout",viewToken,"POST",{user_id:viewer.id});
     await api(cert + "/access",viewToken,"GET",undefined,401);
     assert.equal(db.get("PRAGMA foreign_key_check"),null);

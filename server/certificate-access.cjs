@@ -4,6 +4,7 @@ const {normalizeArabic} = require("./domain.cjs");
 const CAPABILITIES = [
   "view", "create", "edit_draft", "import", "create_master", "manage_settings",
   "view_collections", "manage_collections", "submit", "approve", "issue", "revise", "export", "view_audit",
+  "ops_view", "ops_edit", "ops_approve", "ops_finance", "ops_qc", "ops_load", "ops_release", "ops_export", "ops_catalogue",
 ];
 const parse = (value, fallback = null) => value ? JSON.parse(value) : fallback;
 const encode = (value) => JSON.stringify(value);
@@ -158,8 +159,10 @@ function setGrant(database, requester, userId, input) {
   const capabilities = Array.isArray(input.capabilities)
     ? [...new Set(input.capabilities.map((value) => str(value).replace(/^certificates\./, "")))] : [];
   if (capabilities.some((value) => !CAPABILITIES.includes(value))) fail(400, "Unknown certificate capability");
-  if (capabilities.some((value) => value !== "view") && !capabilities.includes("view"))
+  if (capabilities.some((value) => value !== "view" && !value.startsWith("ops_")) && !capabilities.includes("view"))
     fail(400, "Certificate viewing is required for other certificate permissions");
+  if (capabilities.some((value) => value.startsWith("ops_") && value !== "ops_view") && !capabilities.includes("ops_view"))
+    fail(400,"Project Operations viewing is required for other operations permissions");
   const projectIds = Array.isArray(input.project_ids) ? [...new Set(input.project_ids.map(idOf))] : [];
   if (projectIds.length > 2000 || projectIds.some((id) =>
     !id || !database.get("SELECT 1 FROM cert_projects WHERE id = ?", [id]))) fail(400, "Invalid project scope");

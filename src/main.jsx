@@ -652,6 +652,7 @@ class AppErrorBoundary extends React.Component {
 const NAV = [
   { id: "dashboard", label: "لوحة التحكم", icon: Activity },
   { id: "progress-certificates", label: "المستخلصات والتحصيلات", sidebarLabelEn: "Certificates", icon: FileCheck },
+  { id: "project-operations", label: "عمليات المشروعات", sidebarLabelEn: "Project Operations", icon: ClipboardList },
   { id: "offer", label: "عروض الأسعار", icon: FileText },
   { id: "invoice", label: "الفواتير", icon: ReceiptText },
   { id: "statement", label: "كشف حساب", icon: WalletCards },
@@ -689,6 +690,7 @@ const ROUTE_APP_VARIANTS = {
   certificates: "main",
   "contractor-certificates": "main",
   "progress-certificates": "main",
+  "project-operations": "main",
 };
 
 const ROUTE_INITIAL_TABS = {
@@ -710,6 +712,7 @@ const ROUTE_INITIAL_TABS = {
   certificates: "contractor",
   "contractor-certificates": "contractor",
   "progress-certificates": "progress-certificates",
+  "project-operations": "project-operations",
   entry: "entry",
   settings: "settings",
   quantities: "quantities",
@@ -734,6 +737,7 @@ const APP_VARIANT_ID = "main";
 const INITIAL_ACTIVE_TAB = ROUTE_INITIAL_TABS[currentRouteKey()] || APP_VARIANT.defaultTab;
 const NAV_ITEMS = NAV;
 const ProgressCertificates = lazy(() => import("./certificates/Certificates.jsx"));
+const ProjectOperations = lazy(() => import("./project-operations/ProjectOperations.jsx"));
 const ProjectReceiptEditor = lazy(() => import("./certificates/CertificateOperations.jsx").then(({ReceiptEditor}) => ({default:ReceiptEditor})));
 const CertificateGrants = lazy(() => import("./certificates/CertificateGrants.jsx"));
 const CertificateAccessPanel = lazy(() => import("./certificates/CertificateAccessPanel.jsx"));
@@ -2659,6 +2663,11 @@ function App() {
 
   const canViewCertificates = certificateSession && certificateAccess?.enabled &&
     certificateAccess.capabilities?.includes("view");
+  const canViewOperations = certificateSession && certificateAccess?.capabilities?.includes("ops_view");
+  const [visitedOperations,setVisitedOperations]=useState(false);
+  useEffect(()=>{
+    if (activeTab==="project-operations" && canViewOperations) setVisitedOperations(true);
+  },[activeTab,canViewOperations]);
   const [visitedCertificates, setVisitedCertificates] = useState(false);
   useEffect(() => {
     if (activeTab === "progress-certificates" && canViewCertificates) setVisitedCertificates(true);
@@ -4279,7 +4288,8 @@ function App() {
     NAV_ITEMS.find((tab) => tab.id === activeTab) ||
     NAV.find((tab) => tab.id === activeTab)
   )?.label;
-  const localizedActiveNavLabel = uiText(activeNavLabel, uiLanguage);
+  const localizedActiveNavLabel = activeTab==="project-operations" && uiLanguage==="en"
+    ? "Project Operations" : uiText(activeNavLabel, uiLanguage);
   const activeServerAddress = cleanApiBase(
     apiBase ||
       window.priceOfferDesktop?.apiBase ||
@@ -4301,7 +4311,7 @@ function App() {
             </div>
           </div>
           <nav className="main-nav" data-localized>
-            {NAV_ITEMS.map(({ id, label, sidebarLabelEn, icon: Icon }) => (
+            {NAV_ITEMS.filter(({id})=>id!=="project-operations"||canViewOperations).map(({ id, label, sidebarLabelEn, icon: Icon }) => (
               <button
                 key={id}
                 data-nav-id={id}
@@ -4486,6 +4496,23 @@ function App() {
               />
             </Suspense>
           )}
+
+          {(activeTab === "project-operations" || visitedOperations) && canViewOperations && (
+            <div hidden={activeTab !== "project-operations"}>
+              <Suspense fallback={<LoadingOverlay/>}>
+                <ProjectOperations key={certificateSession} api={api} apiBase={apiBase} session={certificateSession}
+                  access={certificateAccess} uiLanguage={uiLanguage} active={activeTab==="project-operations"}
+                  onOpenOffers={()=>requestTabChange("offer")}
+                  saveNativeReport={window.Capacitor?.isNativePlatform?.() ? (blob,name)=>saveNativeReport(blob,name,{folder:"Project Operations"}) : undefined}
+                  shareNativeReport={window.Capacitor?.isNativePlatform?.() ? shareNativeReport : undefined}
+                  onOpenDocument={(doc,party)=>openDocumentPreview(doc,{...party,display_name:party.name})
+                    .catch((error)=>setMessage(error.message))}/>
+              </Suspense>
+            </div>
+          )}
+          {activeTab==="project-operations"&&!canViewOperations&&<div className="notice">
+            {uiLanguage==="ar"?"يلزم إذن عرض عمليات المشروعات.":"Project Operations viewing permission is required."}
+          </div>}
 
           {activeTab === "dashboard" && (
             <section className="panel certificate-entry" data-localized>
