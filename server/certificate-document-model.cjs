@@ -2,7 +2,7 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 13;
+const MODEL_VERSION = 14;
 const reportColors = {text:'#183148', muted:'#3c5266', header:'#e5eef1', headerLine:'#b5cbd1', group:'#f3f7f8', groupText:'#26525a',
   subtotal:'#edf4f5', building:'#98c3e0', unit:'#acd3ac', workType:'#a2cbc6'};
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
@@ -10,7 +10,7 @@ const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maxi
 const labels = {
   en: {
     draft: 'Draft - for review', customer: 'Customer', project: 'Project', location: 'Location',
-    customer_code: 'Customer code', project_code: 'Project code', address: 'Address',
+    customer_code: 'Customer code', project_code: 'Project code', customer_project_code:'Customer project code', address: 'Address',
     site: 'Site address', tax_no: 'Tax registration', registration: 'Commercial registration',
     attention: 'Attention', contract_ref: 'Contract / PO', contract_date: 'Contract date',
     certificate: 'Certificate', progress_type: 'Progress certificate', final_type: 'Final certificate',
@@ -28,6 +28,7 @@ const labels = {
     current_credit: 'Current credit', cumulative_credit: 'Credit to date',
     ordinary_collections: 'Ordinary collections', advance_recovery: 'Advance recovery', advance_remaining: 'Advance balance remaining',
     settled_work: 'Work value', receipts: 'Payment details', advance_receipts: 'Advance payments received',
+    works_insurance:'Works retention',final_insurance:'Final retention',retention:'Retention',
     collection_received: 'By payment receipt date', collection_cleared: 'By payment clearance date',
     received_date: 'Received', method: 'Method', reference: 'Reference', amount: 'Amount',
     receipt_type: 'Type', status: 'Status', payment_details_through: 'Payment details through',
@@ -42,7 +43,7 @@ const labels = {
   },
   ar: {
     draft: 'مسودة - للمراجعة', customer: 'العميل', project: 'المشروع', location: 'الموقع',
-    customer_code: 'كود العميل', project_code: 'كود المشروع', address: 'العنوان',
+    customer_code: 'كود العميل', project_code: 'كود المشروع', customer_project_code:'كود المشروع لدى العميل', address: 'العنوان',
     site: 'عنوان الموقع', tax_no: 'التسجيل الضريبي', registration: 'السجل التجاري',
     attention: 'عناية', contract_ref: 'العقد / أمر الشراء', contract_date: 'تاريخ العقد',
     certificate: 'المستخلص', progress_type: 'مستخلص دوري', final_type: 'مستخلص ختامي',
@@ -52,6 +53,7 @@ const labels = {
     currency: 'العملة', title: 'المرجع', notes: 'ملاحظة المستخلص', work_type: 'نوع العمل', work_item: 'البند',
     description: 'الأعمال', width: 'العرض', length: 'الطول', height: 'الارتفاع',
     dimension_unit: 'وحدة القياس', count: 'العدد', billed_quantity: 'الكمية', unit: 'الوحدة',
+    works_insurance:'تأمينات الأعمال',final_insurance:'تأمين نهائي',retention:'المحتجز',
     rate: 'سعر الوحدة', agreed_amount: 'القيمة المتفق عليها', progress: 'نسبة الإنجاز', note: 'ملاحظة',
     last_current: 'جاري المستخلص السابق', previous: 'القيمة السابقة', current: 'القيمة الحالية',
     cumulative: 'القيمة التراكمية', cover: 'ملخص الأعمال', detail: 'تفاصيل الأعمال',
@@ -409,6 +411,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       metadata('attention', customer.attention || customer.print_contact, { wide: true })],
     [metadata('project', nameForPrint(project, locale), { required: true, wide: true }),
       metadata('project_code', project.code, { isolated: true }),
+      {...metadata('customer_project_code',project.customer_project_code,{required:true,isolated:true}),label:locale==='ar'?'كود المشروع لدى العميل':'Customer project code'},
       metadata('site', project.site_address || project.address, { wide: true }),
       metadata('location', choiceAllowsLocation ? sharedLocation : '', { wide: true }),
       metadata('contract_ref', header.contract_ref || project.contract_ref, { isolated: true }),
@@ -451,8 +454,13 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     summaryGroups.get(key).lines.push(line);
   }
   const coverRows = [...summaryGroups.values()].map(({path,lines:groupLines}) => ({
-    name:path.map(({name}) => name).join(' / '),path,...workRollup(groupLines,moneyKeys),
+    name:path.map(({name}) => name).join(' / '),building:path.find(group=>group.kind==='building')?.name||'',
+    work_description:path.find(group=>group.kind==='work_type')?.name||'',path,...workRollup(groupLines,moneyKeys),
   }));
+  const coverTextColumns=buildings.size&&lines.some(line=>line.work_type)?[
+    {key:'building',label:t.building_unit,weight:16,kind:'text'},
+    {key:'work_description',label:t.description,weight:34,kind:'text'},
+  ]:[{key:'name',label:t[({building:'building_unit',unit:'floor_apartment'})[coverKind]||'work_type'],weight:34,kind:'text'}];
   return {
     modelVersion: MODEL_VERSION, locale, direction: locale === 'ar' ? 'rtl' : 'ltr', labels: t,
     variant, issued, historical, approved, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',
@@ -476,8 +484,10 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     groupLabel: t[({building:'building_unit',unit:'floor_apartment'})[coverKind || groupBy] || 'work_type'],
     identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
-    detailGroups, detailBands:bands, coverRows,
+    detailGroups, detailBands:bands, coverRows,coverTextColumns,
     workTotals, financeRows,
+    holds:variant==='internal'?(totals.holds||[]).filter(hold=>Number(hold.balance)>0).map(hold=>({
+      label:text(hold.label||t[hold.category]||t.other_rule),collection_date:text(hold.collection_date),balance:money(hold.balance)})):[],
   };
 }
 

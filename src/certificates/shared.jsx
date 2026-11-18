@@ -4,13 +4,16 @@ import { normalizeSmartNumericClipboardValue, normalizeSmartSearchText } from ".
 export const certificateApi = "/api/certificates";
 
 export function useCertificateApi(api, session) {
-  return useMemo(() => (path, { method = "GET", body, signal } = {}) =>
-    api.request(`${certificateApi}${path}`, {
+  return useMemo(() => async(path, { method = "GET", body, signal } = {}) => {
+    const result=await api.request(`${certificateApi}${path}`, {
       method,
       signal,
       headers: { Authorization: `Bearer ${session}` },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    }), [api, session]);
+    });
+    if(method!=='GET')window.dispatchEvent(new Event('easycommercial-finance-updated'));
+    return result;
+  }, [api, session]);
 }
 
 export function queryString(fields) {
@@ -100,6 +103,7 @@ export function ProjectDetailsFields({ draft, onChange, t, creating = false }) {
       ["name", t("الاسم الرسمي", "Official name"), {required:true,autoFocus:creating}],
       ["alternate_name", t("الاسم باللغة الأخرى", "Name in other language")],
       ["code", t("رمز المشروع", "Project code"), {dir:"ltr",readOnly:!creating,placeholder:t("يُعيّن تلقائيًا", "Assigned automatically")}],
+      ["customer_project_code",t("كود المشروع لدى العميل (اختياري)","Customer project code (optional)")],
       ["address", t("عنوان المشروع", "Project address")],
       ["contract_ref", t("مرجع العقد / أمر الشراء", "Contract / PO reference")],
       ["contract_date", t("تاريخ العقد", "Contract date"), {type:"date",dir:"ltr"}],
@@ -163,7 +167,7 @@ export function Combobox({ label, selected, options, onSelect, onSearch, onAdd, 
   }, [selectedId, selectedLabel, resetKey]);
   const normalized = searchText(value);
   const matches = options.filter((option) => !normalized ||
-    [optionLabel(option),option.alternate_name,option.code,option.contract_ref,option.address,...(option.search_aliases || [])]
+    [optionLabel(option),option.alternate_name,option.code,option.customer_project_code,option.contract_ref,option.address,...(option.search_aliases || [])]
       .some((part) => searchText(part).includes(normalized))).slice(0, 30);
   const canAdd = onAdd && value.trim() && !matches.some((option) => searchText(optionLabel(option)) === normalized);
   const choices = matches.length + (canAdd ? 1 : 0);

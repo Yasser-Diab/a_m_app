@@ -1,6 +1,6 @@
 const {accessFor, scopeSql, inScope, encode, parse, fail, str, idOf, date, lookup} = require("../certificate-access.cjs");
-const {getProject, getCustomer, createProject, projectLookupKeys} = require("../certificate-projects.cjs");
-const {configuration,cleanTechnical,categories,estimatedArea,dimensions,number} = require("./specifications.cjs");
+const {getProject, getCustomer, createProject,updateProject, projectLookupKeys} = require("../certificate-projects.cjs");
+const {configuration,cleanTechnical,openingDefaults,categories,estimatedArea,dimensions,number} = require("./specifications.cjs");
 const {awardReference}=require("./references.cjs");
 
 function authorizeOperations(db, req, capability = "ops_view", projectId = null) {
@@ -42,7 +42,7 @@ function projectChoices(db,access,query) {
   const numeric=key.replace(/^0+(?=\d)/,"");
   const numberSearch=/^\d+$/.test(numeric);
   const choices=db.all(`SELECT cp.id,cp.name,cp.alternate_name,cp.code,cp.created_at,cp.customer_id, p.display_name AS customer,
-    json_extract(cp.raw_json,'$.name_history') AS name_history, op.boq_id IS NOT NULL AS configured,
+    json_extract(cp.raw_json,'$.name_history') AS name_history,json_extract(cp.raw_json,'$.customer_project_code') AS customer_project_code, op.boq_id IS NOT NULL AS configured,
     op.award_reference FROM cert_projects cp JOIN parties p ON p.id=cp.customer_id
     LEFT JOIN ops_projects op ON op.project_id=cp.id WHERE ${scope.clause}`,scope.params);
   const matchesByName=new Map();
@@ -73,7 +73,7 @@ function projectChoices(db,access,query) {
     const documentMatch=numberSearch? sources.find((doc)=>[doc.operation_no,doc.document_no]
       .some((number)=>lookup(number).replace(/^0+(?=\d)/,"")===numeric)):
       (key?sources.find((doc)=>lookup(doc.operation_no).includes(key)):null);
-    const nameMatch=!key||[choice.customer,choice.award_reference,...projectLookupKeys(choice)].some((value)=>lookup(value).includes(key));
+    const nameMatch=!key||[choice.customer,choice.customer_project_code,choice.award_reference,...projectLookupKeys(choice)].some((value)=>lookup(value).includes(key));
     if (!nameMatch&&!documentMatch) return [];
     return [{...entry,matched_document:documentMatch||null,source_document:documentMatch||sources.find(({status})=>status==="approved")||sources[0],
       has_approved_source:sources.some(({status})=>status==="approved")}];
@@ -204,7 +204,7 @@ function setup(db,project,boqId,user,reviewDate) {
         color:row.color || standard.color || "",width_mm:values.width_mm,height_mm:values.height_mm,
         quantity:Number.isInteger(row.item_count) && row.item_count>0 ? row.item_count : null};
       if (saved) filled++;
-      insert.run([project.id,row.id,"BOQ-"+row.id,encode({values,line:row}),encode(values),encode(technical),
+      insert.run([project.id,row.id,"BOQ-"+row.id,encode({values,line:row}),encode(values),encode(openingDefaults(saved?.category,technical)),
         saved?.category||"",saved?.system||"",boq.id,saved?1:0]);
     }
   } finally { insert.free(); }
@@ -214,6 +214,7 @@ function setup(db,project,boqId,user,reviewDate) {
 
 function changeProjectDetails(db,state,body,user) {
   if (Number(body.version)!==state.version) fail(409,"Reload the project before saving");
+  if(Object.hasOwn(body.details||{},'customer_project_code'))updateProject(db,getProject(db,state.project_id),{customer_project_code:body.details.customer_project_code});
   const details=projectDetails({...body.details,report_signatures:body.details?.report_signatures??state.details.report_signatures});
   db.run("UPDATE ops_projects SET details=?,version=version+1 WHERE project_id=?",[encode(details),state.project_id]);
   record(db,user,state.project_id,"project_updated",state.project_id,{before:state.details,after:details});

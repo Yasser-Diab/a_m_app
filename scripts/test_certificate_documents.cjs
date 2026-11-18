@@ -161,6 +161,10 @@ async function main() {
   assert.equal(works.getRow(6).getCell(columnIndex).value,400);
   byUnit.header.group_by = 'building';
   assert.deepEqual(buildCertificateDocument(byUnit).coverRows.map(({name}) => name),['Tower A / Building works','Tower B / Building works']);
+  const buildingSummary=buildCertificateDocument(byUnit);
+  assert.deepEqual(buildingSummary.coverTextColumns.map(column=>column.key),['building','work_description']);
+  assert.deepEqual(buildingSummary.coverRows.map(row=>[row.building,row.work_description]),[['Tower A','Building works'],['Tower B','Building works']]);
+  assert.match(buildCertificateHtml(buildingSummary),/data-key="building"/);
   byUnit.header.group_by = 'work_type';
   byUnit.header.show_group_subtotals = false;
   const noGroupsSubtotal = buildCertificateDocument(byUnit);

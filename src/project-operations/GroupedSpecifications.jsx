@@ -2,7 +2,7 @@ import {useEffect,useId,useMemo,useState} from "react";
 import {Field,queryString,useResource} from "../certificates/shared.jsx";
 import {ErrorMessage,Page,Pick,Table} from "./shared.jsx";
 import {SpecificationError,applySpecificationEdits,editSpecification,resolveSpecificationEdits} from "./specification-edits.jsx";
-import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText} from "./terminology.js";
+import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText,hasTrim} from "./terminology.js";
 
 const measurementFields=[
   ["tag","رقم الفتحة","Opening tag"],["quantity","العدد","Count"],
@@ -18,7 +18,7 @@ const labels={
 };
 const sides={right:["يمين","Right"],left:["شمال","Left"],top:["علوي","Top"],bottom:["سفلي","Bottom"]};
 const LOOKUP_FIELDS=["hinge_side","opening_direction","fixed_panels","fixed_position","tilt_fixed","top_fixed_height","bottom_fixed_height",
-  "perimeter","rubber_bar","interlock_right","interlock_left",
+  "perimeter","trim_type","trim_size_cm","rubber_bar","interlock_right","interlock_left",
   "interlock_right_mm","interlock_left_mm","reflective","georgian","georgian_configuration",
   "layers","outside_glass","outside_thickness","spacer_thickness","cavity","inside_glass","inside_thickness","interlayer"];
 const CORE_FIELDS=["profile","color","finish","glass_type","infill","glass_thickness","glass_color","glazing","coating_direction"];
@@ -94,7 +94,7 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
     const specific=catalogue.categories.find(({id})=>id===item.category)?.systems.find(({id})=>id===item.system);
     const activeTags=configurationTags(specific,item.technical);
     const dependency=item.technical[depends];
-    return (!field.populatedOnly||item.technical[key]!=null&&item.technical[key]!=="")&&(!tags||tags.split(" ").some((tag)=>activeTags.has(tag)))&&
+    return hasTrim(key,item.technical)&&(!field.populatedOnly||item.technical[key]!=null&&item.technical[key]!=="")&&(!tags||tags.split(" ").some((tag)=>activeTags.has(tag)))&&
       (!depends||Boolean(dependency)&&!["لا","بدون","لا ينطبق","no","none","n/a"].includes(String(dependency).toLowerCase()))&&
       (!field.minLeaves||Number(item.technical.leaves)>=field.minLeaves);
   };

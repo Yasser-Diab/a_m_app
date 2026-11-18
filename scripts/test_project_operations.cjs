@@ -106,7 +106,7 @@ async function main() {
     assert.equal(estimatedArea({width_mm:1200,height_mm:1400,quantity:100}),168);
     const itemPath=scope+"/items/"+initial.id;
     await api(itemPath,"PATCH",{version:1,code:initial.code,category:"windows",system:"windows-8",
-      technical:{quantity:100,width_mm:1200,height_mm:1400,leaves:1,slide_direction:"Left"}},400);
+      technical:{quantity:100,width_mm:1200,height_mm:1400,leaves:1,slide_direction:"Left",viewing:"Invalid"}},400);
     const specs={quantity:100,width_mm:1200,height_mm:1400,leaves:1,viewing:"Inside",slide_direction:"Left",
       profile:"Series 100",hinge:"Hidden irrelevant hinge",tag:"W-01",rubber_bar:true,screen:"ضلفة مستقلة",perimeter:["left","top","bottom"],
       subframe:{status:"not_deducted",sides:{left:{width:50,depth:100,deduction:50},
@@ -328,8 +328,8 @@ async function main() {
     const sourced=await api(resolvedPath+"/orders","POST",{items:[{item_id:second.id,quantity:1}]});
     assert.equal(sourced.reference,award.award_reference.replace(/ASG$/,"WO-0002"));
     const signoffs=await api(resolvedPath+"/orders/"+generated.id+"/report","POST",{kind:"manufacturing",classification:"materials"});
-    assert.ok(signoffs.html.includes("Company sign-off"));
-    assert.ok(signoffs.html.includes("Client &amp; consultant sign-off"));
+    assert.ok(!signoffs.html.includes("Company sign-off"));
+    assert.ok(signoffs.html.includes('<h3>Customer</h3>'));
     assert.ok(signoffs.html.includes(lead.name)&&signoffs.html.includes(client.name));
     assert.ok(signoffs.html.includes("Double-sided pull handle"));
     assert.ok(!signoffs.html.includes("hidden@fixture.test"));

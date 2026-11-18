@@ -151,6 +151,10 @@ async function writeCertificateXlsx(model) {
     { key: 'cumulative', label: `${model.labels.cumulative} (${model.currency})`, weight: 20, kind: 'money' },
   ], model.financeRows);
   if (model.receipts.length) addWorksheet(workbook, model, model.labels.receipts, model.receiptColumns, model.receipts);
+  if(model.variant==='internal'&&model.holds?.length)addWorksheet(workbook,model,model.locale==='ar'?'المحتجزات':'Retentions',[
+    {key:'label',label:model.locale==='ar'?'الاستقطاع':'Deduction',weight:30,kind:'text'},
+    {key:'collection_date',label:model.locale==='ar'?'تاريخ التحصيل':'Collection date',weight:20,kind:'text'},
+    {key:'balance',label:model.locale==='ar'?'المحتجز':'Held',weight:18,kind:'money'}],model.holds);
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
@@ -174,7 +178,7 @@ function initializeCertificateArtifacts(database) {
 }
 
 function enqueueCertificateRender(database, certificateId, frozenInput) {
-  const variants = frozenInput.receipts?.length ? ['customer', 'internal'] : ['customer'];
+  const variants = frozenInput.receipts?.length||frozenInput.totals?.holds?.some(hold=>hold.balance>0) ? ['customer', 'internal'] : ['customer'];
   for (const variant of variants) {
     const model = buildCertificateDocument(frozenInput, { variant });
     database.run(`INSERT OR IGNORE INTO cert_pdf_artifacts(certificate_id, variant, template_version, document_json)

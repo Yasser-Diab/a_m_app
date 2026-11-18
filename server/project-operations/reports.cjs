@@ -61,10 +61,11 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   .loading-sheet td:nth-child(-n+8){white-space:nowrap}.loading-sheet th{font-size:8pt;overflow-wrap:normal;hyphens:none}
   .drawings{display:flex;flex-wrap:wrap;gap:8px}
   figure{max-width:47%;margin:6px 0 0;break-inside:avoid}figure img{max-width:100%;max-height:66mm;object-fit:contain}
-  .signoffs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-block:12px}
+  .signoffs{display:grid;grid-template-columns:minmax(0,1fr);gap:28px;margin-block:28px 12px}
   .signoff h3{margin-block:0 15px}
-  .signatures{display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:16px;padding-top:12px}
-  .signatures div{border-top:1px solid #587384;padding-top:6px;min-height:39px;break-inside:avoid}
+  .signatures{display:grid;grid-template-columns:repeat(var(--signers),minmax(0,1fr));gap:16px;padding-top:12px;align-items:start}
+  .signatures div{border-top:1px solid #587384;padding-top:6px;min-height:39px;min-width:0;text-align:center;overflow-wrap:anywhere;break-inside:avoid}
+  .signoff{break-inside:avoid}
   </style></head><body>${watermark?`<div class="watermark" lang="en" dir="ltr">${escape(watermark)}</div>`:""}
   <header>${logo?`<img alt="" src="${escape(logo)}">`:""}<div><strong>${escape(name)}</strong>
   ${secondary?`<div>${escape(secondary)}</div>`:""}</div></header><h1>${escape(title)}</h1>
@@ -81,6 +82,7 @@ function projectBlock(db,project,customer,state,order,locale,branding) {
     .filter(({document_id})=>sources.has(document_id)).map(({snapshot})=>JSON.parse(snapshot));
   return `<section>${grid([
     [t("المشروع","Project"),project.name],[t("رمز المشروع","Project code"),project.code],
+    [t("كود المشروع لدى العميل","Customer project code"),project.customer_project_code],
     [t("العميل","Customer"),customer.display_name],[t("الموقع","Site"),info.location],
     [t("عنوان الموقع","Site address"),info.address||project.address],[t("المبنى / القطاع","Building / sector"),info.building],
     [t("رقم الإسناد","Award no."),state.award_reference],
@@ -174,7 +176,7 @@ function groupedWork(db,items,locale,drawingSets) {
     const system=configuration(db,spec.category,spec.system);
     const pairs=[
       [t("نوع العمل","Work type"),categories.get(spec.category)?.[locale]],
-      [t("النظام","System"),localized(spec.system_label,locale)],
+      [t("النظام","System"),locale==="ar"&&spec.system_label?.ar===spec.system_label?.en?system?.ar:localized(spec.system_label,locale)],
       ...fieldsFor(spec.category,system,tech,true).filter(({key})=>populated(tech[key],key)&&!dimensionFields.has(key)&&!internalFields.has(key)&&!locks.has(key))
         .map((field)=>{
           const specified=items.filter((item)=>populated(item.reportTechnical[field.key],field.key));
@@ -242,11 +244,10 @@ function signatures(db,projectId,order,kind,locale,selection) {
         || assigned.find(({responsibility})=>responsibility===key) || order.loads[0]?.responsible?.[key];
       if (person) signers.set(person.id||person.side+":"+person.name,{person,title:person.signature_label||person.position||t(...names)});
     }
-  const groups=[[" company",t("توقيعات الشركة","Company sign-off"),true],
-    [" client",t("توقيعات العميل والاستشاري","Client & consultant sign-off"),false]];
+  const groups=[[" company","",true],[" client",t("العميل","Customer"),false]];
   const blocks=groups.map(([side,heading,internal])=>{
     const members=[...signers.values()].filter(({person})=>(person.side?person.side==="company":Boolean(person.user_id))===internal);
-    return members.length?`<div class="signoff${side}"><h3>${escape(heading)}</h3><div class="signatures">${members.map(({person,title})=>
+    return members.length?`<div class="signoff${side}">${heading?`<h3>${escape(heading)}</h3>`:''}<div class="signatures" style="--signers:${members.length}">${members.map(({person,title})=>
       `<div><strong><bdi>${escape(person.name||title)}</bdi></strong>${person.name&&title?`<br>${escape(title)}`:""}
         ${person.company?`<br><bdi>${escape(person.company)}</bdi>`:""}</div>`).join("")}</div></div>`:"";
   }).join("");

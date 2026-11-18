@@ -18,6 +18,7 @@ const tabs=[
   ["history","السجل","History",History],
 ];
 const fields = [
+  ["customer_project_code","كود المشروع لدى العميل (اختياري)","Customer project code (optional)"],
   ["owner","صاحب المشروع","Project owner"],["main_contractor","المقاول الرئيسي","Main contractor"],
   ["consultant","الاستشاري","Consultant"],["location","المدينة / الموقع","City / site"],
   ["address","عنوان موقع المشروع","Site address"],["building","المبنى / المرحلة","Building / phase"],
@@ -153,7 +154,7 @@ function Setup({ctx,path,t,request,can,reload,onOpenOffers,onOpenDocument,prefer
 
 function Overview({ctx,request,path,t,can,catalogue,reload,onOpenDocument,uiLanguage,revision}) {
   const state=ctx.operations;
-  const [draft,setDraft]=useState(()=>({...state.details,address:state.details.address||ctx.project.address||"",
+  const [draft,setDraft]=useState(()=>({...state.details,customer_project_code:ctx.project.customer_project_code||'',address:state.details.address||ctx.project.address||"",
     contract_ref:state.details.contract_ref||ctx.project.contract_ref||""}));
   const action=useAction(request,reload);
   const loading=useResource(request,path+"/loading",revision);
@@ -183,14 +184,14 @@ function Overview({ctx,request,path,t,can,catalogue,reload,onOpenDocument,uiLang
         t("بانتظار التصنيف","Unclassified"),quantity(row.items),quantity(row.quantity),quantity(row.estimated_area)]])} empty=""/>
     <form className="pc-stack" onSubmit={(event)=>{event.preventDefault();action.run(path,"PATCH",{version:state.version,details:draft});}}>
       <fieldset disabled={!can("edit")||action.busy}><legend>{t("بيانات الموقع والتسليم","Site & delivery")}</legend><div className="pc-form">
-        {fields.filter(([key])=>["address","building","start_date","delivery_date","contract_ref"].includes(key))
+        {fields.filter(([key])=>["customer_project_code","address","building","start_date","delivery_date","contract_ref"].includes(key))
           .map(([key,ar,en,type])=><Text key={key} label={t(ar,en)} value={draft[key]} type={type} onChange={(value)=>setDraft({...draft,[key]:value})}/>)}
         <Pick label={t("حالة المشروع","Project status")} value={draft.status} onChange={(value)=>setDraft({...draft,status:value})}
           items={catalogue.projectStatuses.map((status)=>[status,technicalText(status,uiLanguage)])}/>
       </div><details>
         <summary>{t("بيانات إضافية","Additional project details")}</summary>
         <div className="pc-form">
-          {fields.filter(([key])=>!["address","building","start_date","delivery_date","contract_ref"].includes(key))
+          {fields.filter(([key])=>!["customer_project_code","address","building","start_date","delivery_date","contract_ref"].includes(key))
             .map(([key,ar,en,type])=><Text key={key} label={t(ar,en)} value={draft[key]} type={type} onChange={(value)=>setDraft({...draft,[key]:value})}/>)}
         </div>
       </details></fieldset>

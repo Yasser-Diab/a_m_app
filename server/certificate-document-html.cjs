@@ -133,6 +133,15 @@ function financeBlock(model) {
     </tbody></table></section>`;
 }
 
+function retentionBlock(model){
+  if(model.variant!=='internal'||!model.holds?.length)return '';
+  const t=(ar,en)=>model.locale==='ar'?ar:en;
+  return `<section class="finance"><h2>${t('الاستقطاعات المحتجزة — متابعة داخلية','Retentions — Internal follow-up')}</h2>
+    <table><colgroup><col data-key="label" data-weight="40" data-kind="text"><col data-key="date" data-weight="25" data-kind="text"><col data-key="balance" data-weight="25" data-kind="money"></colgroup>
+    <thead><tr><th>${t('الاستقطاع','Deduction')}</th><th>${t('تاريخ التحصيل','Collection date')}</th><th class="number">${t('المحتجز','Held')}</th></tr></thead>
+    <tbody>${model.holds.map(hold=>`<tr><td>${escapeHtml(hold.label)}</td><td><bdi dir="ltr">${escapeHtml(hold.collection_date||'—')}</bdi></td><td class="number" data-number="balance">${amount(hold.balance)}</td></tr>`).join('')}</tbody></table></section>`;
+}
+
 function sourceTemplate(id, units) {
   return `<template id="${id}"><table><tbody>${units.join('')}</tbody></table></template>`;
 }
@@ -177,14 +186,15 @@ function detailRows(model) {
 
 function buildCertificateHtml(model) {
   const { labels, locale, direction, columns, coverRows, moneyKeys, workTotals, receiptColumns, landscape, paper } = model;
-  const coverColumns = [{ key: 'name', label: model.groupLabel || labels.work_type, weight: 34, kind: 'text' },
+  const coverTextColumns=model.coverTextColumns||[{key:'name',label:model.groupLabel||labels.work_type,weight:34,kind:'text'}];
+  const coverColumns = [...coverTextColumns,
     ...(workTotals.count != null ? [{key:'count',label:labels.count,weight:8,kind:'number'}] : []),
     ...(workTotals.quantities?.length ? [{key:'billed_quantity',label:labels.billed_quantity,weight:26,kind:'quantity'}] : []),
     ...moneyKeys.map((key) => ({ key, label: labels[key], weight: 18, kind: 'money' }))];
   const size = paper === 'Letter' ? [215.9, 279.4] : [210, 297];
   const [width, height] = landscape ? size.toReversed() : size;
   const style = model.style || {};
-  const cover = coverRows.map((row) => `<tr ${bandAttributes(row.path || [])}>${rowCells(row,coverColumns.slice(0,1))}${rollupCells(row,coverColumns.slice(1),moneyKeys)}</tr>`);
+  const cover = coverRows.map((row) => `<tr>${rowCells(row,coverTextColumns)}${rollupCells(row,coverColumns.slice(coverTextColumns.length),moneyKeys)}</tr>`);
   cover.push(subtotalRow(workTotals, coverColumns, moneyKeys, labels.total));
   const receiptRows = model.receipts.map((row) => `<tr>${rowCells(row, receiptColumns)}</tr>`);
   return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="utf-8">
@@ -283,15 +293,18 @@ function buildCertificateHtml(model) {
       border-block-start:0.6pt solid #adc2c9; text-align:center; font-size:8pt; overflow-wrap:anywhere; }
     .signatory:only-child { justify-self:end; }
     .signatories[dir="rtl"] .signatory:only-child { justify-self:start; }
-    .signatory small { display: block; }
+    .signatory { text-align:center; }
+    .signatory small { display: block;text-align:center; }
     </style></head><body>
     ${pageTemplate('cover', labels.cover, tableOpening(coverColumns), model)}
     ${pageTemplate('detail', labels.detail, tableOpening(columns), model)}
     ${pageTemplate('receipts', '', '', model)}
     ${pageTemplate('settlement', '', '', model)}
+    ${pageTemplate('retentions', '', '', model)}
     ${pageTemplate('signoff-page', '', '', model)}
     ${sourceTemplate('cover-rows', cover)}${sourceTemplate('detail-rows', detailRows(model))}
     <template id="settlement-block">${financeBlock(model)}</template>
+    <template id="retentions-block">${retentionBlock(model)}</template>
     <template id="receipts-block"><section class="payment-details"><h2>${escapeHtml(labels.receipts)}</h2>${tableOpening(receiptColumns,receiptRows.join(''))}</section></template>
     <template id="signatures-block">${signaturesBlock(model)}</template>
     </body></html>`;
@@ -356,7 +369,7 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
   for (const id of ['cover','detail']) {
     fitColumns(document.getElementById(id).content.querySelector('table'),document.getElementById(`${id}-rows`).content);
   }
-  for (const id of ['settlement','receipts']) {
+  for (const id of ['settlement','retentions','receipts']) {
     const table = document.getElementById(`${id}-block`).content.querySelector('table');
     if (table) fitColumns(table,table);
   }
@@ -482,6 +495,7 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
   const openingPages = hasCover ? pagesFor('cover') : pagesFor('detail', false, true);
   const workPageCount = openingPages.length;
   appendTableSection('settlement', openingPages);
+  appendTableSection('retentions', openingPages);
   if (hasReceipts) appendTableSection('receipts', openingPages);
   if (hasCover) {
     appendSummarySignoff(openingPages);

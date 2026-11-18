@@ -4,7 +4,7 @@ import {ErrorMessage,Page,Pick,Table,Text,display,options,panelNames,quantity,st
 import SpecificationGrid from "./SpecificationGrid.jsx";
 import GroupedSpecifications from "./GroupedSpecifications.jsx";
 import SourceRefresh from './SourceRefresh.jsx';
-import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText} from "./terminology.js";
+import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText,openingDefaults,hasTrim} from "./terminology.js";
 
 const commonParts={
   measurement:["المقاسات","Measurements"],profile:["نظام القطاعات","Profile system"],glass:["الزجاج","Glass"],
@@ -81,7 +81,7 @@ function dimensions(spec) {
 }
 
 function SpecEditor({draft,change,catalogue,t,locale,nested=false}) {
-  const spec=draft.technical||{};
+  const spec=openingDefaults(draft.category,draft.technical||{});
   const category=catalogue.categories.find(({id})=>id===draft.category);
   const system=category?.systems.find(({id})=>id===draft.system);
   const tags=configurationTags(system,spec);
@@ -90,7 +90,7 @@ function SpecEditor({draft,change,catalogue,t,locale,nested=false}) {
   const specific=[...(category?.fields||[]),...(system?.fields||[])].filter((field)=>{
     const required=catalogue.conditional[draft.category]?.[field.key];
     const dependency=catalogue.dependencies[draft.category]?.[field.key];
-    return (!field.populatedOnly||spec[field.key]!=null&&spec[field.key]!=="")&&(!required||required.split(" ").some((tag)=>tags.has(tag))) && (!dependency||valid(spec[dependency]))
+    return hasTrim(field.key,spec)&&(!field.populatedOnly||spec[field.key]!=null&&spec[field.key]!=="")&&(!required||required.split(" ").some((tag)=>tags.has(tag))) && (!dependency||valid(spec[dependency]))
       && (!field.minLeaves||Number(spec.leaves)>=field.minLeaves);
   });
   const opening=["windows","doors"].includes(draft.category);

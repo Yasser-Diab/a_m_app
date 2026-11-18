@@ -4,6 +4,7 @@ const {audit, date, encode, fail, idOf, lookup, nextCertificateId, now, parse, s
 const {getProject, getCustomer, getProfile, projectLocations, cleanRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, DATE_FLOOR} = require("./certificate-ledger.cjs");
 const {calculateValuation, MODES, decimal, money, toMinor} = require("./certificate-valuation.cjs");
+const {withRetentionHistory}=require('./certificate-retention-history.cjs');
 const {legacySnapshot, legacyLines, legacyCertificateInput} = require("./certificate-history.cjs");
 const {certificateLocationFields} = require("./document-locations.cjs");
 const {reconcile: reconcileOperations} = require("./project-operations/finance.cjs");
@@ -159,7 +160,7 @@ function certificateDocumentInput(database, row, lines = null) {
   const customer = getCustomer(database, project.customer_id);
   const profile = getProfile(database, project.id, row.rules_version == null ? today() : header.work_to, row.rules_version);
   if (header.rule_override) profile.rules = header.rule_override;
-  const baseline = scopeBaseline(database, row, header);
+  const baseline = withRetentionHistory(database,scopeBaseline(database, row, header));
   if (header.recover_advance) {
     profile.rules=profile.rules.filter(({category})=>category==="advance_recovery");
     profile.settings={...profile.settings,collections_basis:baseline?.rule_settings?.collections_basis||profile.settings.collections_basis};

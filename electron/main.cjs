@@ -1416,6 +1416,7 @@ ipcMain.handle('desktop-settings:update', async (_event, patch = {}) => {
 function reportFolderForType(type = '') {
   const normalized = String(type || '').toLowerCase();
   if (normalized === 'project-operations') return 'Project Operations';
+  if (normalized === 'retentions') return 'Retentions';
   if (normalized.includes('offer')) return 'Price Offers';
   if (normalized.includes('invoice')) return 'Invoices';
   if (normalized.includes('statement')) return 'Account Statements';

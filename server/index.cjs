@@ -8751,8 +8751,7 @@ async function createServer(options = {}) {
     next();
   });
 
-  registerCertificateRoutes(app, database, dataDir, { branding: () => reportBranding(database), appVersion: APP_VERSION });
-  registerOperations(app,database,{branding:()=>reportBranding(database),renderPdf:async(html,options)=>{
+  const renderOperationsPdf=async(html,options)=>{
     const directory=await fs.promises.mkdtemp(path.join(os.tmpdir(),"easycommercial-operations-"));
     try {
       const output=await writePdf(html,path.join(directory,"report.pdf"),{...options,branding:reportBranding(database)});
@@ -8760,7 +8759,9 @@ async function createServer(options = {}) {
     } finally {
       await fs.promises.rm(directory,{recursive:true,force:true});
     }
-  },allocateDocument:()=>{
+  };
+  registerCertificateRoutes(app, database, dataDir, { branding: () => reportBranding(database), appVersion: APP_VERSION,renderPdf:renderOperationsPdf });
+  registerOperations(app,database,{branding:()=>reportBranding(database),renderPdf:renderOperationsPdf,allocateDocument:()=>{
     const number=nextAvailableDocumentNo(database);
     return {number,reference:formatOperationNo(number)};
   }});

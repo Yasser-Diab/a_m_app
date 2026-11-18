@@ -178,6 +178,8 @@ const UI_TRANSLATIONS = {
     "العميل": "Customer",
     "المقاول": "Contractor",
     "المستخلصات والتحصيلات": "Progress Certificates & Collections",
+    "بيانات العملاء":"Customers Data",
+    "الاستقطاعات المحتجزة":"Retentions",
     "رقم / مستند": "No. / Document",
     "كل مستندات المحدد": "All selected documents",
     "المشروع (اختياري)": "Project (optional)",
@@ -654,6 +656,8 @@ const NAV = [
   { id: "dashboard", label: "لوحة التحكم", icon: Activity },
   { id: "progress-certificates", label: "المستخلصات والتحصيلات", sidebarLabelEn: "Certificates", icon: FileCheck },
   { id: "project-operations", label: "عمليات المشروعات", sidebarLabelEn: "Project Operations", icon: ClipboardList },
+  {id:'customer-data',label:'بيانات العملاء',sidebarLabelEn:'Customers Data',icon:Users},
+  {id:'retentions',label:'الاستقطاعات المحتجزة',sidebarLabelEn:'Retentions',icon:WalletCards},
   { id: "offer", label: "عروض الأسعار", icon: FileText },
   { id: "invoice", label: "الفواتير", icon: ReceiptText },
   { id: "statement", label: "كشف حساب", icon: WalletCards },
@@ -692,6 +696,7 @@ const ROUTE_APP_VARIANTS = {
   "contractor-certificates": "main",
   "progress-certificates": "main",
   "project-operations": "main",
+  'customer-data':'main',retentions:'main',
 };
 
 const ROUTE_INITIAL_TABS = {
@@ -714,6 +719,7 @@ const ROUTE_INITIAL_TABS = {
   "contractor-certificates": "contractor",
   "progress-certificates": "progress-certificates",
   "project-operations": "project-operations",
+  'customer-data':'customer-data',retentions:'retentions',
   entry: "entry",
   settings: "settings",
   quantities: "quantities",
@@ -739,6 +745,8 @@ const INITIAL_ACTIVE_TAB = ROUTE_INITIAL_TABS[currentRouteKey()] || APP_VARIANT.
 const NAV_ITEMS = NAV;
 const ProgressCertificates = lazy(() => import("./certificates/Certificates.jsx"));
 const ProjectOperations = lazy(() => import("./project-operations/ProjectOperations.jsx"));
+const CustomersData=lazy(()=>import('./certificates/CustomersData.jsx'));
+const Retentions=lazy(()=>import('./certificates/Retentions.jsx'));
 const ProjectReceiptEditor = lazy(() => import("./certificates/CertificateOperations.jsx").then(({ReceiptEditor}) => ({default:ReceiptEditor})));
 const CertificateGrants = lazy(() => import("./certificates/CertificateGrants.jsx"));
 const CertificateAccessPanel = lazy(() => import("./certificates/CertificateAccessPanel.jsx"));
@@ -2665,6 +2673,7 @@ function App() {
   const canViewCertificates = certificateSession && certificateAccess?.enabled &&
     certificateAccess.capabilities?.includes("view");
   const canViewOperations = certificateSession && certificateAccess?.capabilities?.includes("ops_view");
+  const canViewRetentions=certificateSession&&certificateAccess?.capabilities?.includes('view_collections');
   const [visitedOperations,setVisitedOperations]=useState(false);
   useEffect(()=>{
     if (activeTab==="project-operations" && canViewOperations) setVisitedOperations(true);
@@ -2931,12 +2940,19 @@ function App() {
           username: currentUser.username || currentUser.display_name || "",
           company: bootstrap?.company?.company_name || "",
         });
-        const data = await api.request(`/api/events?${query.toString()}`);
-        const events = data?.events || [];
+        const results=await Promise.allSettled([
+          api.request(`/api/events?${query.toString()}`),
+          canViewRetentions?api.request(`/api/certificates/retentions/notices?locale=${uiLanguage}`,{headers:{Authorization:`Bearer ${certificateSession}`}}):Promise.resolve({events:[]}),
+        ]);
+        const events=results.flatMap(result=>result.status==='fulfilled'?result.value?.events||[]:[])
+          .filter(event=>event.source!=='retention'||localStorage.getItem(`retention-dismiss:${currentUser.id}:${event.id}`)!=='1')
+          .map(event=>event.source==='retention'?{...event,seen:localStorage.getItem(`retention-seen:${currentUser.id}:${event.id}`)==='1'}:event);
         if (cancelled) return;
         setManagerEvents(events.filter((event) => event.in_app_enabled));
         for (const event of events.filter((item) => item.windows_enabled)) {
-          if (event.notified || notifiedManagerEventIdsRef.current.has(event.id)) {
+          try{
+          const notificationKey=event.source==='retention'?`retention-notified:${currentUser.id}:${event.id}`:null;
+          if (event.notified || notifiedManagerEventIdsRef.current.has(event.id)||(notificationKey&&localStorage.getItem(notificationKey)==='1')) {
             continue;
           }
           notifiedManagerEventIdsRef.current.add(event.id);
@@ -2944,7 +2960,7 @@ function App() {
             await window.priceOfferDesktop.showNotification({
               title: event.title,
               body: event.message,
-              section: "settings",
+              section: event.source==='retention'?'retentions':'settings',
             });
           } else if ("Notification" in window) {
             if (Notification.permission === "default") {
@@ -2954,10 +2970,12 @@ function App() {
               new Notification(event.title, { body: event.message });
             }
           }
-          await api.request(`/api/events/${event.id}/notified`, {
+          if(notificationKey)localStorage.setItem(notificationKey,'1');
+          else await api.request(`/api/events/${event.id}/notified`, {
             method: "POST",
             body: JSON.stringify({ user_id: currentUser.id }),
           }).catch(() => null);
+          }catch{notifiedManagerEventIdsRef.current.delete(event.id);}
         }
       } catch {
         if (!cancelled) setManagerEvents([]);
@@ -2967,10 +2985,12 @@ function App() {
     const timer = window.setInterval(loadEvents, 60 * 1000);
     const onFocus = () => loadEvents();
     window.addEventListener("focus", onFocus);
+    window.addEventListener('easycommercial-finance-updated',onFocus);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener('easycommercial-finance-updated',onFocus);
     };
   }, [
     api,
@@ -2978,6 +2998,7 @@ function App() {
     currentUser?.display_name,
     currentUser?.id,
     currentUser?.username,
+    canViewRetentions,certificateSession,uiLanguage,refreshKey,
   ]);
 
   useEffect(() => {
@@ -3207,6 +3228,12 @@ function App() {
   async function updateManagerEventState(eventId, action) {
     if (!currentUser?.id) return;
     try {
+      if(String(eventId).startsWith('retention:')){
+        if(action==='open'){requestTabChange('retentions');return;}
+        localStorage.setItem(`retention-${action==='dismiss'?'dismiss':'seen'}:${currentUser.id}:${eventId}`,'1');
+        setManagerEvents(current=>action==='dismiss'?current.filter(event=>event.id!==eventId):current.map(event=>event.id===eventId?{...event,seen:true}:event));
+        return;
+      }
       await api.request(`/api/events/${eventId}/${action}`, {
         method: "POST",
         body: JSON.stringify({ user_id: currentUser.id }),
@@ -4325,7 +4352,7 @@ function App() {
             </div>
           </div>
           <nav className="main-nav" data-localized>
-            {NAV_ITEMS.filter(({id})=>id!=="project-operations"||canViewOperations).map(({ id, label, sidebarLabelEn, icon: Icon }) => (
+            {NAV_ITEMS.filter(({id})=>id==='project-operations'?canViewOperations:id==='customer-data'?canViewCertificates:id==='retentions'?canViewRetentions:true).map(({ id, label, sidebarLabelEn, icon: Icon }) => (
               <button
                 key={id}
                 data-nav-id={id}
@@ -4528,6 +4555,12 @@ function App() {
             {uiLanguage==="ar"?"يلزم إذن عرض عمليات المشروعات.":"Project Operations viewing permission is required."}
           </div>}
 
+          {activeTab==='customer-data'&&canViewCertificates&&<Suspense fallback={<LoadingOverlay/>}><CustomersData {...{api,session:certificateSession,access:certificateAccess,uiLanguage}}/></Suspense>}
+          {activeTab==='retentions'&&canViewRetentions&&<Suspense fallback={<LoadingOverlay/>}><Retentions {...{api,apiBase,session:certificateSession,access:certificateAccess,uiLanguage,refreshKey}}
+            saveNativeReport={window.Capacitor?.isNativePlatform?.()?(blob,name)=>saveNativeReport(blob,name,{folder:'Retentions'}):undefined}
+            shareNativeReport={window.Capacitor?.isNativePlatform?.()?shareNativeReport:undefined}/></Suspense>}
+          {['customer-data','retentions'].includes(activeTab)&&!(activeTab==='customer-data'?canViewCertificates:canViewRetentions)&&<div className="notice">
+            {uiLanguage==='ar'?'يلزم إذن عرض هذا القسم.':'Viewing permission is required.'}</div>}
           {activeTab === "dashboard" && (
             <section className="panel certificate-entry" data-localized>
               <div className="certificate-entry-copy">
@@ -17468,19 +17501,20 @@ function SummaryTable({ rows }) {
   );
 }
 
-function ManagerEventCenter({ events = [], onAction }) {
+function ManagerEventCenter({ events = [], onAction,uiLanguage='ar' }) {
+  const t=(ar,en)=>uiLanguage==='ar'?ar:en;
   return (
     <section className="panel manager-event-center">
       <details open={events.length > 0}>
         <summary>
           <span>
-            <Bell size={18} /> التنبيهات والعروض
+            <Bell size={18} /> {t('التنبيهات والعروض','Notifications and offers')}
           </span>
           <strong>{events.length}</strong>
         </summary>
         <div className="manager-event-list">
           {!events.length && (
-            <div className="empty-state">لا توجد تنبيهات نشطة حالياً.</div>
+            <div className="empty-state">{t('لا توجد تنبيهات نشطة حالياً.','No active notifications.')}</div>
           )}
           {events.map((event) => {
             const style = event.style || {};
@@ -17495,7 +17529,7 @@ function ManagerEventCenter({ events = [], onAction }) {
                 }}
               >
                 <div className="manager-event-card-head">
-                  <span>{event.event_type === "offer" ? "عرض" : event.event_type === "warning" ? "تحذير" : "معلومة"}</span>
+                  <span>{event.event_type === "offer" ? t('عرض','Offer') : event.event_type === "warning" ? t('تنبيه','Alert') : t('معلومة','Information')}</span>
                   <small>{event.created_at ? formatUserDateTime(event.created_at) : ""}</small>
                 </div>
                 <h3>{event.title}</h3>
@@ -17508,9 +17542,10 @@ function ManagerEventCenter({ events = [], onAction }) {
                     </div>
                   )}
                 <div className="manager-event-actions">
+                  {event.source==='retention'&&<button type="button" onClick={()=>onAction?.(event.id,'open')}>{t('فتح المحتجزات','Open retentions')}</button>}
                   {!event.seen && (
                     <button type="button" onClick={() => onAction?.(event.id, "seen")}>
-                      <Check size={16} /> تمت القراءة
+                      <Check size={16} /> {t('تمت القراءة','Mark as read')}
                     </button>
                   )}
                   <button
@@ -17518,7 +17553,7 @@ function ManagerEventCenter({ events = [], onAction }) {
                     className="ghost"
                     onClick={() => onAction?.(event.id, "dismiss")}
                   >
-                    <X size={16} /> إخفاء
+                    <X size={16} /> {t('إخفاء','Dismiss')}
                   </button>
                 </div>
               </article>
@@ -18688,6 +18723,7 @@ function SettingsView({
       <ManagerEventCenter
         events={managerEvents}
         onAction={onManagerEventAction}
+        uiLanguage={uiLanguage}
       />
       <section className="panel application-version-panel">
         <div className="panel-head">

@@ -52,7 +52,10 @@ const dependencies = {
   curtain_walls:{opening_type:"opening_unit"},
   louvers:{mesh:"screen"},
 };
-const doorExtras = [{key:"fixed_panels",en:"Fixed panels",ar:"عدد الأجزاء الثابتة",type:"number"}];
+const doorExtras = [{key:"fixed_panels",en:"Fixed panels",ar:"عدد الأجزاء الثابتة",type:"number"},
+  {key:"perimeter",ar:"البرور",en:"Perimeter trims",type:"sides"}];
+const trimFields=[{key:"trim_type",ar:"نوع البرور",en:"Architrave type",options:["عدل","بومبيه"]},
+  {key:"trim_size_cm",ar:"مقاس البرور (سم)",en:"Architrave size (cm)",type:"number"}];
 const slidingLocks=[
   {key:"lock_right",en:"Right-hand lock type",ar:"نوع قفل الضلفة اليمنى",minLeaves:2,type:"text"},
   {key:"lock_left",en:"Left-hand lock type",ar:"نوع قفل الضلفة اليسرى",minLeaves:2,type:"text"},
@@ -65,7 +68,7 @@ const glassType={key:"glass_type",en:"Glass type",ar:"نوع الزجاج",type:
 const glassCompositionKeys=new Set(["layers","outside_glass","outside_thickness","spacer_thickness","cavity","inside_glass","inside_thickness","interlayer"]);
 const glassCompositionFields=categories.get("glass").fields.filter(({key})=>glassCompositionKeys.has(key));
 const categoryFields=(kind)=>[...(categories.get(kind)?.fields||[]).filter(({key})=>!["coating_direction","glass_type"].includes(key)).map(named),
-  ...(kind==="doors"?doorExtras:[]),...(kind==="windows"?[{key:"vent_size",ar:"مقاس الشفاط (مم)",en:"Vent size (mm)",type:"text"}]:[]),...(openings.has(kind)?[...slidingLocks,
+  ...(kind==="doors"?doorExtras:[]),...(openings.has(kind)?trimFields:[]),...(kind==="windows"?[{key:"vent_size",ar:"مقاس الشفاط (مم)",en:"Vent size (mm)",type:"text"}]:[]),...(openings.has(kind)?[...slidingLocks,
     {key:"frames_per_opening",ar:"عدد الحلوق لكل فتحة",en:"Frames per opening",type:"number"}]:[]),
   ...(glassCategories.has(kind)?[glassType]:[]),
   ...(glassCategories.has(kind)&&kind!=="windows"?[{key:"glazing",en:"Glazing",ar:"نوع التزجيج",type:"text",options:["Single","Double","Triple"]}]:[]),
@@ -86,7 +89,12 @@ function configuration(db, category, id) {
   if (!id) return null;
   const stored = db.get("SELECT * FROM ops_systems WHERE id=? AND category=?",[id,category]);
   if (!stored) fail(400,"Select a configuration from the selected category");
-  return {...stored,tags:parse(stored.tags,[]),fields:parse(stored.fields,[])};
+  const seed=categories.get(category)?.systems.find(system=>system.id===id);
+  return {...stored,ar:seed&&stored.ar===stored.en?seed.ar:stored.ar,tags:parse(stored.tags,[]),fields:parse(stored.fields,[])};
+}
+
+function openingDefaults(category,input={}){
+  return openings.has(category)?{viewing:"Inside",perimeter:[...directions],...input}:input;
 }
 
 function fieldsFor(category, system, data = {}, includePopulated = false) {
@@ -97,6 +105,7 @@ function fieldsFor(category, system, data = {}, includePopulated = false) {
   if (/laminat|مصفح|رقائقي/i.test(data.glass_type||"")) tags.add("laminated");
   const specific = [...categoryFields(category),...(system?.fields||[])];
   return [...common,...specific].filter((field)=>{
+    if(trimFields.some(item=>item.key===field.key)&&(!Array.isArray(data.perimeter)||!data.perimeter.length))return false;
     if(field.populatedOnly&&(data[field.key]==null||data[field.key]===""))return false;
     if (includePopulated && data[field.key]!=null && data[field.key]!=="" &&
         (!Array.isArray(data[field.key]) || data[field.key].length)) return true;
@@ -113,7 +122,8 @@ function catalogueForClient(db) {
     categories:catalogue.categories.map((category)=>({
       ...category,fields:categoryFields(category.id),
       systems:systems.filter((s)=>s.category===category.id).map((s)=>({
-        ...category.systems.find((entry)=>entry.id===s.id), ...s, tags:parse(s.tags,[]),fields:parse(s.fields,[]),
+        ...category.systems.find((entry)=>entry.id===s.id), ...s, ar:s.ar===s.en?(category.systems.find(entry=>entry.id===s.id)?.ar||s.ar):s.ar,
+        tags:parse(s.tags,[]),fields:parse(s.fields,[]),
       })),
     })),
   };
@@ -145,6 +155,7 @@ function cleanFrame(frame) {
 }
 
 function cleanTechnical(db, category, system, input = {}, nested = false) {
+  input=openingDefaults(category,input);
   const result = {};
   for (const {key,type,en} of fieldsFor(category,system,input)) {
     if (input[key] == null || input[key] === "") continue;
@@ -176,6 +187,7 @@ function cleanTechnical(db, category, system, input = {}, nested = false) {
   if (input.panel_counts && typeof input.panel_counts === "object")
     result.panel_counts = Object.fromEntries(panels.filter((kind)=>input.panel_counts[kind] !== "" && input.panel_counts[kind] != null)
       .map((kind)=>[kind,number(input.panel_counts[kind],"panel count",{integer:true})]));
+  for(const key of ["viewing","perimeter"])if(input[key]===null||input[key]==="")result[key]=null;
   return result;
 }
 
@@ -258,4 +270,4 @@ function initializeSystems(db) {
 }
 
 module.exports = {categories, approvalParts, directions, panels, systemSeeds, configuration, catalogueForClient, fieldsFor,
-  cleanTechnical, dimensions, estimatedArea, loadingQuantities,frameQuantity,screenQuantity,perimeterDescription, extensionFields, initializeSystems, number};
+  cleanTechnical,openingDefaults, dimensions, estimatedArea, loadingQuantities,frameQuantity,screenQuantity,perimeterDescription, extensionFields, initializeSystems, number};

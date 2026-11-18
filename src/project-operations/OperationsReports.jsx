@@ -7,16 +7,18 @@ const stageNames={specifications:["استكمال المواصفات","Specifica
   completed:["مكتمل","Completed"],review:["مراجعة التعديلات","Changes to review"]};
 const unit=(name,locale)=>locale==="ar"?({"m²":"م²","l.m":"م.ط",Pcs:"عدد",kg:"كجم"}[name]||name):name;
 
-function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNativeReport,shareNativeReport,disabled}) {
+export function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNativeReport,shareNativeReport,disabled,endpoint,reportType='project-operations'}) {
   const [pdf,setPdf]=useState(null),[error,setError]=useState(null),[busy,setBusy]=useState(false);
   const [reportLanguage,setReportLanguage]=useState(uiLanguage);
   const abort=useRef(null),frame=useRef(null);
+  const filterKey=JSON.stringify(filters);
+  useEffect(()=>{abort.current?.abort();setPdf(null);setBusy(false);},[filterKey,endpoint]);
   useEffect(()=>()=>abort.current?.abort(),[]);
   useEffect(()=>()=>{if(pdf)URL.revokeObjectURL(pdf.url);},[pdf]);
   async function preview(){
     abort.current?.abort();const controller=new AbortController();abort.current=controller;setBusy(true);setError(null);
     try{
-      const response=await fetch(`${apiBase.replace(/\/$/,"")}/api/project-operations/reports/${kind}/pdf`,{method:"POST",signal:controller.signal,
+      const response=await fetch(`${apiBase.replace(/\/$/,"")}${endpoint||`/api/project-operations/reports/${kind}/pdf`}`,{method:"POST",signal:controller.signal,
         headers:{"Content-Type":"application/json",Authorization:`Bearer ${session}`},body:JSON.stringify({...filters,locale:reportLanguage})});
       if(!response.ok)throw new Error((await response.json().catch(()=>null))?.error||`HTTP ${response.status}`);
       const blob=await response.blob(),disposition=response.headers.get("content-disposition")||"";
@@ -29,9 +31,9 @@ function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNativeRepo
     try{
       const bytes=new Uint8Array(await pdf.blob.arrayBuffer());
       if(print&&window.priceOfferDesktop?.openReportPreview)await window.priceOfferDesktop.openReportPreview({bytes,fileName:pdf.name});
-      else if(!print&&window.priceOfferDesktop?.saveReportFile)await window.priceOfferDesktop.saveReportFile({bytes,fileName:pdf.name,format:"pdf",reportType:"project-operations"});
+      else if(!print&&window.priceOfferDesktop?.saveReportFile)await window.priceOfferDesktop.saveReportFile({bytes,fileName:pdf.name,format:"pdf",reportType});
       else if(print&&shareNativeReport)await shareNativeReport(pdf.blob,pdf.name);
-      else if(!print&&saveNativeReport)await saveNativeReport(pdf.blob,pdf.name,{reportType:"project-operations"});
+      else if(!print&&saveNativeReport)await saveNativeReport(pdf.blob,pdf.name,{reportType});
       else if(print){frame.current?.contentWindow?.focus();frame.current?.contentWindow?.print();}
       else{const link=document.createElement("a");link.href=pdf.url;link.download=pdf.name;link.click();}
     }catch(cause){setError(cause);}
@@ -43,7 +45,7 @@ function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNativeRepo
     {pdf&&<><button type="button" onClick={()=>output()}>{t("تنزيل PDF","Download PDF")}</button>
       <button type="button" onClick={()=>output(true)}>{t("فتح للطباعة","Open for printing")}</button>
       <button type="button" onClick={()=>setPdf(null)}>{t("إغلاق المعاينة","Close preview")}</button></>}
-  </div><ErrorMessage error={error}/>{pdf&&!shareNativeReport&&<iframe ref={frame} className="ops-preview" title={t("معاينة التقرير","Report preview")} src={pdf.url}/>}</div>;
+  </div><ErrorMessage error={error}/>{pdf&&!shareNativeReport&&<iframe ref={frame} className="ops-preview pc-preview" title={t("معاينة التقرير","Report preview")} src={pdf.url}/>}</div>;
 }
 
 export function RunningProjects(props){

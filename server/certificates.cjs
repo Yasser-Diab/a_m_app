@@ -6,7 +6,7 @@ const {
   featureEnabled, getGrant, getUserGrant, hasManagerRole, idOf, inScope, initializeSessionSecret, issueCertificateSession,
   certificateSessionUser, revokeCertificateSession, lookup, parse, scopeSql, setGrant, setting, setSetting, str, today,
 } = require("./certificate-access.cjs");
-const {initializeMasterCodes, getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, updateProject, createLocation,
+const {initializeMasterCodes, getProject, getCustomer, customerData,saveCustomerData,createCustomer, saveCustomerProfile, createProject, updateProject, createLocation,
   projectLookupKeys, projectLocations, projectEntrySuggestions, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, addReceipt, updateReceipt, changeReceipt, collectionResponse} = require("./certificate-ledger.cjs");
 const {getRevision, certificateDocumentInput, certificateNumber, createDraft, saveDraft, runAction, forAccess, recognizedReceipts,previewOperationalQuantities,carryForwardLines} = require("./certificate-revisions.cjs");
@@ -21,6 +21,7 @@ const {
   resumeCertificateRenders, registerCertificateDocumentRoutes,
 } = require("./certificate-documents.cjs");
 const {certificateReportOptions} = require("./certificate-document-model.cjs");
+const {retentionReport,retentionNotices,retentionHtml}=require('./certificate-retentions.cjs');
 const {initializeCertificateNumbers}=require("./certificate-numbering.cjs");
 const {reconcile:reconcileOperations} = require("./project-operations/finance.cjs");
 
@@ -75,13 +76,14 @@ function projectsResponse(database, req, access) {
   const matches = lookup(req.query.q);
   const rows = database.all(`
     SELECT id,name,alternate_name,customer_id,code,address,contract_ref,contract_date,currency,
-      json_extract(raw_json,'$.name_history') AS name_history FROM cert_projects
+      json_extract(raw_json,'$.name_history') AS name_history,json_extract(raw_json,'$.customer_project_code') AS customer_project_code FROM cert_projects
     WHERE ${scope.clause} AND (? IS NULL OR customer_id=?)
       AND (? = '' OR search_name LIKE ? OR alternate_name LIKE ? OR code LIKE ? OR contract_ref LIKE ? OR address LIKE ?
-        OR EXISTS (SELECT 1 FROM json_each(cert_projects.raw_json,'$.name_history') WHERE value LIKE ?))
+        OR EXISTS (SELECT 1 FROM json_each(cert_projects.raw_json,'$.name_history') WHERE value LIKE ?)
+        OR json_extract(raw_json,'$.customer_project_code') LIKE ?)
     ORDER BY created_at DESC,id DESC LIMIT 200
   `, [...scope.params,customerId,customerId,matches,`%${matches}%`,`%${str(req.query.q)}%`,`%${matches}%`,`%${str(req.query.q)}%`,
-    `%${str(req.query.q)}%`,`%${str(req.query.q)}%`]);
+    `%${str(req.query.q)}%`,`%${str(req.query.q)}%`,`%${str(req.query.q)}%`]);
   return rows.map(({name_history,...row}) => ({...row,search_aliases:parse(name_history,[])}));
 }
 
@@ -231,7 +233,7 @@ function reportResponse(database, req, access) {
   return {items,totals,currencies,location_id:locationId,work_cutoff:workCutoff,collection_cutoff:collectionCutoff};
 }
 
-function registerCertificateRoutes(app, database, dataDir, { branding = () => ({}), appVersion = "" } = {}) {
+function registerCertificateRoutes(app, database, dataDir, { branding = () => ({}), appVersion = "",renderPdf } = {}) {
   const router = express.Router();
   app.use("/api/certificates",router);
   router.use((req,_res,next) => {
@@ -251,6 +253,14 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     return {project:getProject(database,projectId),access};
   };
   const admin = (req) => adminAccess(database,req);
+  router.get('/retentions',(req,res)=>res.json(retentionReport(database,checked(req,'view_collections'),req.query)));
+  router.get('/retentions/notices',(req,res)=>res.json({events:retentionNotices(database,checked(req,'view_collections'),req.query.locale)}));
+  router.post('/retentions/pdf',async(req,res,next)=>{try{
+    const access=checked(req,'view_collections');checked(req,'export');
+    const data=retentionReport(database,access,req.body||{}),locale=req.body?.locale==='en'?'en':'ar';
+    const pdf=await renderPdf(retentionHtml(data,{locale,branding:branding()}),{report_language:locale});
+    res.type('pdf').set('Content-Disposition',`attachment; filename="Retentions-${today()}.pdf"`).send(pdf);
+  }catch(error){next(error);}});
   const detail = (row,access) => forAccess(database,row,access);
   const printInput = (model, user, options = {}) => {
     const settings = getProfile(database, model.project_id).settings;
@@ -356,6 +366,17 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
       return {...getCustomer(database,saved.id),created:saved.created};
     });
     res.status(customer.created ? 201 : 200).json(customer);
+  });
+  function scopedCustomer(req,capability){
+    const access=checked(req,capability),id=idOf(req.params.customerId),scope=scopeSql(access,'cp.id');
+    if(!access.all_projects&&!database.get(`SELECT 1 FROM cert_projects cp WHERE cp.customer_id=? AND ${scope.clause}`,[id,...scope.params]))fail(404,'Customer not found');
+    return {access,id};
+  }
+  router.get('/customers/:customerId',(req,res)=>{const {id}=scopedCustomer(req,'view');res.json(customerData(database,id));});
+  router.put('/customers/:customerId',(req,res)=>{
+    const {access,id}=scopedCustomer(req,'create_master');
+    if(!hasMasterPermission(access))fail(403,'Company settings permission is required to edit customer data');
+    res.json(database.transaction(()=>saveCustomerData(database,id,req.body,access.user)));
   });
   router.put("/customers/:customerId/settings",(req,res) => {
     const access = checked(req,"manage_settings");

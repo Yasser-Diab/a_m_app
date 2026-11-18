@@ -4,7 +4,7 @@ const {decimal} = require("./certificate-valuation.cjs");
 const {certificateLocationFields} = require("./document-locations.cjs");
 const {audit, currency, date, encode, fail, idOf, lookup, parse, setting, setSetting, str, today} = require("./certificate-access.cjs");
 const RULE_CATEGORIES = ["vat", "retention", "contractor_withholding", "engineering_stamp",
-  "social_insurance", "works_insurance", "other", "advance_recovery"];
+  "social_insurance", "works_insurance", "final_insurance", "other", "advance_recovery"];
 const DEFAULT_SETTINGS = {minimum_area: 0, quantity_precision: 4, count_precision: 0,
   collections_basis: "received", work_types: [], work_items: [], output_mode: "auto"};
 
@@ -73,6 +73,7 @@ function getProject(database, id) {
   const project = database.get(`
     SELECT cp.id,cp.customer_id,cp.name,cp.alternate_name,cp.code,cp.address,cp.contract_ref,
            cp.contract_date,cp.currency,cp.created_at,json_extract(cp.raw_json,'$.name_history') AS name_history,
+           json_extract(cp.raw_json,'$.customer_project_code') AS customer_project_code,
            COALESCE(json_extract(cp.raw_json,'$.workbook_project_missing'),0) AS historical_only,p.display_name AS customer_name
     FROM cert_projects cp JOIN parties p ON p.id=cp.customer_id WHERE cp.id=?
   `, [id]);
@@ -83,7 +84,7 @@ function getProject(database, id) {
 function getCustomer(database, id) {
   const customer = database.get(`
     SELECT p.id,p.base_name AS name,p.display_name,p.category,p.address,p.tax_no,
-      c.code,c.alternate_name,c.print_contact
+      c.code,c.alternate_name,c.print_contact,json_extract(c.raw_json,'$.company_data.commercial_registration') AS registration_no
     FROM parties p LEFT JOIN cert_customer_profiles c ON c.customer_id=p.id
     WHERE p.id=? AND p.role='customer'
   `, [id]);
@@ -133,6 +134,24 @@ function saveCustomerProfile(database, customerId, input, {fromWorkbook = false}
     input.raw ? encode(input.raw) : null]);
 }
 
+function customerData(database,id){
+  const customer=getCustomer(database,id),party=database.get('SELECT phone,email,notes FROM parties WHERE id=?',[id]);
+  const raw=parse(database.get('SELECT raw_json FROM cert_customer_profiles WHERE customer_id=?',[id])?.raw_json,{});
+  return {...customer,...party,...raw.company_data};
+}
+function saveCustomerData(database,id,input,user){
+  getCustomer(database,id);
+  const raw=parse(database.get('SELECT raw_json FROM cert_customer_profiles WHERE customer_id=?',[id])?.raw_json,{});
+  const keys=['legal_name','commercial_registration','vat_registration','tax_office','billing_address','contact_name','contact_position','website'];
+  raw.company_data={...raw.company_data,...Object.fromEntries(keys.map(key=>[key,str(input[key],2000)]))};
+  database.run('UPDATE parties SET address=?,tax_no=?,phone=?,email=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [str(input.address,2000),str(input.tax_no),str(input.phone),str(input.email),str(input.notes,4000),id]);
+  database.run(`INSERT INTO cert_customer_profiles(customer_id,raw_json) VALUES(?,?)
+    ON CONFLICT(customer_id) DO UPDATE SET raw_json=excluded.raw_json`,[id,encode(raw)]);
+  audit(database,user,'customer_data_updated',{details:{customer_id:id}});
+  return customerData(database,id);
+}
+
 function createProject(database, input, userId = null, {fromWorkbook = false} = {}) {
   const customer = getCustomer(database, idOf(input.customer_id));
   const name = str(input.name);
@@ -147,7 +166,7 @@ function createProject(database, input, userId = null, {fromWorkbook = false} = 
     INSERT INTO cert_projects (customer_id,name,search_name,alternate_name,code,address,contract_ref,contract_date,currency,raw_json,created_by)
     VALUES (?,?,?,?,?,?,?,?,?,?,?)
   `, [customer.id, name, searchName, str(input.alternate_name), code, address, contract,
-    date(input.contract_date, true), currency(input.currency), input.raw ? encode(input.raw) : null, userId]);
+    date(input.contract_date, true), currency(input.currency), encode({...input.raw,customer_project_code:str(input.customer_project_code)}), userId]);
   return {id: record.lastInsertRowid, created: true};
 }
 
@@ -174,6 +193,7 @@ function updateProject(database, project, body) {
     fail(409, "A project already uses that name, address and contract for this customer");
   const current = database.get("SELECT raw_json FROM cert_projects WHERE id=?", [project.id]);
   const raw = parse(current.raw_json) ?? {};
+  if(Object.hasOwn(body,'customer_project_code'))raw.customer_project_code=str(body.customer_project_code);
   const currentNames = new Set([searchName,lookup(alternateName),""]);
   const previousNames = [...parse(project.name_history,[]),project.name,project.alternate_name];
   raw.name_history = [...new Set(previousNames.filter((previous) => !currentNames.has(lookup(previous))))];
@@ -238,7 +258,8 @@ function getProfile(database, projectId, at = today(), version = null) {
 function cleanRules(input) {
   if (!Array.isArray(input) || input.length > 30) fail(400, "Enter up to 30 rules");
   let advanceRules = 0;
-  return input.map((entry) => {
+  const keys=new Set();
+  return input.map((entry,index) => {
     const category = str(entry?.category);
     if (!RULE_CATEGORIES.includes(category)) fail(400, "Unknown financial rule");
     const rate = entry.rate == null || entry.rate === "" ? null : str(entry.rate, 40);
@@ -251,7 +272,10 @@ function cleanRules(input) {
     if (rate !== null && decimal(rate) > decimal(100)) fail(400, "Percentage rate cannot exceed 100");
     if (category === "advance_recovery" && ++advanceRules > 1) fail(400, "Configure a single advance recovery rule");
     if (rate !== null && amount !== null) fail(400, "Choose a percentage or a fixed amount for each rule");
-    return {category, label: str(entry.label), rate, amount, cap,
+    const key=str(entry.key,100)||`${category}:${index}`;
+    if(keys.has(key))fail(400,'Financial rules must have distinct identifiers');keys.add(key);
+    return {key,category, label: str(entry.label), rate, amount, cap,
+      collection_date:date(entry.collection_date,true),refundable:entry.refundable===true,
       basis: entry.basis === "running" ? "running" : "work",
       sign: entry.sign === "addition" || (category === "vat" && entry.sign !== "deduction") ? "addition" : "deduction",
       enabled: entry.enabled !== false};
@@ -320,6 +344,6 @@ function checkedLocation(database, projectId, locationId) {
   return locationId;
 }
 
-module.exports = {initializeMasterCodes, getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, updateProject,
+module.exports = {initializeMasterCodes, getProject, getCustomer, customerData,saveCustomerData,createCustomer, saveCustomerProfile, createProject, updateProject,
   projectLookupKeys, projectLocations, projectEntrySuggestions,
   createLocation, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation};

@@ -1,4 +1,5 @@
 import {ErrorMessage} from "./shared.jsx";
+import {openingDefaults} from './terminology.js';
 
 export function editSpecification(item,previous,key,next) {
   const patch=previous||{id:item.id,version:item.version,base:{technical:{}},technical:{}};
@@ -16,7 +17,7 @@ export function editSpecification(item,previous,key,next) {
 
 export function applySpecificationEdits(item,patch) {
   return {...item,category:patch?.category??item.category,system:patch?.system??item.system,
-    technical:{...item.technical,...patch?.technical}};
+    technical:openingDefaults(patch?.category??item.category,{...item.technical,...patch?.technical})};
 }
 
 export function resolveSpecificationEdits(patches,conflicts,keepMine) {

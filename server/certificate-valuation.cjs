@@ -1,4 +1,5 @@
 const {certificateLocationFields} = require("./document-locations.cjs");
+const {isHold,ruleKey,applyHold}=require('./certificate-retention-math.cjs');
 const SCALE = 1_000_000_000_000n;
 const MAX = 90_000_000_000;
 const UNIT_FACTORS = {mm: 1_000_000_000n, cm: 10_000_000_000n, m: SCALE};
@@ -213,17 +214,22 @@ function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=fa
   let net = current;
   const components = [];
   const recoveries = [];
-  for (const rule of profile.rules) {
+  const holds=new Map((baseline?.totals?.holds||[]).map(hold=>[hold.key,hold])),processedHolds=new Set();
+  for (const [ruleIndex,rule] of profile.rules.entries()) {
     if (!rule.enabled || (recoverAdvance&&rule.category!=="advance_recovery")) continue;
     const priorWork=recoverAdvance?BigInt(toMinor(baseline?.totals?.current)||0):0n;
     const recoveryCapacity=net+(recoverAdvance?BigInt(toMinor(baseline?.totals?.current_earned)||0):0n);
     if (rule.category==="advance_recovery"&&recoveryCapacity<=0n) continue;
-    const base = rule.basis === "running" ? net : current+priorWork;
-    let value = rule.amount === null
+    let base = rule.basis === "running" ? net : current+priorWork;
+    const completedRelease=rule.category==='works_insurance'&&!rule.collection_date;
+    const eligibleWork=completedRelease?calculated.reduce((sum,{line})=>sum+(Number(line.cumulative_progress)>=100?0n:BigInt(toMinor(line.current)||0)),0n):current;
+    if(completedRelease)base=rule.basis==='running'&&current!==0n?
+      divide(base*eligibleWork*(current<0n?-1n:1n),current<0n?-current:current):eligibleWork;
+    let value = rule.amount == null
       ? divide(multiply(base * (SCALE / 100n), decimal(rule.rate) ?? 0n), 100n)
-      : decimal(rule.amount) || 0n;
+      : completedRelease&&eligibleWork<=0n?0n:decimal(rule.amount) || 0n;
     let delta = moneyMinorBig(value);
-    if (rule.cap !== null) {
+    if (rule.cap != null) {
       const cap = BigInt(toMinor(rule.cap) || 0);
       if (delta > cap) delta = cap;
       if (delta < -cap) delta = -cap;
@@ -244,10 +250,25 @@ function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=fa
         advance.available_minor -= Number(used);
       }
     }
+    let retained=null;
+    if(isHold(rule)){
+      const key=ruleKey(rule,ruleIndex),priorHold=holds.get(key);
+      retained=applyHold({rule,index:ruleIndex,prior:priorHold,lines:calculated.map(item=>item.line),delta,minor:toMinor,money,round:divide});
+      delta=retained.delta;holds.set(key,retained.hold);processedHolds.add(key);
+      if(rule.category==='works_insurance'&&!rule.collection_date&&delta===0n&&retained.balance===0n)continue;
+    }
     const movement = rule.sign === "addition" && rule.category !== "advance_recovery" ? delta : -delta;
     components.push({category: rule.category, label: rule.label, basis: rule.basis, base: money(base),
-      amount: money(movement), rate: rule.rate, rule_version: profile.version});
+      amount: money(movement), rate: rule.rate, rule_version: profile.version,
+      ...(retained?{rule_key:retained.hold.key,previous:-money(retained.previous),cumulative:-money(retained.balance)}:{})});
     net += movement;
+  }
+  if(!recoverAdvance)for(const [key,hold]of holds){
+    if(processedHolds.has(key)||hold.category!=='works_insurance'||hold.collection_date)continue;
+    const result=applyHold({rule:{...hold,key,amount:null},index:hold.rule_index,prior:hold,lines:calculated.map(item=>item.line),delta:0n,minor:toMinor,money,round:divide});
+    holds.set(key,result.hold);
+    if(result.delta!==0n){net-=result.delta;components.push({category:hold.category,label:hold.label,basis:'work',base:0,amount:-money(result.delta),
+      previous:-money(result.previous),cumulative:-money(result.balance),rule_key:key,rule_version:profile.version});}
   }
 
   const previousNet = BigInt(toMinor(baseline?.totals?.cumulative_earned) || 0);
@@ -278,6 +299,7 @@ function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=fa
       ...(ledger.advances.length ? {advance_remaining:money(ledger.advances.reduce((sum,advance) =>
         sum + Math.min(advance.outstanding_minor,advance.available_minor),0))} : {}),
       reversed_advance_recovery: money(releasedRecovery), current_reversed_advance_recovery: money(periodReleased), components,
+      holds:[...holds.values()],
       groups: rankedGroups.map((group) => ({
         work_type: group.work_type, previous: money(group.previous), current: money(group.current),
         cumulative: money(group.previous + group.current), last_current: baseline ? money(group.last_current) : null,

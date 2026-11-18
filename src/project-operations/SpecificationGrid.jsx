@@ -6,7 +6,7 @@ import {
   normalizeSmartNumericClipboardValue,parseSmartClipboardGrid,
 } from "../smart-table-clipboard.mjs";
 import {SpecificationError,applySpecificationEdits,editSpecification,resolveSpecificationEdits} from "./specification-edits.jsx";
-import {technicalText,fieldOptions,configurationTags,perimeterText} from "./terminology.js";
+import {technicalText,fieldOptions,configurationTags,perimeterText,hasTrim} from "./terminology.js";
 
 const mainKeys=["tag","category","system","quantity","width_mm","height_mm","profile","color","infill"];
 const lockColumns=["leaves","lock_right","lock_left","central_lock_handle"];
@@ -29,7 +29,7 @@ function fieldAvailable(catalogue,row,key) {
   const tags=catalogue.conditional[row.category]?.[key];
   const activeTags=configurationTags(system,row.technical);
   const depends=catalogue.dependencies[row.category]?.[key];
-  return (!part.populatedOnly||row.technical[key]!=null&&row.technical[key]!=="")&&(!tags||tags.split(" ").some((tag)=>activeTags.has(tag)))
+  return hasTrim(key,row.technical)&&(!part.populatedOnly||row.technical[key]!=null&&row.technical[key]!=="")&&(!tags||tags.split(" ").some((tag)=>activeTags.has(tag)))
     && (!depends||enabled(row.technical[depends])) && (!part.minLeaves||Number(row.technical.leaves)>=part.minLeaves);
 }
 

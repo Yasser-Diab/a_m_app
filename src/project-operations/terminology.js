@@ -1,4 +1,6 @@
 import values from "../../server/project-operations/translations.json";
+export const openingDefaults=(category,technical={})=>["windows","doors"].includes(category)?{viewing:"Inside",perimeter:["right","left","top","bottom"],...technical}:technical;
+export const hasTrim=(key,technical)=>!["trim_type","trim_size_cm"].includes(key)||Array.isArray(technical.perimeter)&&technical.perimeter.length>0;
 export const technicalText=(value,locale)=>values[value]?.[locale==="ar"?0:1]??value;
 export const coatingValue=(value)=>({"Inside":"للداخل","Outside":"للخارج","Inward":"للداخل","Outward":"للخارج",
   "Inside cavity":"داخل الكتلة","من الداخل":"للداخل","من الخارج":"للخارج"})[value]||value;

@@ -18,7 +18,7 @@ const categoryLabels = {
   vat: ["ضريبة القيمة المضافة", "VAT"], retention: ["احتجاز الضمان", "Retention"],
   contractor_withholding: ["خصم تحت حساب الضريبة", "Contractor withholding"],
   engineering_stamp: ["دمغة هندسية", "Engineering stamp"], social_insurance: ["تأمينات اجتماعية", "Social insurance"],
-  works_insurance: ["تأمين الأعمال", "Works insurance"], other: ["تسوية أخرى", "Other adjustment"],
+  works_insurance: ["تأمينات الأعمال", "Works retention"],final_insurance:["تأمين نهائي","Final retention"], other: ["تسوية أخرى", "Other adjustment"],
   advance_recovery: ["استرداد الدفعة المقدمة", "Advance recovery"],
 };
 
@@ -87,7 +87,7 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
       show_unit_subtotals:settings.show_unit_subtotals ?? (settings.show_group_subtotals && oldGroup === "unit"),
       show_work_type_subtotals:settings.show_work_type_subtotals ?? (settings.show_group_subtotals && oldGroup === "work_type")};
   });
-  const [ruleDraft, setRuleDraft] = useState(() => (profile.rules || []).map((rule) => ({ ...rule, key: newKey() })));
+  const [ruleDraft, setRuleDraft] = useState(() => (profile.rules || []).map((rule,index) => ({ ...rule, key: rule.key||`${rule.category}:${index}` })));
   const [types, setTypes] = useState(() => (settings.work_types || project.work_types || []).map((type) => typeof type === "string" ? type : optionLabel(type)).filter(Boolean).join("\n"));
   const [signatures, setSignatures] = useState(() => (settings.signatures || []).map((person) => ({...person, key: newKey()})));
   const [busy, setBusy] = useState(false);
@@ -119,7 +119,7 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
       await request(`/projects/${project.id}/settings`, { method: "PUT", body: {
         expected_version: profile.latest_version ?? profile.version ?? 0,
         reason, effective_at: effectiveAt,
-        rules: ruleDraft.map(({ key, ...rule }) => ({ ...rule, rate: numberText(rule.rate), amount: numberText(rule.amount), cap: numberText(rule.cap) })),
+        rules: ruleDraft.map(rule => ({ ...rule, rate: numberText(rule.rate), amount: numberText(rule.amount), cap: numberText(rule.cap) })),
         work_types: workTypes,
         settings: { ...draft, minimum_area: draft.minimum_area === "" || draft.minimum_area == null ? "inherit" : numberText(draft.minimum_area), quantity_precision: draft.quantity_precision === "" ? "inherit" : draft.quantity_precision, count_precision: draft.count_precision === "" ? "inherit" : draft.count_precision, work_types: workTypes,
           signatures: signatures.map(({ name, title }) => ({ name, title })),
@@ -188,6 +188,11 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
           <Field label={t("الحد الأقصى", "Cap")}><input dir="ltr" inputMode="decimal" value={rule.cap ?? ""} onChange={(event) => updateRule(rule.key, "cap", event.target.value)} /></Field>
           <Field label={t("أساس الحساب", "Calculation basis")}><select value={rule.basis || "work"} onChange={(event) => updateRule(rule.key, "basis", event.target.value)}><option value="work">{t("قيمة الأعمال", "Work value")}</option><option value="running">{t("الرصيد بعد القواعد السابقة", "Balance after earlier rules")}</option></select></Field>
           <Field label={t("الأثر", "Effect")}><select value={rule.sign || "deduction"} onChange={(event) => updateRule(rule.key, "sign", event.target.value)}><option value="addition">{t("إضافة", "Addition")}</option><option value="deduction">{t("خصم", "Deduction")}</option></select></Field>
+          {rule.sign!=='addition'&&rule.category!=='advance_recovery'&&<>
+            <Field label={t('تاريخ تحصيل الاستقطاع (اختياري — داخلي)','Retention collection date (optional — internal)')}><input type="date" dir="ltr" value={rule.collection_date||''} onChange={event=>updateRule(rule.key,'collection_date',event.target.value)}/></Field>
+            {!['retention','final_insurance','works_insurance'].includes(rule.category)&&<label className="pc-check"><input type="checkbox" checked={Boolean(rule.refundable)} onChange={event=>updateRule(rule.key,'refundable',event.target.checked)}/>{t('استقطاع مسترد','Refundable deduction')}</label>}
+            {rule.category==='works_insurance'&&!rule.collection_date&&<p className="pc-caption">{t('يُرد المحتجز السابق وتتوقف خصومات البند عند اكتماله 100%.','Previously held amounts are released and deductions stop when the item reaches 100%.')}</p>}
+          </>}
         </div>
       </div>)}
       {!taxRules.length && <p className="pc-caption">{t("لم تضاف ضرائب أو استقطاعات إضافية.", "No additional taxes or deductions are listed.")}</p>}

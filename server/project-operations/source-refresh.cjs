@@ -2,7 +2,7 @@ const {createHash}=require('node:crypto');
 const {encode,parse,idOf,fail,lookup}=require('../certificate-access.cjs');
 const {getProject,projectLookupKeys}=require('../certificate-projects.cjs');
 const {operation,itemValues,getItem,record}=require('./core.cjs');
-const {configuration,loadingQuantities}=require('./specifications.cjs');
+const {configuration,loadingQuantities,openingDefaults}=require('./specifications.cjs');
 
 function sourcePlan(db,projectId,documentId){
   const state=operation(db,projectId),project=getProject(db,projectId),id=idOf(documentId)||state.boq_id;
@@ -52,9 +52,9 @@ function refreshSource(db,projectId,body,user){
   const changed=[];
   for(const {row,item}of matches){
     const values=itemValues(row),saved=defaults.get(values.description),standard=parse(saved?.technical,{}),base=item?parse(item.technical,{}):standard;
-    const technical={...base,building:row.building_unit||'',room:row.floor_apartment||'',
+    const technical=openingDefaults(item?.category||saved?.category,{...base,building:row.building_unit||'',room:row.floor_apartment||'',
       profile:row.profile_spec||base.profile||'',infill:row.glass_spec||base.infill||'',color:row.color||base.color||'',width_mm:values.width_mm,height_mm:values.height_mm,
-      quantity:Number.isInteger(row.item_count)&&row.item_count>0?row.item_count:null};
+      quantity:Number.isInteger(row.item_count)&&row.item_count>0?row.item_count:null});
     let id=item?.id;
     if(item){
       db.run(`UPDATE ops_items SET source_line_id=?,commercial=?,technical=?,active=1,version=version+1,financial_version=financial_version+1 WHERE id=?`,
