@@ -26,6 +26,7 @@ const {legacySnapshot} = require("./certificate-history.cjs");
 const {getProject: getCertificateProject, projectLocations: certificateLocations} = require("./certificate-projects.cjs");
 const {addReceipt: addCertificateReceipt} = require("./certificate-ledger.cjs");
 const {initializeOperations,registerOperations,isAdjustment: isOpsAdjustment} = require("./project-operations/index.cjs");
+const {deleteDocumentEverywhere}=require("./project-operations/document-deletion.cjs");
 const {
   fetchManagerSubscriptionStatus,
   registerManagerGatewayRoutes,
@@ -10128,8 +10129,6 @@ async function createServer(options = {}) {
 
   app.delete("/api/documents/:id", (req, res) => {
     const documentId = Number(req.params.id);
-    if (isOpsAdjustment(database,documentId))
-      return res.status(409).json({error:"This linked invoice adjustment is part of the operational audit trail"});
     const current = database.get(
       "SELECT * FROM documents WHERE id = ? AND deleted_at IS NULL",
       [documentId],
@@ -10141,35 +10140,17 @@ async function createServer(options = {}) {
       });
     }
     try {
-      database.db.exec("BEGIN TRANSACTION");
-      const deleteItems = database.db.prepare(
-        "DELETE FROM work_items WHERE document_id = ?",
-      );
-      const deleteDocument = database.db.prepare(
-        "DELETE FROM documents WHERE id = ?",
-      );
-      try {
-        deleteItems.run([documentId]);
-        deleteDocument.run([documentId]);
-      } finally {
-        deleteItems.free();
-        deleteDocument.free();
-      }
-      database.db.exec("COMMIT");
-      database.save();
+      const user=certificateSessionUser(database,req);
+      const removed=database.transaction(()=>deleteDocumentEverywhere(database,current,user));
       res.json({
         ok: true,
         id: documentId,
+        removed,
         operation_no: current.operation_no,
         message: "Document and all related rows were permanently deleted.",
       });
     } catch (error) {
-      try {
-        database.db.exec("ROLLBACK");
-      } catch {
-        // The original deletion error is more useful.
-      }
-      res.status(500).json({ error: `Could not delete document: ${error.message}` });
+      res.status(error.status||500).json({ error: `Could not delete document: ${error.message}` });
     }
   });
 

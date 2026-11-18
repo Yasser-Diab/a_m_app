@@ -9,6 +9,7 @@ const specs = require("./specifications.cjs");
 const production = require("./production.cjs");
 const finance = require("./finance.cjs");
 const management = require("./management-reports.cjs");
+const sourceRefresh=require("./source-refresh.cjs");
 const {report,appendDrawings,reportFilename} = require("./reports.cjs");
 const {awardReference}=require("./references.cjs");
 
@@ -138,6 +139,8 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   get(base,(_,__,id)=>core.projectContext(db,id));
   post(base,"ops_edit",(req,access,id)=>core.setup(db,getProject(db,id),idOf(req.body.boq_id),access.user,req.body.approval_date));
   post(base+"/boqs","ops_edit",(req,access,id)=>core.setup(db,getProject(db,id),idOf(req.body.boq_id),access.user,req.body.approval_date));
+  get(base+"/source-refresh",(req,_,id)=>sourceRefresh.previewSource(db,id,req.query),'ops_edit');
+  post(base+"/source-refresh",'ops_edit',(req,access,id)=>sourceRefresh.refreshSource(db,id,req.body,access.user));
   patch(base,"ops_edit",(req,access,id)=>core.changeProjectDetails(db,core.operation(db,id),req.body,access.user));
   patch(base+"/signatures","ops_edit",(req,access,id)=>core.saveReportSignatures(db,core.operation(db,id),req.body,access.user));
   get(base+"/people",(_,access,id)=>core.people(db,id,access.capabilities.includes("ops_edit")));

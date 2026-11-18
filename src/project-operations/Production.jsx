@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from "react";
 import {Dialog,localDate,newKey,useDebounce,useResource} from "../certificates/shared.jsx";
 import {ErrorMessage,Page,Pick,Suggest,Table,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
 import ProjectSignatures from "./ProjectSignatures.jsx";
+import SourceRefresh from './SourceRefresh.jsx';
 
 const checkLabels={measurements:["المقاسات","Measurement conformity"],profile:["القطاعات","Profile conformity"],
   finish:["التشطيب","Finish"],glass:["الزجاج","Glass"],opening:["اتجاه الفتح والمقابض","Opening and handles"],
@@ -28,6 +29,7 @@ export default function Production(props) {
         <button type="button" onClick={()=>setCreate("maintenance")}>{t("أمر صيانة جديد","New maintenance order")}</button>
       </>}
     </div>
+    <SourceRefresh {...props}/>
     {totals&&<div className="pc-cards">
       {[[t("المطلوب للتحميل","Required"),totals.required],[t("محمل","Loaded"),totals.loaded],[t("متبقي","Remaining"),totals.remaining],
         [t("اكتمال التحميل","Loading completion"),completion]].map(([label,value])=><div key={label}><span>{label}</span>

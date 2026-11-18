@@ -108,13 +108,11 @@ function stable(value) {
 function groupedWork(db,items,locale,drawingSets) {
   const buckets=new Map();
   const groups=[];
-  const populated=(value,key)=>value!=null&&value!==""&&(!Array.isArray(value)||value.length>0||key==="perimeter");
+  const populated=(value,key)=>value!=null&&(typeof value!=="string"||value.trim()!=="")&&(!Array.isArray(value)||value.length>0||key==="perimeter");
   const prepared=[];
   for (const [index,item] of items.entries()) {
     const source=item.specification;
     const technical={...source.technical};
-    for (const [key,commercial] of [["profile","profile"],["infill","glass"],["finish","finish"]])
-      if (!technical[key]&&source.commercial[commercial]) technical[key]=source.commercial[commercial];
     const spec={...source,technical};
     const shared=Object.fromEntries(Object.entries(spec.technical).filter(([key,value])=>
       !dimensionFields.has(key)&&!internalFields.has(key)&&populated(value,key)));
@@ -177,7 +175,7 @@ function groupedWork(db,items,locale,drawingSets) {
     const pairs=[
       [t("نوع العمل","Work type"),categories.get(spec.category)?.[locale]],
       [t("النظام","System"),localized(spec.system_label,locale)],
-      ...fieldsFor(spec.category,system,tech,true).filter(({key})=>!dimensionFields.has(key)&&!internalFields.has(key)&&!locks.has(key))
+      ...fieldsFor(spec.category,system,tech,true).filter(({key})=>populated(tech[key],key)&&!dimensionFields.has(key)&&!internalFields.has(key)&&!locks.has(key))
         .map((field)=>{
           const specified=items.filter((item)=>populated(item.reportTechnical[field.key],field.key));
           return [field[locale],field.key==="perimeter"?perimeterDescription(tech[field.key],locale):field.key==="coating_direction"?text(({Inside:"للداخل",Outside:"للخارج"})[tech[field.key]]||tech[field.key]):text(tech[field.key]),
@@ -188,10 +186,12 @@ function groupedWork(db,items,locale,drawingSets) {
     pairs.push(...supplemental(tech,system));
     const integrated=tech.integrated?.system?configuration(db,tech.integrated.category,tech.integrated.system):null;
     if (integrated) pairs.push([t("وحدة الفتح المدمجة","Integrated opening"),integrated[locale]],
-      ...fieldsFor(tech.integrated.category,integrated,tech.integrated.spec,true).filter(({key})=>!internalFields.has(key)&&!locks.has(key))
+      ...fieldsFor(tech.integrated.category,integrated,tech.integrated.spec,true).filter(({key})=>populated(tech.integrated.spec[key],key)&&!internalFields.has(key)&&!locks.has(key))
         .map((field)=>[field[locale],field.key==="perimeter"?perimeterDescription(tech.integrated.spec[field.key],locale):text(tech.integrated.spec[field.key])]),...supplemental(tech.integrated.spec,integrated));
     const size=(value)=>value==null?"":value;
     const hasLocation=items.some(({specification})=>["building","floor","room"].some((key)=>specification.technical[key]));
+    const hasWidth=items.some(({specification})=>specification.technical.width_mm!=null);
+    const hasHeight=items.some(({specification})=>specification.technical.height_mm!=null);
     const hasDepth=items.some(({specification})=>specification.technical.depth_mm!=null);
     const hasDrawing=items.some(({specification})=>specification.technical.drawing_ref);
     const changedDimensions=(item)=>{
@@ -204,7 +204,7 @@ function groupedWork(db,items,locale,drawingSets) {
       const data=item.specification.technical;
       const net=item.specification.manufacturing_dimensions;
       return row([data.tag||item.specification.code,...(hasLocation?[[data.building,data.floor,data.room].filter(Boolean).join(" / ")]:[]),
-        item.quantity,size(data.width_mm),size(data.height_mm),...(hasDepth?[size(data.depth_mm)]:[]),
+        item.quantity,...(hasWidth?[size(data.width_mm)]:[]),...(hasHeight?[size(data.height_mm)]:[]),...(hasDepth?[size(data.depth_mm)]:[]),
         ...(hasDrawing?[data.drawing_ref]:[]),...(hasDeductions?[changedDimensions(item)?net.width+" × "+net.height:""]:[])]);
     }).join("");
     const imageHtml=drawings.length?'<div class="drawings">'+drawings.map(({name,mime,content})=>mime==="application/pdf"
@@ -213,7 +213,7 @@ function groupedWork(db,items,locale,drawingSets) {
         '"><figcaption>'+escape(name)+"</figcaption></figure>").join("")+"</div>":"";
     return '<section class="work-group"><p class="item-number">'+escape(t(`البند ${groupIndex+1} من ${groups.length}`,`Item ${groupIndex+1} of ${groups.length}`))+
       '</p><h3>'+escape(spec.commercial.description)+'</h3><table class="measurements"><thead>'+
-      row([t("الفتحة","Opening"),...(hasLocation?[t("الموقع","Location")]:[]),t("العدد","Count"),t("العرض مم","Width mm"),t("الارتفاع مم","Height mm"),
+      row([t("الفتحة","Opening"),...(hasLocation?[t("الموقع","Location")]:[]),t("العدد","Count"),...(hasWidth?[t("العرض مم","Width mm")]:[]),...(hasHeight?[t("الارتفاع مم","Height mm")]:[]),
         ...(hasDepth?[t("العمق مم","Depth mm")]:[]),...(hasDrawing?[t("مرجع الرسم","Drawing reference")]:[]),
         ...(hasDeductions?[t("مقاس التصنيع بعد التخصيم مم","Manufacturing after deduction mm")]:[])],"th")+
       "</thead><tbody>"+measures+'</tbody></table><div class="shared-specifications">'+grid(pairs)+"</div>"+imageHtml+"</section>";

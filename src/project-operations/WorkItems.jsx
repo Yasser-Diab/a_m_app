@@ -3,6 +3,7 @@ import {Dialog,Field,localDate,newKey,useDebounce,useResource} from "../certific
 import {ErrorMessage,Page,Pick,Table,Text,display,options,panelNames,quantity,states,useAction,usePaged} from "./shared.jsx";
 import SpecificationGrid from "./SpecificationGrid.jsx";
 import GroupedSpecifications from "./GroupedSpecifications.jsx";
+import SourceRefresh from './SourceRefresh.jsx';
 import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText} from "./terminology.js";
 
 const commonParts={
@@ -89,7 +90,7 @@ function SpecEditor({draft,change,catalogue,t,locale,nested=false}) {
   const specific=[...(category?.fields||[]),...(system?.fields||[])].filter((field)=>{
     const required=catalogue.conditional[draft.category]?.[field.key];
     const dependency=catalogue.dependencies[draft.category]?.[field.key];
-    return (!required||required.split(" ").some((tag)=>tags.has(tag))) && (!dependency||valid(spec[dependency]))
+    return (!field.populatedOnly||spec[field.key]!=null&&spec[field.key]!=="")&&(!required||required.split(" ").some((tag)=>tags.has(tag))) && (!dependency||valid(spec[dependency]))
       && (!field.minLeaves||Number(spec.leaves)>=field.minLeaves);
   });
   const opening=["windows","doors"].includes(draft.category);
@@ -312,11 +313,12 @@ export function WorkItems(props) {
         {spreadsheet?t("استمارة المواصفات","Specifications form"):t("عرض الجدول","Spreadsheet")}</button>}
       {linked&&spreadsheet&&can("edit")&&<button type="button" onClick={()=>setId("new")}>{t("بند إضافي","Propose an extra item")}</button>}
     </div>
+    {linked&&<SourceRefresh {...props} documentId={Number(boqId)}/>}
     {!linked&&can("edit")&&<div><button type="button" className="primary" disabled={attach.busy}
       onClick={()=>attach.run(path+"/boqs","POST",{boq_id:Number(boqId)})}>{t("فتح استمارة المواصفات","Open specifications form")}</button></div>}
     <ErrorMessage error={list.error||item.error||attach.error}/>
     <div hidden={!linked||spreadsheet}>
-      <GroupedSpecifications {...props} boqId={linked?boqId:null} openItem={setId}/>
+      <GroupedSpecifications key={boqId+':'+(source?.import_fingerprint||'')} {...props} boqId={linked?boqId:null} openItem={setId}/>
     </div>
     {visitedSheet&&<div hidden={!linked||!spreadsheet} className="pc-stack">
       <div className="pc-form">
@@ -324,7 +326,7 @@ export function WorkItems(props) {
         <Pick label={t("الفئة","Category")} value={category} placeholder={t("كل الفئات","All categories")}
           onChange={(next)=>{setCategory(next);list.setPage(1);}} items={catalogue.categories.map((cat)=>[cat.id,cat[uiLanguage]])}/>
       </div>
-      <SpecificationGrid {...props} items={linked?list.data?.items||[]:[]} openItem={setId}
+      <SpecificationGrid key={boqId+':'+(source?.import_fingerprint||'')} {...props} items={linked?list.data?.items||[]:[]} openItem={setId}
         pageKey={JSON.stringify([boqId,q,category,list.data?.page])} pagination={<Page data={list.data} onPage={list.setPage} t={t}/>}/>
     </div>}
     {(id==="new"||item.data)&&<ItemDialog {...props} key={id+":"+(item.data?.version||0)} mode={id==="new"?"new":"edit"}

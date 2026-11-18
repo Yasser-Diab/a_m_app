@@ -18,6 +18,7 @@ export function perimeterText(value,locale) {
 export function configurationTags(system,technical={}) {
   const tags=new Set(system?.tags||[]);
   if (Number(technical.fixed_panels)>0) tags.add("fixed_panel");
+  if(Number(technical.top_fixed_height)>0||Number(technical.bottom_fixed_height)>0||/upper|lower|علوي|سفلي/i.test(technical.tilt_fixed||""))tags.add("fixed_panel");
   if (/double|triple|دبل|مزدوج|ثلاثي/i.test(technical.glazing||"")) tags.add("insulated");
   if (/laminat|مصفح|رقائقي/i.test(technical.glass_type||"")) tags.add("laminated");
   return tags;

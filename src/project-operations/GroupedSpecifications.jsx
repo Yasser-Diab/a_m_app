@@ -17,12 +17,13 @@ const labels={
   rubber_bar:["جلدة التثبيت","Rubber glazing gasket"],perimeter:["البرور","Perimeter trims"],
 };
 const sides={right:["يمين","Right"],left:["شمال","Left"],top:["علوي","Top"],bottom:["سفلي","Bottom"]};
-const LOOKUP_FIELDS=["hinge_side","opening_direction","fixed_position","tilt_fixed","top_fixed_height","bottom_fixed_height",
-  "vent_opening","vent_position","vent_width","vent_height","vent_direction","perimeter","rubber_bar","interlock_right","interlock_left",
+const LOOKUP_FIELDS=["hinge_side","opening_direction","fixed_panels","fixed_position","tilt_fixed","top_fixed_height","bottom_fixed_height",
+  "perimeter","rubber_bar","interlock_right","interlock_left",
   "interlock_right_mm","interlock_left_mm","reflective","georgian","georgian_configuration",
   "layers","outside_glass","outside_thickness","spacer_thickness","cavity","inside_glass","inside_thickness","interlayer"];
 const CORE_FIELDS=["profile","color","finish","glass_type","infill","glass_thickness","glass_color","glazing","coating_direction"];
 const LOCK_FIELDS=["leaves","frames_per_opening","lock_right","lock_left","central_lock_handle","screen","screen_type","screen_leaves","hinge","lock","handle","roller"];
+const VENT_FIELDS=["vent_opening","vent_position","vent_size","vent_width","vent_height","vent_direction"];
 
 function together(rows,get) {
   const sample=get(rows[0])??"";
@@ -93,7 +94,7 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
     const specific=catalogue.categories.find(({id})=>id===item.category)?.systems.find(({id})=>id===item.system);
     const activeTags=configurationTags(specific,item.technical);
     const dependency=item.technical[depends];
-    return (!tags||tags.split(" ").some((tag)=>activeTags.has(tag)))&&
+    return (!field.populatedOnly||item.technical[key]!=null&&item.technical[key]!=="")&&(!tags||tags.split(" ").some((tag)=>activeTags.has(tag)))&&
       (!depends||Boolean(dependency)&&!["لا","بدون","لا ينطبق","no","none","n/a"].includes(String(dependency).toLowerCase()))&&
       (!field.minLeaves||Number(item.technical.leaves)>=field.minLeaves);
   };
@@ -168,6 +169,9 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
       {LOCK_FIELDS.some(visible)&&<fieldset className="ops-paper-fields" disabled={!editAllowed||busy}>
         <legend>{t("الضلف والأقفال والسلك","Leaves, locks & screens")}</legend>
         <div className="pc-form">{controls(LOCK_FIELDS)}</div>
+      </fieldset>}
+      {VENT_FIELDS.some(visible)&&<fieldset className="ops-paper-fields" disabled={!editAllowed||busy}>
+        <legend>{t("الشفاط","Vent")}</legend><div className="pc-form">{controls(VENT_FIELDS)}</div>
       </fieldset>}
       {LOOKUP_FIELDS.some(visible)&&<details className="ops-paper-details">
         <summary>{t("تفاصيل الفتح والزجاج والتسكيك","Opening, glass & interlock details")}</summary>

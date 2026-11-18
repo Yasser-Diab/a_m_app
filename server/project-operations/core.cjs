@@ -533,4 +533,4 @@ function projectContext(db,id) {
 
 module.exports = {authorizeOperations,record,pageOptions,projectChoices,projectContext,operation,setup,changeProjectDetails,getItem,
   itemPage,specificationGroups,updateItem,saveSpecifications,rememberSpecification,resolveProject,proposeItem,submitChange,getChange,changePage,reviewChange,
-  people,addPerson,updateAssignment,responsibilityKeys,contacts,dashboard,selection,saveReportSignatures};
+  people,addPerson,updateAssignment,responsibilityKeys,contacts,dashboard,selection,saveReportSignatures,itemValues};

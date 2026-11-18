@@ -4,7 +4,7 @@ const crypto = require("node:crypto");
 const path = require("node:path");
 const os = require("node:os");
 const {createServer} = require("../server/index.cjs");
-const {dimensions, estimatedArea, fieldsFor, configuration,loadingQuantities,perimeterDescription} = require("../server/project-operations/specifications.cjs");
+const {dimensions, estimatedArea, fieldsFor, configuration,loadingQuantities,perimeterDescription,cleanTechnical} = require("../server/project-operations/specifications.cjs");
 const {PDFDocument} = require("pdf-lib");
 
 async function main() {
@@ -531,6 +531,98 @@ async function main() {
       const bytes=await api(ops+"/reports/"+kind+"/pdf","POST",{locale,include_completed:"1",mode:"project",...(kind==="quantities"?{project_id:compactProject.id}:{})});
       await fs.writeFile(path.join(process.env.AM_OPERATIONS_TEST_PDF,"management-"+kind+"-"+locale+".pdf"),bytes);
     }
+    const refreshDoc=seedBoq(customer.id,"Source refresh project",5500,"005500","invoice",["Refresh slider","Removed opening"]);
+    await api('/documents/'+refreshDoc,'PUT',{status:'approved'});
+    const refreshProject=await api(ops+'/resolve-project','POST',{document_id:refreshDoc,project:'Source refresh project'});
+    const refreshPath=ops+'/projects/'+refreshProject.id;
+    await api(refreshPath,'POST',{boq_id:refreshDoc});
+    const beforeRefresh=(await api(refreshPath+'/items')).items;
+    for(const item of beforeRefresh)await api(refreshPath+'/items/'+item.id,'PATCH',{version:item.version,code:item.code,category:'windows',system:'windows-8',
+      technical:{...item.technical,leaves:2,profile:'Customer series',infill:'Clear tempered',vent_opening:true,vent_size:'250',rubber_bar:false,lock_left:'Left latch',lock_right:'Right latch'},remember:true});
+    const customerDefaults=db.all('SELECT * FROM ops_customer_specs WHERE customer_id=? ORDER BY description',[customer.id]);
+    const openOrder=await api(refreshPath+'/orders','POST',{items:beforeRefresh.map(item=>({item_id:item.id,quantity:1}))});
+    const openPath=refreshPath+'/orders/'+openOrder.id;
+    const signState=(await api(refreshPath)).operations;
+    await api(refreshPath+'/signatures','PATCH',{version:signState.version,kind:'manufacturing',signatures:[{name:'Source signatory',side:'company'}]});
+    const sourceLines=db.all('SELECT * FROM work_items WHERE document_id=? ORDER BY id',[refreshDoc]);
+    db.run('UPDATE work_items SET item_count=2,width_cm=135,rate=420,total_quantity=2,quantity=2 WHERE id=?',[sourceLines[0].id]);
+    db.run("UPDATE work_items SET deleted_at=CURRENT_TIMESTAMP WHERE id=?",[sourceLines[1].id]);
+    db.run(`INSERT INTO work_items(document_id,party_id,project,description,item_count,width_cm,height_cm,total_quantity,quantity,unit,unit_code,rate)
+      VALUES (?,?,?,'Refresh slider',1,160,170,1,1,'Pcs','count',430)`,[refreshDoc,customer.id,'Source refresh project']);
+    let sourcePreview=await api(refreshPath+'/source-refresh?document_id='+refreshDoc);
+    assert.equal(sourcePreview.updated,1);assert.equal(sourcePreview.added,1);assert.equal(sourcePreview.removed,1);assert.equal(sourcePreview.refreshable_orders,1);
+    await api(refreshPath+'/source-refresh','POST',{...sourcePreview,document_id:refreshDoc},400);
+    await api(refreshPath+'/source-refresh','POST',{...sourcePreview,document_id:refreshDoc,confirm:true,fingerprint:'stale'},409);
+    const refreshed=await api(refreshPath+'/source-refresh','POST',{...sourcePreview,document_id:refreshDoc,confirm:true});
+    assert.equal(refreshed.refreshable_orders,1);
+    let refreshedItems=(await api(refreshPath+'/items')).items;
+    assert.equal(refreshedItems.filter(item=>item.active).length,2);
+    const refreshedOriginal=refreshedItems.find(item=>item.id===beforeRefresh[0].id);
+    assert.equal(refreshedOriginal.commercial.rate,420);assert.equal(refreshedOriginal.technical.quantity,2);assert.equal(refreshedOriginal.technical.width_mm,1350);
+    assert.equal(refreshedOriginal.original.width_mm,1100);
+    let updatedOrder=await api(openPath);
+    assert.equal(updatedOrder.items.length,2);assert.equal(updatedOrder.items.reduce((sum,item)=>sum+item.quantity,0),3);
+    assert.ok(updatedOrder.items.every(item=>item.specification.technical.profile==='Customer series'));
+    assert.deepEqual(db.all('SELECT * FROM ops_customer_specs WHERE customer_id=? ORDER BY description',[customer.id]),customerDefaults);
+    assert.equal((await api(refreshPath)).operations.details.report_signatures.manufacturing[0].name,'Source signatory');
+    const tilted=configuration(db,'windows','windows-4'),slider=configuration(db,'windows','windows-8');
+    for(const system of [tilted,slider]){
+      assert.ok(fieldsFor('windows',system,{}).some(field=>field.key==='vent_opening'));
+      assert.ok(!fieldsFor('windows',system,{}).some(field=>field.key==='vent_size'));
+      assert.ok(fieldsFor('windows',system,{vent_opening:true}).some(field=>field.key==='vent_size'));
+      assert.ok(!fieldsFor('windows',system,{vent_opening:true}).some(field=>field.key==='vent_position'));
+      const withFixed=fieldsFor('windows',system,{vent_opening:true,fixed_panels:1});
+      assert.deepEqual(withFixed.find(field=>field.key==='vent_position').options,['Right','Left','Centre','In leaf']);
+    }
+    assert.equal(cleanTechnical(db,'windows',tilted,{vent_opening:true,vent_size:'250',fixed_panels:1,vent_position:'Centre'}).vent_position,'Centre');
+    assert.equal(cleanTechnical(db,'windows',tilted,{vent_opening:false,vent_size:'250'}).vent_size,undefined);
+    const sparse=db.all('SELECT id,specification FROM ops_order_items WHERE order_id=?',[openOrder.id]);
+    for(const row of sparse){const spec=JSON.parse(row.specification);spec.technical={quantity:1,leaves:2,vent_opening:true,vent_size:'250',rubber_bar:false,divider_width:0};
+      spec.commercial.profile='Do not restore a cleared profile';spec.commercial.glass='Do not restore cleared infill';
+      db.run('UPDATE ops_order_items SET specification=? WHERE id=?',[JSON.stringify(spec),row.id]);}
+    const sparseReport=await api(openPath+'/report','POST',{kind:'manufacturing',classification:'materials',locale:'en'});
+    for(const missing of ['Do not restore','Perimeter','Width mm','Height mm','Glass type','Infill','Vent position'])assert.ok(!sparseReport.html.includes(missing),missing);
+    assert.ok(sparseReport.html.includes('Vent size (mm)')&&sparseReport.html.includes('250')&&sparseReport.html.includes('Rubber bar'));
+    for(const row of sparse){const item=updatedOrder.items.find(item=>item.id===row.id);db.run('UPDATE ops_order_items SET specification=? WHERE id=?',[JSON.stringify(item.specification),row.id]);}
+    for(const stage of [...cat.approvalParts,'manufacturing','pre_shipment'])await api(openPath+'/approvals','POST',{stage,approved:true});
+    updatedOrder=await api(openPath);
+    const loadItem=updatedOrder.items[0];
+    const dispatcher=await api(refreshPath+'/people','POST',{side:'company',name:'Refresh dispatcher',position:'Dispatch',responsibility:'loading'});
+    await api(openPath+'/loading','POST',{command_key:crypto.randomUUID(),responsible:{loading:dispatcher.id},lines:Object.entries(loadItem.quantities).map(([kind,quantity])=>({order_item_id:loadItem.id,kind,quantity}))});
+    const history=db.get('SELECT specification FROM ops_order_items WHERE id=?',[loadItem.id]).specification;
+    db.run('UPDATE work_items SET item_count=3,width_cm=140 WHERE id=?',[sourceLines[0].id]);
+    sourcePreview=await api(refreshPath+'/source-refresh?document_id='+refreshDoc);
+    assert.equal(sourcePreview.historical_orders,1);assert.equal(sourcePreview.refreshable_orders,0);
+    await api(refreshPath+'/source-refresh','POST',{...sourcePreview,document_id:refreshDoc,confirm:true});
+    assert.equal(db.get('SELECT specification FROM ops_order_items WHERE id=?',[loadItem.id]).specification,history);
+    const keepDoc=seedBoq(customer.id,'Source refresh project',5501,'005501','price_offer',['Keep this opening']);
+    await api('/documents/'+keepDoc,'PUT',{status:'approved'});await api(refreshPath+'/boqs','POST',{boq_id:keepDoc});
+    const keepItem=(await api(refreshPath+'/items?boq_id='+keepDoc)).items[0];
+    await api(refreshPath+'/items/'+keepItem.id,'PATCH',{version:keepItem.version,code:keepItem.code,category:'windows',system:'windows-8',technical:{...keepItem.technical,leaves:2}});
+    const mixedOrder=await api(refreshPath+'/orders','POST',{items:[{item_id:beforeRefresh[0].id,quantity:1},{item_id:keepItem.id,quantity:1}]});
+    const changeToRemove=await api(refreshPath+'/items/'+beforeRefresh[0].id+'/changes','POST',{values:{rate:450},reason:'Delete linked adjustment with source'});
+    const reviewedRemoval=await api(refreshPath+'/changes/'+changeToRemove.id+'/review','POST',{status:'approved'});
+    const defaultsBeforeDeletion=db.all('SELECT * FROM ops_customer_specs WHERE customer_id=? ORDER BY description',[customer.id]);
+    const deleteBody={requester_user_id:manager.id};
+    await api('/documents/'+refreshDoc,'DELETE',deleteBody,409);
+    const currentState=(await api(refreshPath)).operations;
+    await api(refreshPath,'PATCH',{version:currentState.version,details:{...currentState.details,status:'موقوف'}});
+    db.run('UPDATE users SET can_change_status=1 WHERE id=?',[viewer.id]);
+    await api('/documents/'+refreshDoc,'DELETE',deleteBody,403,viewer.certificate_session);
+    const deletedSource=await api('/documents/'+refreshDoc,'DELETE',deleteBody);
+    assert.ok(deletedSource.removed.document_ids.includes(refreshDoc)&&deletedSource.removed.document_ids.includes(reviewedRemoval.adjustment_id));
+    assert.equal(db.get('SELECT id FROM documents WHERE id=?',[refreshDoc]),null);
+    assert.equal(db.get('SELECT id FROM documents WHERE id=?',[reviewedRemoval.adjustment_id]),null);
+    assert.equal(db.get('SELECT id FROM work_items WHERE document_id=?',[refreshDoc]),null);
+    assert.equal(db.get('SELECT id FROM ops_items WHERE source_document_id=?',[refreshDoc]),null);
+    assert.equal(db.get('SELECT id FROM ops_orders WHERE id=?',[openOrder.id]),null);
+    assert.equal((await api(refreshPath+'/orders/'+mixedOrder.id)).items.length,1);
+    assert.equal((await api(refreshPath)).operations.boq_id,keepDoc);
+    assert.ok(db.get('SELECT id FROM documents WHERE id=?',[keepDoc]));
+    assert.deepEqual(db.all('SELECT * FROM ops_customer_specs WHERE customer_id=? ORDER BY description',[customer.id]),defaultsBeforeDeletion);
+    await api('/documents/'+keepDoc,'DELETE',deleteBody);
+    assert.equal((await api(refreshPath)).operations,null);assert.ok(db.get('SELECT id FROM cert_projects WHERE id=?',[refreshProject.id]));
+    assert.ok(db.get("SELECT id FROM ops_audit WHERE action='source_document_deleted' AND entity_id=?",[refreshDoc]));
     assert.equal(db.all("PRAGMA foreign_key_check").length,0);
     console.log("Project Operations integration, discovery, bulk specifications, customer defaults, locks, generated references, sign-offs, finance and loading passed");
   } finally {

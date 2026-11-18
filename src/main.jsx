@@ -3909,6 +3909,19 @@ function App() {
     }
   }
 
+  useEffect(()=>{
+    function documentDeleted(event){
+      const ids=new Set((event.detail?.document_ids||[event.detail?.id]).filter(Boolean).map(String));
+      setReportContexts(current=>Object.fromEntries(Object.entries(current).map(([key,context])=>[key,{
+        ...context,reportData:null,previewUrl:'',previewKey:'',documents:(context.documents||[]).filter(item=>!ids.has(String(item.id))),
+        ...(ids.has(String(context.documentId||context.document?.id))?{documentId:'',documentSearch:'',document:null}:{}),
+      }])));
+      setRefreshKey(value=>value+1);
+    }
+    window.addEventListener('easycommercial-document-deleted',documentDeleted);
+    return()=>window.removeEventListener('easycommercial-document-deleted',documentDeleted);
+  },[]);
+
   function handleDocumentSaved(savedDocument = {}) {
     const workflowId = workflowForDocument(savedDocument);
     const partyObject = savedDocument.party_id
@@ -8644,12 +8657,15 @@ function ReportWorkspace({
     if (!document?.id) return;
     setBusy(true);
     try {
-      await api.request(`/api/documents/${document.id}`, {
+      const deletion=await api.request(`/api/documents/${document.id}`, {
         method: "DELETE",
+        headers:{Authorization:`Bearer ${currentUser?.certificate_session||""}`},
         body: JSON.stringify({ requester_user_id: currentUser?.id }),
       });
+      window.dispatchEvent(new CustomEvent('easycommercial-document-deleted',{detail:{id:document.id,document_ids:deletion?.removed?.document_ids}}));
+      const deletedIds=new Set((deletion?.removed?.document_ids||[document.id]).map(String));
       setDocuments((current) =>
-        current.filter((item) => String(item.id) !== String(document.id)),
+        current.filter((item) => !deletedIds.has(String(item.id))),
       );
       setDocumentId("");
       setDocumentSearch("");
@@ -8770,9 +8786,10 @@ function ReportWorkspace({
         dialog={
           pendingDocumentDelete
             ? {
-                title: "حذف المستند نهائياً",
-                message: `تحذير: سيتم حذف المستند ${pendingDocumentDelete.operation_no || pendingDocumentDelete.document_no || pendingDocumentDelete.id} وكل البنود المرتبطة به. لا يمكن التراجع عن هذا الإجراء.`,
-                confirmLabel: "حذف نهائي",
+                title: t("حذف المستند نهائياً","Permanently delete document"),
+                message: t(`تحذير: سيتم حذف المستند ${pendingDocumentDelete.operation_no || pendingDocumentDelete.document_no || pendingDocumentDelete.id} وبنوده وبيانات التشغيل والفحص والتحميل المرتبطة به نهائيًا. لا يمكن التراجع عن هذا الإجراء.`,
+                  `Permanently delete document ${pendingDocumentDelete.operation_no || pendingDocumentDelete.document_no || pendingDocumentDelete.id}, its entries, and its linked operations, inspections and loading records. This cannot be undone.`),
+                confirmLabel: t("حذف نهائي","Delete permanently"),
                 danger: true,
               }
             : null

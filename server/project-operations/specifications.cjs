@@ -8,7 +8,9 @@ const labels={screen:"السلك",screen_type:"نوع السلك",screen_materia
   coating_direction:"اتجاه العاكس",viewing:"تحديد اليمين والشمال من",glass_thickness:"سمك الزجاج (مم)",profile:"نوع القطاع",
   infill:"تكوين الزجاج / الحشو",interlock_right:"التسكيك يمين",interlock_left:"التسكيك شمال",
   layers:"عدد طبقات الزجاج",spacer_thickness:"سمك فاصل الزجاج (مم)",cavity:"نوع الغاز / التجويف",perimeter:"البرور"};
-const named=(field)=>labels[field.key]?{...field,ar:labels[field.key]}:field;
+const named=(field)=>({...field,...(labels[field.key]?{ar:labels[field.key]}:{}),
+  ...({vent_opening:{ar:"شفاط",en:"Vent"},vent_position:{ar:"مكان الشفاط",en:"Vent position",options:["Right","Left","Centre","In leaf"]},
+    vent_width:{populatedOnly:true},vent_height:{populatedOnly:true},vent_direction:{populatedOnly:true}}[field.key]||{})});
 const common = catalogue.common.filter(({key}) => !["item_code","project_code","customer_code","system","area","production_ref"].includes(key)).map(named);
 const categories = new Map(catalogue.categories.map((category) => [category.id,category]));
 const openings = new Set(["windows","doors"]);
@@ -29,7 +31,7 @@ const conditional = {
     roller:"sliding", lock_right:"sliding", lock_left:"sliding", central_lock_handle:"sliding",
     tilt_mode:"tilt", tilt_fixed:"tilt", tilt_arm:"tilt", tilt_arm_45:"tilt", tilt_hinges:"tilt",
     interlock_right:"sliding", interlock_right_mm:"sliding", interlock_left:"sliding", interlock_left_mm:"sliding",
-    fixed_position:"fixed fixed_panel",top_fixed_height:"fixed fixed_panel",bottom_fixed_height:"fixed fixed_panel",vent_opening:"fixed fixed_panel",
+    fixed_position:"fixed fixed_panel",top_fixed_height:"fixed fixed_panel",bottom_fixed_height:"fixed fixed_panel",vent_position:"fixed fixed_panel",
   },
   doors:{
     active_leaf:"hinged sliding",hinge_side:"hinged",opening_angle:"hinged",hinge:"hinged",closer:"hinged",
@@ -46,7 +48,7 @@ const conditional = {
 };
 const dependencies = {
   windows:{screen_type:"screen",screen_material:"screen",screen_configuration:"screen",
-    georgian_configuration:"georgian",vent_position:"vent_opening",vent_width:"vent_opening",vent_height:"vent_opening",vent_direction:"vent_opening"},
+    georgian_configuration:"georgian",vent_position:"vent_opening",vent_size:"vent_opening",vent_width:"vent_opening",vent_height:"vent_opening",vent_direction:"vent_opening"},
   curtain_walls:{opening_type:"opening_unit"},
   louvers:{mesh:"screen"},
 };
@@ -63,7 +65,7 @@ const glassType={key:"glass_type",en:"Glass type",ar:"نوع الزجاج",type:
 const glassCompositionKeys=new Set(["layers","outside_glass","outside_thickness","spacer_thickness","cavity","inside_glass","inside_thickness","interlayer"]);
 const glassCompositionFields=categories.get("glass").fields.filter(({key})=>glassCompositionKeys.has(key));
 const categoryFields=(kind)=>[...(categories.get(kind)?.fields||[]).filter(({key})=>!["coating_direction","glass_type"].includes(key)).map(named),
-  ...(kind==="doors"?doorExtras:[]),...(openings.has(kind)?[...slidingLocks,
+  ...(kind==="doors"?doorExtras:[]),...(kind==="windows"?[{key:"vent_size",ar:"مقاس الشفاط (مم)",en:"Vent size (mm)",type:"text"}]:[]),...(openings.has(kind)?[...slidingLocks,
     {key:"frames_per_opening",ar:"عدد الحلوق لكل فتحة",en:"Frames per opening",type:"number"}]:[]),
   ...(glassCategories.has(kind)?[glassType]:[]),
   ...(glassCategories.has(kind)&&kind!=="windows"?[{key:"glazing",en:"Glazing",ar:"نوع التزجيج",type:"text",options:["Single","Double","Triple"]}]:[]),
@@ -90,10 +92,12 @@ function configuration(db, category, id) {
 function fieldsFor(category, system, data = {}, includePopulated = false) {
   const tags = new Set(system?.tags || []);
   if (Number(data.fixed_panels)>0) tags.add("fixed_panel");
+  if(Number(data.top_fixed_height)>0||Number(data.bottom_fixed_height)>0||/upper|lower|علوي|سفلي/i.test(data.tilt_fixed||""))tags.add("fixed_panel");
   if (/double|triple|دبل|مزدوج|ثلاثي/i.test(data.glazing||"")) tags.add("insulated");
   if (/laminat|مصفح|رقائقي/i.test(data.glass_type||"")) tags.add("laminated");
   const specific = [...categoryFields(category),...(system?.fields||[])];
   return [...common,...specific].filter((field)=>{
+    if(field.populatedOnly&&(data[field.key]==null||data[field.key]===""))return false;
     if (includePopulated && data[field.key]!=null && data[field.key]!=="" &&
         (!Array.isArray(data[field.key]) || data[field.key].length)) return true;
     const requirement = conditional[category]?.[field.key];

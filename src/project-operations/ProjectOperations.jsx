@@ -8,6 +8,7 @@ import {WorkItems,Changes} from "./WorkItems.jsx";
 import {technicalText} from "./terminology.js";
 import Production from "./Production.jsx";
 import ProjectSignatures from "./ProjectSignatures.jsx";
+import SourceRefresh from './SourceRefresh.jsx';
 import {RunningProjects,QuantityTakeoff} from "./OperationsReports.jsx";
 
 const tabs=[
@@ -165,6 +166,7 @@ function Overview({ctx,request,path,t,can,catalogue,reload,onOpenDocument,uiLang
         {boq.document_type==="invoice"?t("الفاتورة المعتمدة","Approved invoice"):t("عرض السعر المعتمد","Approved quotation")} <bdi>{boq.operation_no}</bdi></button>
       <span className="pc-chip">{t("معتمد","Approved")}{boq.approval_date&&<> · <bdi>{boq.approval_date}</bdi></>}</span>
     </div>
+    <SourceRefresh {...{ctx,path,request,t,can,reload}}/>
     <dl className="ops-project-meta">
       {[[t("كود العميل","Customer code"),ctx.customer.code],[t("رقم المشروع","Project no."),ctx.project.code],
         [t("رقم الإسناد","Award no."),state.award_reference]].map(([name,value])=><div key={name}><dt>{name}</dt><dd><bdi>{value}</bdi></dd></div>)}

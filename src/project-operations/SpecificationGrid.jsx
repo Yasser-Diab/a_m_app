@@ -29,7 +29,7 @@ function fieldAvailable(catalogue,row,key) {
   const tags=catalogue.conditional[row.category]?.[key];
   const activeTags=configurationTags(system,row.technical);
   const depends=catalogue.dependencies[row.category]?.[key];
-  return (!tags||tags.split(" ").some((tag)=>activeTags.has(tag)))
+  return (!part.populatedOnly||row.technical[key]!=null&&row.technical[key]!=="")&&(!tags||tags.split(" ").some((tag)=>activeTags.has(tag)))
     && (!depends||enabled(row.technical[depends])) && (!part.minLeaves||Number(row.technical.leaves)>=part.minLeaves);
 }
 
