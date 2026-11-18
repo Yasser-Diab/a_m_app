@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal, flushSync } from "react-dom";
+import ReportPreviewFrame from "./report-preview.jsx";
 import {
   Activity,
   AlertTriangle,
@@ -3444,7 +3445,7 @@ function App() {
       projectFilter: doc.project || "",
       reportData,
       previewUrl,
-      previewKey: `${workflow.reportType}?${query.toString()}`,
+      previewKey: `${workflow.reportType}?${query.toString()}#${Date.now()}`,
     });
     switchToTab(workflowId);
     setMessage(
@@ -8437,7 +8438,7 @@ function ReportWorkspace({
       if (resolvedDocumentId && String(resolvedDocumentId) !== String(documentId))
         setDocumentId(String(resolvedDocumentId));
       const query = queryForResolvedDocument(resolvedDocumentId);
-      const key = `${workflow.reportType}?${query.toString()}`;
+      const key = `${workflow.reportType}?${query.toString()}#${Date.now()}`;
       const url = buildUrl(
         apiBase,
         `/api/documents/${workflow.reportType}/html?${query.toString()}`,
@@ -9316,7 +9317,7 @@ function ReportWorkspace({
             </button>
           </div>
           <div className="preview-frame-wrap">
-            <iframe title="Export preview" src={previewUrl} />
+            <ReportPreviewFrame key={previewKey} title="Export preview" url={previewUrl} session={currentUser?.certificate_session} t={t} />
           </div>
         </section>
       )}
