@@ -41,7 +41,7 @@ function projectChoices(db,access,query) {
   const key=lookup(typed);
   const numeric=key.replace(/^0+(?=\d)/,"");
   const numberSearch=/^\d+$/.test(numeric);
-  const choices=db.all(`SELECT cp.id,cp.name,cp.alternate_name,cp.code,cp.customer_id, p.display_name AS customer,
+  const choices=db.all(`SELECT cp.id,cp.name,cp.alternate_name,cp.code,cp.created_at,cp.customer_id, p.display_name AS customer,
     json_extract(cp.raw_json,'$.name_history') AS name_history, op.boq_id IS NOT NULL AS configured,
     op.award_reference FROM cert_projects cp JOIN parties p ON p.id=cp.customer_id
     LEFT JOIN ops_projects op ON op.project_id=cp.id WHERE ${scope.clause}`,scope.params);
@@ -77,7 +77,8 @@ function projectChoices(db,access,query) {
     if (!nameMatch&&!documentMatch) return [];
     return [{...entry,matched_document:documentMatch||null,source_document:documentMatch||sources.find(({status})=>status==="approved")||sources[0],
       has_approved_source:sources.some(({status})=>status==="approved")}];
-  }).sort((a,b)=>Number(Boolean(b.matched_document))-Number(Boolean(a.matched_document))||a.name.localeCompare(b.name,"ar",{numeric:true}));
+  }).sort((a,b)=>Number(Boolean(b.matched_document))-Number(Boolean(a.matched_document))||
+    String(b.created_at||"").localeCompare(String(a.created_at||""))||Number(b.id||0)-Number(a.id||0));
   return {items:found.slice(offset,offset+limit),total:found.length,page,limit};
 }
 
@@ -110,8 +111,26 @@ function projectDetails(input) {
   const result=Object.fromEntries(detailText.map((key)=>[key,str(input[key],2000)]));
   result.start_date=date(input.start_date,true);
   result.delivery_date=date(input.delivery_date,true);
+  result.report_signatures=cleanReportSignatures(input.report_signatures);
   if (result.start_date && result.delivery_date && result.delivery_date < result.start_date) fail(400,"Delivery date precedes the start date");
   return result;
+}
+
+function cleanReportSignatures(input={}) {
+  return Object.fromEntries(["manufacturing","loading","maintenance"].filter(kind=>Array.isArray(input?.[kind])).map(kind=>[kind,
+    input[kind].map(value=>{const person=value&&typeof value==="object"?value:{};return {name:str(person.name,200),title:str(person.title,200),company:str(person.company,200),
+      side:person.side==="client"?"client":"company"};}).filter(person=>person.name||person.title)]));
+}
+
+function saveReportSignatures(db,state,body,user) {
+  if(Number(body.version)!==state.version) fail(409,"Reload the project before saving signatures");
+  const kind=str(body.kind);
+  if(!["manufacturing","loading","maintenance"].includes(kind)||!Array.isArray(body.signatures)) fail(400,"Choose a report and its signatures");
+  const report_signatures={...state.details.report_signatures,...cleanReportSignatures({[kind]:body.signatures})};
+  const details={...state.details,report_signatures};
+  db.run("UPDATE ops_projects SET details=?,version=version+1 WHERE project_id=?",[encode(details),state.project_id]);
+  record(db,user,state.project_id,"report_signatures_updated",state.project_id,{kind,before:state.details.report_signatures?.[kind],after:report_signatures[kind]});
+  return operation(db,state.project_id);
 }
 
 function itemValues(row) {
@@ -195,7 +214,7 @@ function setup(db,project,boqId,user,reviewDate) {
 
 function changeProjectDetails(db,state,body,user) {
   if (Number(body.version)!==state.version) fail(409,"Reload the project before saving");
-  const details=projectDetails(body.details||{});
+  const details=projectDetails({...body.details,report_signatures:body.details?.report_signatures??state.details.report_signatures});
   db.run("UPDATE ops_projects SET details=?,version=version+1 WHERE project_id=?",[encode(details),state.project_id]);
   record(db,user,state.project_id,"project_updated",state.project_id,{before:state.details,after:details});
   return operation(db,state.project_id);
@@ -514,4 +533,4 @@ function projectContext(db,id) {
 
 module.exports = {authorizeOperations,record,pageOptions,projectChoices,projectContext,operation,setup,changeProjectDetails,getItem,
   itemPage,specificationGroups,updateItem,saveSpecifications,rememberSpecification,resolveProject,proposeItem,submitChange,getChange,changePage,reviewChange,
-  people,addPerson,updateAssignment,responsibilityKeys,contacts,dashboard,selection};
+  people,addPerson,updateAssignment,responsibilityKeys,contacts,dashboard,selection,saveReportSignatures};

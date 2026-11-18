@@ -219,6 +219,15 @@ function recognizedReceipts(ledger) {
       method:entry.method,reference:entry.reference}));
 }
 
+function carryForwardLines(database,project,input) {
+  const profile=getProfile(database,project.id),header=normalizeHeader(input,project,profile);
+  checkedLocation(database,project.id,header.location_id);
+  const baseline=scopeBaseline(database,{id:0,root_id:Number.MAX_SAFE_INTEGER,project_id:project.id,series_key:scopeKey(header)},header);
+  if(!baseline)return {lines:[],baseline:null};
+  const result=calculateValuation([],baseline,{...profile,rules:[]},{ordinary_minor:0,period_ordinary_minor:0,advances:[]});
+  return {lines:result.lines,baseline:{id:baseline.id,work_to:baseline.header.work_to}};
+}
+
 function createDraft(database, project, body, user, revision = {}) {
   if (project.historical_only && !revision.revisesId) fail(409, "Add the missing project details before creating a new certificate");
   const supplied = body.header || {};
@@ -477,4 +486,4 @@ function forAccess(database, row, access) {
 }
 
 module.exports = {getRevision, getLines, replaceLines, scopeBaseline, certificateDocumentInput, certificateNumber,
-  createDraft, requireVersion, saveDraft, runAction, forAccess, recognizedReceipts,previewOperationalQuantities};
+  createDraft, requireVersion, saveDraft, runAction, forAccess, recognizedReceipts,previewOperationalQuantities,carryForwardLines};

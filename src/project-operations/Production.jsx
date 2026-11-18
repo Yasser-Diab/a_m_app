@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from "react";
 import {Dialog,localDate,newKey,useDebounce,useResource} from "../certificates/shared.jsx";
 import {ErrorMessage,Page,Pick,Suggest,Table,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
+import ProjectSignatures from "./ProjectSignatures.jsx";
 
 const checkLabels={measurements:["المقاسات","Measurement conformity"],profile:["القطاعات","Profile conformity"],
   finish:["التشطيب","Finish"],glass:["الزجاج","Glass"],opening:["اتجاه الفتح والمقابض","Opening and handles"],
@@ -142,7 +143,7 @@ function MaintenanceDetails({order,path,request,t,can,reload,...props}) {
   </section>;
 }
 
-function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport}) {
+function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport,ctx}) {
   const [dialog,setDialog]=useState(null);
   const [reason,setReason]=useState("");
   const action=useAction(request,reload);
@@ -189,7 +190,7 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
         <bdi>{batch.lines.map((row)=>[row.code,display(panelNames,row.kind,t),row.quantity].join(" · ")).join(", ")}</bdi>,batch.notes]])}/>
     {dialog==="qc"&&<Inspection {...{order,endpoint,request,can,t,reload}} close={()=>setDialog(null)}/>}
     {dialog==="load"&&<Loading {...{order,endpoint,request,t,reload}} people={people.data||[]} close={()=>setDialog(null)}/>}
-    {["manufacturing","loadingReport","approvalReport"].includes(dialog)&&<Report {...{endpoint,t,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport}}
+    {["manufacturing","loadingReport","approvalReport"].includes(dialog)&&<Report {...{endpoint,t,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}}
       reference={order.reference} loading={dialog==="loadingReport"} approvals={dialog==="approvalReport"}
       people={people.data||[]} close={()=>setDialog(null)}/>}
     {dialog==="close"&&<Dialog t={t} title={t("إغلاق الأمر","Close production order")} onClose={()=>setDialog(null)}>
@@ -306,7 +307,7 @@ function Loading({order,endpoint,request,t,people,reload,close}) {
   </Dialog>;
 }
 
-function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,close,apiBase,session,reference,saveNativeReport,shareNativeReport}) {
+function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,close,apiBase,session,reference,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}) {
   const [draft,setDraft]=useState({classification:"materials",drawings:true,measurement_watermark:false,people:{},locale:uiLanguage});
   const [pdf,setPdf]=useState(null);
   const [error,setError]=useState(null);
@@ -369,13 +370,15 @@ function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,clos
             ["materials",t("طلب خامات","Material requisition")],["manufacturing",t("أمر تصنيع","Manufacturing order")],
           ]}/>}
       </div>
-      {!maintenance&&!approvals&&(loading?<details><summary>{t("تغيير المسؤولين لهذا التقرير","Change the team for this report")}</summary>
-        <Assignments people={people} values={draft.people} set={(value)=>set("people",value)} t={t}/></details>:
+      {!maintenance&&!approvals&&(loading?null:
         <div className="ops-options">
           <label className="pc-check"><input type="checkbox" checked={draft.drawings} onChange={(event)=>set("drawings",event.target.checked)}/>{t("إدراج الرسومات","Include drawings")}</label>
           <label className="pc-check"><input type="checkbox" checked={draft.measurement_watermark}
             onChange={(event)=>set("measurement_watermark",event.target.checked)}/>{t("علامة مائية لحالة المقاسات","Measurement status watermark")}</label>
         </div>)}
+      {!maintenance&&!approvals&&ctx&&<details><summary>{t("توقيعات المشروع","Project signatures")}</summary>
+        <ProjectSignatures {...{ctx,path,request,t,can,reload,people}} initialKind={loading?"loading":"manufacturing"} fixedKind/>
+      </details>}
       <div className="pc-toolbar">
         <button className="primary" type="submit">{t("معاينة","Preview")}</button>
         <button type="button" disabled={!pdf} onClick={()=>output(false)}>{t("تنزيل PDF","Download PDF")}</button>

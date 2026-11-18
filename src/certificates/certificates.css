@@ -13,7 +13,12 @@
 .pc-workspace p, .pc-grants p, .pc-dialog p { margin-block: 0; }
 .pc-tabs { display: flex; align-items: center; gap: 6px; padding: 6px; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--pc-radius); }
 .pc-tabs button { flex: 0 0 auto; justify-content: flex-start; border-color: transparent; background: transparent; min-block-size: 40px; }
-.pc-tabs button[aria-pressed="true"] { font-weight: 700; }
+.pc-tabs button[aria-pressed="true"] {
+  font-weight: 700;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+}
+.pc-tabs button[aria-pressed="true"] svg { color: var(--accent); }
 .pc-workspace [hidden] { display: none; }
 .pc-name[aria-current="true"] { text-decoration: underline; }
 .pc-output-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: 10px; }

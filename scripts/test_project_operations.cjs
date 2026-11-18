@@ -455,7 +455,7 @@ async function main() {
     assert.ok(sameLoading.html.includes("Loading Order "+numberedLoading.loading_reference));
     assert.ok(!manifest.html.includes("اجتاز")&&!manifest.html.includes("قبل الشحن"));
     await api(compactEndpoint+"/approvals","POST",{stage:"pre_shipment",approved:false});
-    const withFrames={command_key:crypto.randomUUID(),responsible:{loading:manualCompany.id},
+    const withFrames={command_key:crypto.randomUUID(),loading_date:"2026-01-10",responsible:{loading:manualCompany.id},
       lines:[{order_item_id:firstOrderItem.id,kind:"sliding",quantity:2},{order_item_id:firstOrderItem.id,kind:"frames",quantity:1},
         {order_item_id:firstOrderItem.id,kind:"screens",quantity:1}]};
     await api(compactEndpoint+"/loading","POST",withFrames,409);
@@ -481,6 +481,55 @@ async function main() {
         Authorization:"Bearer "+activeToken},body:JSON.stringify({kind:"loading",locale:"en"})});
       assert.ok(response.headers.get("content-disposition").includes("Operations customer - "+afterLoading.loading_reference+" - Loading.pdf"));
       await response.arrayBuffer();
+    }
+    const reportOptions=await api(ops+"/report-options");
+    assert.ok(reportOptions.projects.some(row=>row.id===compactProject.id));
+    const progressReport=await api(ops+"/reports/progress?include_completed=1");
+    const compactProgress=progressReport.items.find(row=>row.id===compactProject.id);
+    assert.ok(compactProgress);assert.equal(compactProgress.counts.items,2);
+    const takeoff=await api(ops+"/reports/quantities?mode=project&project_id="+compactProject.id);
+    assert.equal(takeoff.items.length,2);assert.equal(takeoff.totals.count,2);
+    const loadedTakeoff=await api(ops+"/reports/quantities?mode=loading&project_id="+compactProject.id+"&from=2000-01-01&to=2099-01-01");
+    assert.equal(loadedTakeoff.totals.count,1);assert.equal(loadedTakeoff.totals.components.frames,1);
+    assert.equal(loadedTakeoff.totals.components.screens,1);assert.equal(loadedTakeoff.totals.components.sliding,2);
+    const excluded=await api(ops+"/reports/quantities?mode=loading&project_id="+compactProject.id+"&from=1999-01-01&to=1999-12-31");
+    assert.equal(excluded.total,0);
+    const nextOpening=fullOrder.items[1];
+    await api(compactEndpoint+"/loading","POST",{command_key:crypto.randomUUID(),loading_date:"2026-02-01",responsible:{loading:manualCompany.id},
+      lines:[{order_item_id:nextOpening.id,kind:"frames",quantity:1},{order_item_id:nextOpening.id,kind:"sliding",quantity:2}]});
+    const partial=await api(ops+"/reports/quantities?mode=loading&project_id="+compactProject.id+"&from=2026-02-01&to=2026-02-28");
+    assert.equal(partial.totals.count,0);assert.equal(partial.totals.components.frames,1);assert.equal(partial.totals.components.sliding,2);
+    await api(compactEndpoint+"/loading","POST",{command_key:crypto.randomUUID(),loading_date:"2026-03-01",responsible:{loading:manualCompany.id},
+      lines:[{order_item_id:nextOpening.id,kind:"screens",quantity:1}]});
+    const completedLater=await api(ops+"/reports/quantities?mode=loading&project_id="+compactProject.id+"&from=2026-03-01&to=2026-03-01");
+    assert.equal(completedLater.totals.count,1);assert.equal(completedLater.totals.components.screens,1);
+    const entireLoading=await api(ops+"/reports/quantities?mode=loading&project_id="+compactProject.id+"&from=2026-01-01&to=2026-03-01");
+    assert.equal(entireLoading.totals.count,2);assert.equal(entireLoading.totals.components.frames,2);
+    const beforeMixed=db.get("SELECT commercial FROM ops_items WHERE id=?",[compactItems[1].id]).commercial;
+    db.run("UPDATE ops_items SET commercial=? WHERE id=?",[JSON.stringify({...JSON.parse(beforeMixed),unit:"m²",quantity:7}),compactItems[1].id]);
+    const mixed=await api(ops+"/reports/quantities?mode=project&project_id="+compactProject.id);
+    assert.equal(mixed.totals.quantities.length,2);assert.equal(mixed.totals.quantities.find(row=>row.unit==="m²").quantity,7);
+    db.run("UPDATE ops_items SET commercial=? WHERE id=?",[beforeMixed,compactItems[1].id]);
+    await api(ops+"/reports/quantities?mode=loading&from=2026-12-01&to=2026-01-01","GET",undefined,400);
+    const restricted=await api(ops+"/reports/progress?include_completed=1","GET",undefined,200,viewer.certificate_session);
+    assert.ok(restricted.items.every(row=>row.id===project.id));
+    await api(ops+"/reports/quantities?mode=project&project_id="+compactProject.id,"GET",undefined,404,viewer.certificate_session);
+    const stateBeforeSignatures=(await api(compactPath)).operations;
+    const savedSignatures=await api(compactPath+"/signatures","PATCH",{version:stateBeforeSignatures.version,kind:"manufacturing",signatures:[
+      {name:"",title:"Workshop release",side:"company"},{name:"Named receiver",title:"",company:"Client organization",side:"client"}]});
+    const signatureOrder=await api(compactEndpoint+"/report","POST",{kind:"manufacturing",classification:"materials",locale:"en"});
+    assert.ok(signatureOrder.html.includes("Workshop release")&&signatureOrder.html.includes("Named receiver"));
+    assert.ok(!signatureOrder.html.includes("private@client.example"));
+    const loadSignatures=await api(compactPath+"/signatures","PATCH",{version:savedSignatures.version,kind:"loading",signatures:[{name:"Loading signatory",title:"Dispatch",side:"company"}]});
+    const signatureLoading=await api(compactEndpoint+"/report","POST",{kind:"loading",locale:"en"});
+    assert.ok(signatureLoading.html.includes("Loading signatory"));assert.ok(!signatureLoading.html.includes("Named receiver"));
+    await api(compactPath,"PATCH",{version:loadSignatures.version,details:{address:"Updated site"}});
+    assert.equal((await api(compactPath)).operations.details.report_signatures.loading[0].name,"Loading signatory");
+    const stillOther=(await api(resolvedPath)).operations.details.report_signatures;
+    assert.equal(stillOther?.loading,undefined);
+    if(process.env.AM_OPERATIONS_TEST_PDF)for(const locale of ["ar","en"])for(const kind of ["progress","quantities"]){
+      const bytes=await api(ops+"/reports/"+kind+"/pdf","POST",{locale,include_completed:"1",mode:"project",...(kind==="quantities"?{project_id:compactProject.id}:{})});
+      await fs.writeFile(path.join(process.env.AM_OPERATIONS_TEST_PDF,"management-"+kind+"-"+locale+".pdf"),bytes);
     }
     assert.equal(db.all("PRAGMA foreign_key_check").length,0);
     console.log("Project Operations integration, discovery, bulk specifications, customer defaults, locks, generated references, sign-offs, finance and loading passed");

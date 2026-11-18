@@ -423,6 +423,25 @@ async function main() {
       project_id:numberedProject.id,header:{...numberedHeader,work_to},lines:[{...numberedLine,quantity:3}]},201)));
     assert.deepEqual(more.map(({certificate_number})=>certificate_number).sort(),[3,4]);
     assert.equal(more[0].totals.previous,300);
+    const percentProject=await api(cert+"/projects",token,"POST",{customer_id:customer.id,name:"Cumulative percentage updates"},201);
+    const percentLine={identity:"same-opening",description:"Window",mode:"direct",quantity:10,unit:"Pcs",rate:100,recognition:"cumulative",progress:80};
+    const percentFirst=await api(cert,token,"POST",{project_id:percentProject.id,header:{work_to:"2026-01-01"},lines:[percentLine]},201);
+    const percentApproved=await api(cert+"/"+percentFirst.id+"/action",token,"POST",{action:"approve",version:percentFirst.version});
+    const originalPercentSnapshot=db.get("SELECT snapshot_json FROM cert_revisions WHERE id=?",[percentFirst.id]).snapshot_json;
+    const revisionCount=db.get("SELECT COUNT(*) AS n FROM cert_revisions").n;
+    const carry=await api(cert+"/projects/"+percentProject.id+"/carry-forward?work_to=2026-02-01",token);
+    assert.equal(db.get("SELECT COUNT(*) AS n FROM cert_revisions").n,revisionCount);
+    assert.equal(carry.lines.length,1);assert.equal(carry.lines[0].previous_progress,80);assert.equal(carry.lines[0].current,0);
+    const percentSecond=await api(cert,token,"POST",{project_id:percentProject.id,header:{work_to:"2026-02-01"},
+      lines:carry.lines.map(line=>({...line,carried_forward:false,recognition:"cumulative",progress:95}))},201);
+    assert.equal(percentSecond.totals.previous,800);assert.equal(percentSecond.totals.current,150);assert.equal(percentSecond.totals.cumulative,950);
+    assert.equal(percentSecond.lines[0].previous_progress,80);assert.equal(percentSecond.lines[0].current_progress,15);
+    await api(cert+"/"+percentSecond.id+"/action",token,"POST",{action:"approve",version:percentSecond.version});
+    const lastCarry=await api(cert+"/projects/"+percentProject.id+"/carry-forward?work_to=2026-03-01",token);
+    const percentFinal=await api(cert,token,"POST",{project_id:percentProject.id,header:{work_to:"2026-03-01"},
+      lines:lastCarry.lines.map(line=>({...line,carried_forward:false,recognition:"cumulative",progress:100}))},201);
+    assert.equal(percentFinal.totals.previous,950);assert.equal(percentFinal.totals.current,50);assert.equal(percentFinal.totals.cumulative,1000);
+    assert.equal(db.get("SELECT snapshot_json FROM cert_revisions WHERE id=?",[percentFirst.id]).snapshot_json,originalPercentSnapshot);
     await api("/auth/logout",viewToken,"POST",{user_id:viewer.id});
     await api(cert + "/access",viewToken,"GET",undefined,401);
     assert.equal(db.get("PRAGMA foreign_key_check"),null);

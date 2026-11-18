@@ -9,7 +9,7 @@ const {
 const {initializeMasterCodes, getProject, getCustomer, createCustomer, saveCustomerProfile, createProject, updateProject, createLocation,
   projectLookupKeys, projectLocations, projectEntrySuggestions, getProfile, cleanRules, cleanSettings, latestVersion, saveProjectRules, checkedLocation} = require("./certificate-projects.cjs");
 const {allocationLedger, addReceipt, updateReceipt, changeReceipt, collectionResponse} = require("./certificate-ledger.cjs");
-const {getRevision, certificateDocumentInput, certificateNumber, createDraft, saveDraft, runAction, forAccess, recognizedReceipts,previewOperationalQuantities} = require("./certificate-revisions.cjs");
+const {getRevision, certificateDocumentInput, certificateNumber, createDraft, saveDraft, runAction, forAccess, recognizedReceipts,previewOperationalQuantities,carryForwardLines} = require("./certificate-revisions.cjs");
 const {importLegacyCertificates} = require("./certificate-legacy.cjs");
 const {stageImport, commitImport} = require("./certificate-imports.cjs");
 const {money, toMinor} = require("./certificate-valuation.cjs");
@@ -79,7 +79,7 @@ function projectsResponse(database, req, access) {
     WHERE ${scope.clause} AND (? IS NULL OR customer_id=?)
       AND (? = '' OR search_name LIKE ? OR alternate_name LIKE ? OR code LIKE ? OR contract_ref LIKE ? OR address LIKE ?
         OR EXISTS (SELECT 1 FROM json_each(cert_projects.raw_json,'$.name_history') WHERE value LIKE ?))
-    ORDER BY name LIMIT 200
+    ORDER BY created_at DESC,id DESC LIMIT 200
   `, [...scope.params,customerId,customerId,matches,`%${matches}%`,`%${str(req.query.q)}%`,`%${matches}%`,`%${str(req.query.q)}%`,
     `%${str(req.query.q)}%`,`%${str(req.query.q)}%`]);
   return rows.map(({name_history,...row}) => ({...row,search_aliases:parse(name_history,[])}));
@@ -335,7 +335,7 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
       WHERE p.role='customer' AND (?=1 OR EXISTS (
         SELECT 1 FROM cert_projects cp WHERE cp.customer_id=p.id AND ${scope.clause}
       )) AND (?='' OR p.search_name LIKE ? OR p.display_name LIKE ? OR c.code LIKE ? OR c.alternate_name LIKE ?)
-      ORDER BY p.display_name LIMIT 120
+      ORDER BY p.created_at DESC,p.id DESC LIMIT 120
     `,[access.all_projects ? 1 : 0,...scope.params,match,like,typed,like,typed]));
   });
   router.post("/customers",(req,res) => {
@@ -451,6 +451,10 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
   router.put("/projects/:projectId/settings",(req,res) => {
     const {project:row,access} = project(req,"manage_settings");
     res.json(database.transaction(() => saveProjectRules(database,row.id,req.body,access.user)));
+  });
+  router.get("/projects/:projectId/carry-forward",(req,res)=>{
+    const {project:row}=project(req,"create");checked(req,"view",row.id);
+    res.json(carryForwardLines(database,row,req.query));
   });
   router.get("/projects/:projectId/sources",(req,res) => {
     const {project:row} = project(req,"create");

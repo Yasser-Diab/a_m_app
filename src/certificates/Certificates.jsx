@@ -18,14 +18,15 @@ export default function ProgressCertificates({ api, apiBase, session, access, ui
   const request = useCertificateApi(api, session);
   const t = useCallback((ar, en) => uiLanguage === "en" ? en : ar, [uiLanguage]);
   const [tab, setTab] = useState("open");
-  const [editor, setEditor] = useState(() => ({ id: directCertificateId(), generation: 0, mounted: Boolean(directCertificateId()) }));
+  const [editor, setEditor] = useState(() => ({ id: directCertificateId(), record: null, generation: 0, mounted: Boolean(directCertificateId()) }));
+  const [editorBusy, setEditorBusy] = useState(false);
   const [listVersion, setListVersion] = useState(0);
   const [listProject, setListProject] = useState(null);
   const dirtyRef = useRef(false);
   const detailsRef = useRef(null);
   const searchRef = useRef(null);
   const can = (value) => access?.capabilities?.includes(value);
-  const certificate = useResource(request, editor.id ? `/${editor.id}` : null, editor.generation);
+  const certificate = useResource(request, editor.id && !editor.record ? `/${editor.id}` : null, editor.generation);
   const available = [
     { id: "open", title: ["عرض المستخلص", "Open Certificates"], Icon: ClipboardList },
     { id: "new", title: ["مستخلص جديد", "New certificate"], Icon: Plus, hidden: !can("create") },
@@ -39,14 +40,38 @@ export default function ProgressCertificates({ api, apiBase, session, access, ui
   }, [access?.capabilities, tab]);
 
   function open(id) {
+    if (editorBusy) return;
     if (id && String(id) === String(editor.id)) {
       detailsRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
       return;
     }
     if (dirtyRef.current && !window.confirm(t("توجد تعديلات غير محفوظة. هل تريد فتح سجل آخر؟", "There are unsaved changes. Open another record?"))) return;
-    setEditor((current) => ({ id: id || null, generation: current.generation + 1, mounted: true }));
+    setEditor((current) => ({ id: id || null, record: null, generation: current.generation + 1, mounted: true }));
+    if (!id) clearCertificateAddress();
     setTab(id ? "open" : "new");
     if (id) requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  }
+
+  function clearCertificateAddress() {
+    if (!new URLSearchParams(location.search).has("id")) return;
+    const url = new URL(location.href);
+    url.searchParams.delete("id");
+    history.replaceState(history.state, "", url);
+  }
+
+  function resetEditor() {
+    dirtyRef.current = false;
+    setEditorBusy(false);
+    setEditor((current) => ({ id: null, record: null, generation: current.generation + 1, mounted: false }));
+    setTab("open");
+    clearCertificateAddress();
+    requestAnimationFrame(() => searchRef.current?.focus());
+  }
+
+  function closeEditor() {
+    if (editorBusy) return;
+    if (dirtyRef.current && !window.confirm(t("توجد تعديلات غير محفوظة. هل تريد إغلاق المستخلص دون حفظها؟", "There are unsaved changes. Close this certificate without saving them?"))) return;
+    resetEditor();
   }
 
   function select(next) {
@@ -56,26 +81,25 @@ export default function ProgressCertificates({ api, apiBase, session, access, ui
 
   return <div className="pc-workspace" dir={uiLanguage === "en" ? "ltr" : "rtl"}>
     <nav className="pc-tabs" aria-label={t("قسم المستخلصات والتحصيلات", "Progress Certificates & Collections")}>
-      {available.map(({ id, title, Icon }) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => select(id)}><Icon size={17} />{t(...title)}</button>)}
+      {available.map(({ id, title, Icon }) => <button key={id} type="button" aria-pressed={tab === id} disabled={id === "new" && editorBusy} onClick={() => select(id)}><Icon size={17} />{t(...title)}</button>)}
     </nav>
     <div hidden={tab !== "open"}><CertificateList request={request} revision={`${refreshKey}/${listVersion}`} t={t} locale={uiLanguage} selectedId={editor.id} searchRef={searchRef} onOpen={open} project={listProject} setProject={setListProject} /></div>
     {editor.mounted && <div ref={detailsRef} hidden={tab !== (editor.id ? "open" : "new")}>
       <Problem error={certificate.error} t={t} />
       {certificate.pending && <div className="pc-panel" role="status">{t("جارٍ تحميل المستخلص…", "Loading certificate…")}</div>}
-      {(!editor.id || certificate.data) && <CertificateEditor key={editor.generation} initial={certificate.data} request={request} apiBase={apiBase} session={session}
+      {(editor.record || !editor.id || certificate.data) && <CertificateEditor key={editor.generation} initial={editor.record || certificate.data} request={request} apiBase={apiBase} session={session}
         access={access} t={t} locale={uiLanguage} defaultReportLanguage={defaultReportLanguage} dirtyRef={dirtyRef}
-        onChange={() => setListVersion((version) => version + 1)} onAccessChanged={onAccessChanged} saveNativeReport={saveNativeReport} shareNativeReport={shareNativeReport}
-        onDeleted={() => {
-          dirtyRef.current = false;
-          setEditor((current) => ({id:null,generation:current.generation+1,mounted:false}));
-          setListVersion((version) => version+1);
-          setTab("open");
-          if (new URLSearchParams(location.search).has("id")) {
-            const url = new URL(location.href);
-            url.searchParams.delete("id");
-            history.replaceState(history.state,"",url);
+        onChange={(saved) => {
+          setListVersion((version) => version + 1);
+          if (saved?.id) {
+            setEditor((current) => ({...current,id:saved.id,record:saved}));
+            setTab((current) => current === "new" ? "open" : current);
+            if(!editor.id)requestAnimationFrame(()=>detailsRef.current?.scrollIntoView({block:"start",behavior:"smooth"}));
           }
-          searchRef.current?.focus();
+        }} onBusyChange={setEditorBusy} onClose={closeEditor} onAccessChanged={onAccessChanged} saveNativeReport={saveNativeReport} shareNativeReport={shareNativeReport}
+        onDeleted={() => {
+          resetEditor();
+          setListVersion((version) => version+1);
         }}
         onBackToSearch={editor.id ? () => searchRef.current?.focus() : undefined} />}
     </div>}

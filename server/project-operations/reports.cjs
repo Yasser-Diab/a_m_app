@@ -229,7 +229,12 @@ function signatures(db,projectId,order,kind,locale,selection) {
     .map((person)=>[person.id,{person,title:person.signature_label||person.position}]));
   const roles={loading:["مسؤول التحميل","Loading lead"],engineer:["مهندس المشروع","Project engineer"],
     reviewer:["الاستلام","Receiver"],approver:["الاعتماد","Approval"]};
-  if (kind==="loading")
+  const saved=require("./core.cjs").operation(db,projectId).details.report_signatures?.[kind];
+  if(Array.isArray(saved)) {
+    signers.clear();
+    saved.forEach((person,index)=>signers.set("saved-"+index,{person,title:person.title}));
+  }
+  if (kind==="loading"&&!Array.isArray(saved))
     for (const [key,names] of Object.entries(roles)) {
       const custom=typeof selection?.[key]==="string"&&!idOf(selection[key])?selection[key].trim().slice(0,200):null;
       const person=assigned.find(({id})=>id===idOf(selection?.[key]))||
@@ -242,7 +247,7 @@ function signatures(db,projectId,order,kind,locale,selection) {
   const blocks=groups.map(([side,heading,internal])=>{
     const members=[...signers.values()].filter(({person})=>(person.side?person.side==="company":Boolean(person.user_id))===internal);
     return members.length?`<div class="signoff${side}"><h3>${escape(heading)}</h3><div class="signatures">${members.map(({person,title})=>
-      `<div><strong><bdi>${escape(person.name)}</bdi></strong>${title?`<br>${escape(title)}`:""}
+      `<div><strong><bdi>${escape(person.name||title)}</bdi></strong>${person.name&&title?`<br>${escape(title)}`:""}
         ${person.company?`<br><bdi>${escape(person.company)}</bdi>`:""}</div>`).join("")}</div></div>`:"";
   }).join("");
   return blocks?`<div class="signoffs">${blocks}</div>`:"";
@@ -366,4 +371,4 @@ async function appendDrawings(buffer,drawings) {
   return Buffer.from(await output.save());
 }
 
-module.exports={report,appendDrawings,reportFilename};
+module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row};

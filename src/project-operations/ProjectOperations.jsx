@@ -7,6 +7,8 @@ import {ErrorMessage,Page,Pick,Suggest,Table,Text,assignmentRoles,display,option
 import {WorkItems,Changes} from "./WorkItems.jsx";
 import {technicalText} from "./terminology.js";
 import Production from "./Production.jsx";
+import ProjectSignatures from "./ProjectSignatures.jsx";
+import {RunningProjects,QuantityTakeoff} from "./OperationsReports.jsx";
 
 const tabs=[
   ["items","جدول الكميات","BOQ",Layers3],["overview","بيانات المشروع","Project details",ClipboardList],
@@ -34,6 +36,7 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
   const [projectId,setProject]=useState(null);
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState("items");
+  const [view,setView]=useState("projects");
   const [preferred,setPreferred]=useState(null);
   const [discoveryError,setDiscoveryError]=useState(null);
   const [opening,setOpening]=useState(false);
@@ -67,6 +70,11 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
   }
   const documentLabel=(doc)=>doc.document_type==="invoice"?t("فاتورة","Invoice"):t("عرض سعر","Quotation");
   return <div className="pc-workspace ops-workspace" dir={uiLanguage==="ar"?"rtl":"ltr"}>
+    <nav className="pc-tabs" aria-label={t("أقسام إدارة التشغيل","Operations management sections")}>
+      {[["projects","المشروعات","Projects"],["progress","متابعة التشغيل","Work progress"],["quantities","حصر الكميات","Quantity takeoff"]].map(([id,ar,en])=>
+        <button type="button" key={id} aria-pressed={view===id} onClick={()=>setView(id)}>{t(ar,en)}</button>)}
+    </nav>
+    <div className="pc-stack" hidden={view!=="projects"}>
     <section className="pc-panel pc-stack">
       {projectId ? <div className="pc-toolbar">
         <button type="button" onClick={()=>{setProject(null);setPreferred(null);setTab("items");}}>{t("اختيار مشروع آخر","Choose another project")}</button>
@@ -108,6 +116,9 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
         {tab==="history" && <Audit {...controls}/>}
       </section>}
     </>}
+    </div>
+    <div hidden={view!=="progress"}><RunningProjects {...controls} active={view==="progress"} onOpenProject={row=>{setView("projects");openProject(row);}}/></div>
+    <div hidden={view!=="quantities"}><QuantityTakeoff {...controls} active={view==="quantities"}/></div>
   </div>;
 }
 
@@ -257,6 +268,7 @@ function People({request,path,t,can,revision,reload,ctx}) {
       </div>
       <div><button type="submit" className="primary" disabled={action.busy}>{t("إضافة إلى المشروع","Add to project")}</button></div>
     </form>}
+    <ProjectSignatures {...{ctx,path,request,t,can,reload}} people={people.data||[]}/>
   </>;
 }
 

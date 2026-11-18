@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ClipboardList, Eye, Plus, RefreshCw, Save, Settings2, Trash2 } from "lucide-react";
+import { ClipboardList, Eye, Plus, RefreshCw, Save, Settings2, Trash2, X } from "lucide-react";
 import CertificateGrid, { hydrateLines, stripGridFields } from "./CertificateGrid.jsx";
 import CertificateImport from "./CertificateImport.jsx";
 import { ProjectSettings } from "./CertificateOperations.jsx";
@@ -21,7 +21,7 @@ const approvalRequired = new Set(["approve", "issue", "return", "revise", "void"
 const needsReason = new Set(["return", "revise", "void", "reopen","recover_advance"]);
 const normalizeSaved = (item) => item?.certificate || item;
 
-export default function CertificateEditor({ initial, request, apiBase, session, access, t, locale, defaultReportLanguage, onChange, onAccessChanged, saveNativeReport, shareNativeReport, dirtyRef, onBackToSearch, onDeleted }) {
+export default function CertificateEditor({ initial, request, apiBase, session, access, t, locale, defaultReportLanguage, onChange, onBusyChange, onClose, onAccessChanged, saveNativeReport, shareNativeReport, dirtyRef, onBackToSearch, onDeleted }) {
   const [record, setRecord] = useState(initial || null);
   const [editing, setEditing] = useState(!initial || initial.status === "draft");
   const [customer, setCustomer] = useState(initial?.customer || (initial?.project?.customer_id ? { id: initial.project.customer_id, display_name: initial.project.customer_name } : null));
@@ -58,6 +58,8 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const historical = record?.legacy === true;
   const customers = useResource(request, canWrite && !record ? `/customers${queryString({ q: customerQuery })}` : null, projectRevision);
   const projects = useResource(request, canWrite && !record && customer?.id ? `/projects${queryString({ customer_id: customer.id, q: projectQuery })}` : null, projectRevision);
+  const carryForward = useResource(request,canWrite&&!record&&project?.id?`/projects/${project.id}/carry-forward${queryString({
+    work_to:header.work_to,contract_ref:header.contract_ref??project.contract_ref,location_id:header.location_id})}`:null,projectRevision);
   const context = useResource(request, project?.id ? `/projects/${project.id}${queryString({ work_to: header.work_to })}` : null, projectRevision);
   const suggested = useResource(request, canWrite && project?.id ? `/projects/${project.id}/entry-suggestions` : null, projectRevision);
   const operationItems=useResource(request,can("ops_view")&&project?.id?
@@ -68,6 +70,12 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const currency = project?.currency || header.currency || "EGP";
 
   useEffect(() => { dirtyRef.current = dirty; return () => { dirtyRef.current = false; }; }, [dirty, dirtyRef]);
+  useEffect(()=>{
+    if(!carryForward.data)return;
+    setRows(current=>{const entered=current.filter(row=>!row.carried_forward),identities=new Set(entered.map(row=>row.identity));
+      return [...entered,...hydrateLines(carryForward.data.lines).filter(row=>!identities.has(row.identity))];});
+  },[carryForward.data]);
+  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
   useEffect(() => {
     if (record?.status !== "issued" || !["processing", "pending"].includes(record.pdf_status)) return undefined;
     let cancelled = false;
@@ -98,7 +106,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
     const different = project?.id !== nextProject?.id;
     setCustomer(nextCustomer); setProject(nextProject); setPendingScope(null);
     if (different) {
-      setRows((current) => current.map(({ work_item_id, ops_item_id, source, location, ...line }) => ({ ...line, location_id: "", location_name: "" })));
+      setRows((current) => current.filter(line=>!line.carried_forward).map(({ work_item_id, ops_item_id, source, location, ...line }) => ({ ...line, location_id: "", location_name: "" })));
       setGridGeneration((current) => current + 1);
     }
     setHeader((current) => different ? { ...current, contract_ref: nextProject?.contract_ref || "", location_id: "", output_mode: "" } : current);
@@ -215,6 +223,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       {record && <><Status value={record.status} t={t} />{record.revision > 1 && <span className="pc-chip">{t("المراجعة", "Revision")} <bdi>&nbsp;{record.revision}</bdi></span>}</>}
       {record?.pdf_status && <Status value={record.pdf_status} t={t} />}
       {onBackToSearch && <button type="button" onClick={onBackToSearch}>{t("العودة إلى البحث", "Back to search")}</button>}
+      {onClose && <button type="button" disabled={busy} onClick={onClose}><X size={17}/>{t("إغلاق المستخلص", "Close certificate")}</button>}
       {record && canEdit && !editing && <button type="button" onClick={() => setEditing(true)}>{t("تعديل المستخلص", "Edit certificate")}</button>}
       {record && access?.can_delete_documents && <button type="button" className="danger" disabled={busy}
         onClick={() => { setError(null); setDeleteDialog(true); }}><Trash2 size={16}/>{t("حذف", "Delete")}</button>}
@@ -231,7 +240,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
         className={operation === "issue" || operation === "approve" || operation === "submit" ? "primary" : undefined} disabled={busy} onClick={() => showAction(operation)}>{t(...actionLabels[operation])}</button>)}
       {!availableActions.some((operation) => can(permissionFor(operation))) && <span className="pc-caption">{t("يتطلب الانتقال التالي صلاحية سير عمل إضافية.", "The next action requires an additional workflow permission.")}</span>}
     </div>}
-    <Problem error={error || customers.error || projects.error || context.error} t={t} />
+    <Problem error={error || customers.error || projects.error || context.error || carryForward.error} t={t} />
     {statusText && <p className="pc-caption" role="status">{statusText}</p>}
     <div className="pc-form">
       {canWrite && !record ? <>

@@ -47,7 +47,8 @@ export function emptyLine() {
 }
 
 export function hydrateLines(rows = []) {
-  return rows.map((row) => ({ ...row, _gridId: String(row.identity || row.id || newKey()) }));
+  return rows.map((row) => ({ ...row, ...(row.carried_forward?{recognition:"cumulative",progress:row.cumulative_progress??row.previous_progress??row.progress}:{}),
+    _gridId: String(row.identity || row.id || newKey()) }));
 }
 
 export function stripGridFields(rows) {
@@ -214,7 +215,12 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     history.current.past = [...history.current.past.slice(-39), currentRows.current];
     history.current.future = [];
     setHistoryTick((value) => value + 1);
-    onChange(next);
+    const previous=new Map(currentRows.current.map(row=>[row._gridId,row]));
+    onChange(next.map(row=>{
+      const before=previous.get(row._gridId);
+      return before?.carried_forward&&gridKeys.some(key=>row[key]!==before[key])
+        ? {...row,carried_forward:false,recognition:"cumulative"}:row;
+    }));
   }, [onChange]);
 
   function historyMove(direction) {
@@ -257,7 +263,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
 
   function paste(clipboard, point) {
     const data = parseSmartClipboardGrid(clipboard);
-    const entryRows = rows.filter((row) => !row.carried_forward);
+    const entryRows = rows;
     const intoAddition = point?.rowId === additionRow.current._gridId;
     const index = intoAddition ? entryRows.length : entryRows.findIndex((item) => item._gridId === point?.rowId);
     if (index < 0 || !data.length) return false;
@@ -319,7 +325,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   function beginEditing(point, typed) {
     const row = point && displayRows.find((item) => item._gridId === point.rowId);
     const column = row && columns.find((item) => item.key === point.columnKey);
-    if (!editable || !row || row.carried_forward || !column || !gridKeys.includes(column.key) || !applies(row,column)) return false;
+    if (!editable || !row || !column || !gridKeys.includes(column.key) || !applies(row,column)) return false;
     const choices = cellChoices(column.kind,t);
     const value = String(cellValue(row,column.key,locationMap) ?? "");
     const active = {...point,value:choices ? value : typed ?? value,initial:value,choices};
@@ -412,7 +418,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
       event.preventDefault();
       const index = displayRows.findIndex((row) => row._gridId === event.target.dataset.rowSelector);
       const next = displayRows[index] === additionRow.current ? displayRows[index] :
-        displayRows.slice(index+1).find((row) => !row.carried_forward);
+        displayRows[index+1];
       if (next) {
         const point = {rowId:next._gridId,columnKey:selectionColumns[0]};
         select(point,false);
@@ -447,8 +453,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
       event.preventDefault(); historyMove(event.shiftKey || event.code === "KeyY" ? "future" : "past"); return;
     }
     if (!active && editable && isSmartFillDownShortcut(event)) {
-      const next = rows.some((row) => row.carried_forward) ? null :
-        fillSmartSelectionDownRows({rows,range:range(editableColumns),columnOrder:editableColumns,createRow:emptyLine});
+      const next = fillSmartSelectionDownRows({rows,range:range(editableColumns),columnOrder:editableColumns,createRow:emptyLine});
       if (next) { event.preventDefault(); change(next); }
       return;
     }
@@ -632,7 +637,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
           const absolute = start + index;
           const selected = selectedRange && absolute >= selectedRange.rowStart && absolute <= selectedRange.rowEnd
             ? selectionColumns.slice(selectedRange.colStart, selectedRange.colEnd + 1) : null;
-          return <WorkRow key={row._gridId} row={row} rowIndex={absolute} columns={columns} t={t} readOnly={!editable || row.carried_forward} locations={locationMap}
+          return <WorkRow key={row._gridId} row={row} rowIndex={absolute} columns={columns} t={t} readOnly={!editable} locations={locationMap}
             editor={editor?.rowId === row._gridId ? editor : null}
             focus={selection?.focusCell.rowId === row._gridId ? selection.focusCell.columnKey : null}
             onInput={updateEditor} onSelectRow={rowSelection} onMenu={setRowMenu} selected={selected} error={errors.has(String(row.id)) || errors.has(String(row.identity))}

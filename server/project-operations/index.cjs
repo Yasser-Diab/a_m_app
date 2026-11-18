@@ -8,6 +8,7 @@ const core = require("./core.cjs");
 const specs = require("./specifications.cjs");
 const production = require("./production.cjs");
 const finance = require("./finance.cjs");
+const management = require("./management-reports.cjs");
 const {report,appendDrawings,reportFilename} = require("./reports.cjs");
 const {awardReference}=require("./references.cjs");
 
@@ -113,6 +114,20 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   const base="/projects/:projectId";
   get("/catalogue",()=>specs.catalogueForClient(db));
   get("/projects",(req,access)=>core.projectChoices(db,access,req.query));
+  get("/report-options",(_,access)=>management.reportOptions(db,access));
+  function managementData(kind,access,query,all=false) {
+    if(kind==="progress")return management.runningProjects(db,access,query,all);
+    if(kind==="quantities")return management.workQuantities(db,access,query,all);
+    fail(404,"Report not found");
+  }
+  get("/reports/:kind",(req,access)=>managementData(req.params.kind,access,req.query));
+  endpoint("post","/reports/:kind/pdf","ops_export",async(req,access,_,res)=>{
+    const data=managementData(req.params.kind,access,req.body,true);
+    const html=management.managementReport(req.params.kind,data,req.body,branding());
+    const pdf=await renderPdf(html,{report_language:req.body.locale==="ar"?"ar":"en",prepared_by:access.user.display_name||access.user.username});
+    const name=(req.params.kind==="progress"?"Current Work Summary":"Work Quantity Takeoff")+" - "+new Date().toISOString().slice(0,10)+".pdf";
+    res.set("Cache-Control","no-store").set("Access-Control-Expose-Headers","Content-Disposition").attachment(name).type("application/pdf").send(pdf);
+  });
   post("/resolve-project","ops_edit",(req,access)=>core.resolveProject(db,access,req.body));
   get("/employees",()=>db.all("SELECT id,display_name AS name FROM users WHERE is_active=1 ORDER BY display_name"),"ops_edit");
   get("/contacts",(req,access)=>core.contacts(db,access,req.query),"ops_edit");
@@ -124,6 +139,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   post(base,"ops_edit",(req,access,id)=>core.setup(db,getProject(db,id),idOf(req.body.boq_id),access.user,req.body.approval_date));
   post(base+"/boqs","ops_edit",(req,access,id)=>core.setup(db,getProject(db,id),idOf(req.body.boq_id),access.user,req.body.approval_date));
   patch(base,"ops_edit",(req,access,id)=>core.changeProjectDetails(db,core.operation(db,id),req.body,access.user));
+  patch(base+"/signatures","ops_edit",(req,access,id)=>core.saveReportSignatures(db,core.operation(db,id),req.body,access.user));
   get(base+"/people",(_,access,id)=>core.people(db,id,access.capabilities.includes("ops_edit")));
   post(base+"/people","ops_edit",(req,access,id)=>{
     core.operation(db,id);
