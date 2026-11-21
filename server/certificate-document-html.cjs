@@ -248,6 +248,9 @@ function buildCertificateHtml(model) {
     .compact-identity, .continued .full-identity { display: none; }
     .continued .compact-identity { display: flex; }
     .page-content { min-height: 0; flex: 1; }
+    .page-content.bottom-signoff { display:flex; flex-direction:column; padding-block-end:2px; }
+    .page-content.bottom-signoff > * { flex-shrink:0; }
+    .page-content.bottom-signoff > .signoff { margin-block-start:auto; }
     h1 { font-size: 12.5pt; margin: 2mm 0 1.4mm; }
     h2 { font-size: 11pt; margin: 2mm 0 1.4mm; }
     h2 span { font-size: 8pt; font-weight: 400; margin-inline-start: 2mm; color:${reportColors.muted}; }
@@ -416,7 +419,25 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     if (!fits(page)) throw new Error('The certificate sign-off is too tall for the chosen paper');
   }
 
-  function pagesFor(id, compactFirst = false, signDetails = false) {
+  function appendClosingSignoff(pages) {
+    const block = makeSignoff('closing');
+    let page = pages.at(-1);
+    function place() {
+      const content = page.querySelector('main');
+      content.classList.add('bottom-signoff');
+      content.append(block);
+    }
+    place();
+    if (fits(page)) return;
+    block.remove();
+    page.querySelector('main').classList.remove('bottom-signoff');
+    page = makePage('signoff-page', true);
+    pages.push(page);
+    place();
+    if (!fits(page)) throw new Error('The certificate sign-off is too tall for the chosen paper');
+  }
+
+  function pagesFor(id, compactFirst = false, signDetails = false, reserveSignoff = true) {
     let page = makePage(id, compactFirst);
     const pages = [page];
     let table = page.querySelector('tbody');
@@ -428,7 +449,7 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     const headers = new Map();
     for (const [index, unit] of units.entries()) {
       const rows = unit.map((row) => row.cloneNode(true));
-      const signoff = signDetails && index === units.length - 1 ? makeSignoff('closing') : null;
+      const signoff = signDetails && reserveSignoff && index === units.length - 1 ? makeSignoff('closing') : null;
       for (const row of rows) if (row.dataset.groupRow) headers.set(row.dataset.path,row);
       const hadRows = table.rows.length > 0;
       table.append(...rows);
@@ -492,17 +513,13 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     hasCover = detailPages.length > 1;
     detailPages.forEach((page) => page.remove());
   }
-  const openingPages = hasCover ? pagesFor('cover') : pagesFor('detail', false, true);
-  const workPageCount = openingPages.length;
+  const openingPages = hasCover ? pagesFor('cover') : pagesFor('detail', false, true, false);
   appendTableSection('settlement', openingPages);
   appendTableSection('retentions', openingPages);
   if (hasReceipts) appendTableSection('receipts', openingPages);
   if (hasCover) {
     appendSummarySignoff(openingPages);
-  } else if (openingPages.length === workPageCount) {
-    const content = openingPages.at(-1).querySelector('main');
-    content.append(content.querySelector('.signoff'));
-  }
+  } else appendClosingSignoff(openingPages);
   const pages = hasCover ? [...openingPages,...pagesFor('detail',true,true)] : openingPages;
   for (const [index, page] of pages.entries()) {
     page.querySelector('.page-number').textContent = String(index + 1);
