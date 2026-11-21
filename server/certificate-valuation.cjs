@@ -61,7 +61,7 @@ function workLocation(line) {
   return building_unit || floor_apartment ? [building_unit,floor_apartment].map((value) => value.toLowerCase()).join("\u0000") : line.location_id ?? null;
 }
 
-function calculateLine(line, before, settings) {
+function calculateLine(line, before, settings, {correction=false}={}) {
   const errors = [];
   const complain = (field, message) => errors.push({field, message, line_id: line.id});
   const mode = line.mode;
@@ -89,7 +89,7 @@ function calculateLine(line, before, settings) {
   if (mode !== "adjustment" && present(line.progress) && (!positive(progress) || progress > 100n * SCALE))
     complain("progress", "Progress must be from 0 to 100");
 
-  if (before && (workLocation(before) !== workLocation(line) || before.work_type !== line.work_type))
+  if (!correction&&before && (workLocation(before) !== workLocation(line) || before.work_type !== line.work_type))
     complain("identity", "Certified work identity must keep its location and work type");
   if (!line.description && !line.work_item) complain("description", "Work description is required");
   if (line.carried_forward) {
@@ -155,7 +155,7 @@ function calculateLine(line, before, settings) {
     complain("agreed_amount", "Agreed amount must be zero or greater");
   const settled = moneyMinorBig(gross);
   const current = recognition === "cumulative" && mode !== "adjustment" ? settled - previous : settled;
-  if (mode !== "adjustment" && current < 0n) complain("recognition", "A lower cumulative target requires an approved adjustment");
+  if (!correction&&mode !== "adjustment" && current < 0n) complain("recognition", "A lower cumulative target requires an approved adjustment");
   if (mode === "lump" && agreed !== null && previous + current > moneyMinorBig(agreed))
     complain("progress", "Certified work would exceed the agreed amount");
   if (gross > BigInt(MAX) * SCALE || gross < -BigInt(MAX) * SCALE)
@@ -182,7 +182,7 @@ function calculateLine(line, before, settings) {
   };
 }
 
-function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=false} = {}) {
+function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=false,correction=false} = {}) {
   const prior = new Map((baseline?.lines || []).map((line) => [line.identity, line]));
   const ordered = lines.filter((line) => !line.carried_forward);
   const active = new Set(ordered.map((line) => line.identity));
@@ -192,7 +192,7 @@ function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=fa
     });
   }
 
-  const calculated = ordered.map((line) => calculateLine(line, prior.get(line.identity), profile.settings));
+  const calculated = ordered.map((line) => calculateLine(line, prior.get(line.identity), profile.settings,{correction}));
   const errors = calculated.flatMap(({errors: problems}) => problems);
   const groups = new Map();
   let previous = 0n, current = 0n, lastCurrent = 0n;

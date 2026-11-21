@@ -1,14 +1,14 @@
 {
-    "appId":  "com.sherifalihassan.priceoffer",
-    "appName":  "Easy Commercial",
-    "appVersion":  "2.0.4",
-    "webDir":  "dist",
-    "server":  {
-                   "androidScheme":  "http",
-                   "cleartext":  true
-               },
-    "android":  {
-                    "allowMixedContent":  true,
-                    "adjustMarginsForEdgeToEdge":  "auto"
-                }
+  "appId": "com.sherifalihassan.priceoffer",
+  "appName": "Easy Commercial",
+  "appVersion": "2.0.5",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "adjustMarginsForEdgeToEdge": "auto"
+  }
 }

@@ -280,7 +280,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       locations={locations} suggestions={suggested.data || []}
       operationItems={operationItems.data || []}
       workItems={context.data?.work_items || []} workTypes={context.data?.work_types || []}
-      validation={validation} totals={record?.totals} currency={currency} settled={Boolean(record) && !dirty} />
+      validation={validation} totals={record?.totals} currency={currency} settled={Boolean(record) && !dirty} storageKey={'certificateGridColumnWidthsV1:'+(access?.user_id||'default')} />
     {(operationItems.data?.length>0 || record?.operational_quantities?.length>0)&&
       <OperationalQuantities quantities={(claimReview?.header===header&&claimReview?.rows===rows?claimReview.data:null)
         ||record?.operational_quantities||operationItems.data} t={t}

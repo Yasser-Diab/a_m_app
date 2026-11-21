@@ -129,8 +129,8 @@ async function writeCertificateXlsx(model) {
   if (model.issuer.website) identity.addRow([model.issuer.website, model.issuer.shortName]);
   if (model.appVersion) identity.addRow([`EasyCommercial ${model.appVersion}`]);
   const type = { key: 'work_type', label: model.labels.work_type, weight: 18, kind: 'text' };
-  const subtotal = (description,totals) => ({...totals,description,subtotal:true,
-    billed_quantity:totals.quantities?.map(({value,unit}) => `${value} ${unit}`).join('\n') || null});
+  const subtotal = (description,totals) => ({...totals,...(model.showDetailQuantities===false?{count:null,quantities:[]}:{}),description,subtotal:true,
+    billed_quantity:model.showDetailQuantities===false?null:totals.quantities?.map(({value,unit}) => `${value} ${unit}`).join('\n') || null});
   const detail = model.detailBands?.map(({kind,path,line,totals}) => {
     const band = path.some((group) => group.kind === 'unit') ? 'unit' : path.some((group) => group.kind === 'building') ? 'building' : '';
     const workBand = path.some((group) => group.kind === 'work_type');

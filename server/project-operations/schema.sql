@@ -221,3 +221,25 @@ CREATE TABLE IF NOT EXISTS ops_audit (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS ops_audit_project ON ops_audit(project_id,id DESC);
+
+CREATE TABLE IF NOT EXISTS ops_report_edits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL REFERENCES ops_orders(id) ON DELETE CASCADE,
+  document_ref TEXT NOT NULL,
+  report_kind TEXT NOT NULL,
+  locale TEXT NOT NULL CHECK(locale IN ('ar','en')),
+  body_html TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(order_id,document_ref,report_kind,locale)
+);
+CREATE TABLE IF NOT EXISTS ops_report_edit_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_edit_id INTEGER NOT NULL REFERENCES ops_report_edits(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  body_html TEXT,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(report_edit_id,version)
+);

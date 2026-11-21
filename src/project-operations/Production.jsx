@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from "react";
 import {Dialog,localDate,newKey,useDebounce,useResource} from "../certificates/shared.jsx";
 import {ErrorMessage,Page,Pick,Suggest,Table,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
 import ProjectSignatures from "./ProjectSignatures.jsx";
+import ReportEditor from './ReportEditor.jsx';
 import SourceRefresh from './SourceRefresh.jsx';
 
 const checkLabels={measurements:["المقاسات","Measurement conformity"],profile:["القطاعات","Profile conformity"],
@@ -314,6 +315,7 @@ function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,clos
   const [pdf,setPdf]=useState(null);
   const [error,setError]=useState(null);
   const [busy,setBusy]=useState(false);
+  const [editingReport,setEditingReport]=useState(false),[reportSaved,setReportSaved]=useState(false);
   const frame=useRef(null);
   const abort=useRef(null);
   useEffect(()=>()=>abort.current?.abort(),[]);
@@ -363,7 +365,7 @@ function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,clos
   }
   return <Dialog title={title} t={t} wide onClose={close}>
     <form className="pc-stack" onSubmit={preview}>
-      <fieldset className="pc-stack" disabled={busy}>
+      <fieldset className="pc-stack" disabled={busy||editingReport}>
       <div className="pc-form">
         <Pick label={t("لغة التقرير","Report language")} value={draft.locale} required onChange={(value)=>set("locale",value)}
           items={[["ar",t("العربية","Arabic")],["en",t("الإنجليزية","English")]]}/>
@@ -382,6 +384,7 @@ function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,clos
         <ProjectSignatures {...{ctx,path,request,t,can,reload,people}} initialKind={loading?"loading":"manufacturing"} fixedKind/>
       </details>}
       <div className="pc-toolbar">
+        {!approvals&&<button type="button" onClick={()=>{setEditingReport(true);setPdf(null);setReportSaved(false);}}>{t('تحرير قبل التصدير','Edit before export')}</button>}
         <button className="primary" type="submit">{t("معاينة","Preview")}</button>
         <button type="button" disabled={!pdf} onClick={()=>output(false)}>{t("تنزيل PDF","Download PDF")}</button>
         <button type="button" disabled={!pdf} onClick={()=>output(true)}>{t("فتح للطباعة","Open for printing")}</button>
@@ -389,6 +392,9 @@ function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,clos
       </fieldset>
       <ErrorMessage error={error}/>
     </form>
+    {reportSaved&&<p role="status">{t('تم حفظ تعديلات التقرير لهذا المستند.','Report edits saved for this document.')}</p>}
+    {editingReport&&<ReportEditor endpoint={endpoint} request={request} options={{...draft,kind}} t={t} canEdit={can('edit')}
+      onSaved={()=>{setEditingReport(false);setPdf(null);setReportSaved(true);}} onCancel={()=>setEditingReport(false)}/>}
     {pdf&&!shareNativeReport&&<iframe ref={frame} title={title} className="ops-preview" src={pdf.url}/>}
   </Dialog>;
 }

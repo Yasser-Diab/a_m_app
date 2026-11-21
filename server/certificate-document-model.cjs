@@ -2,7 +2,7 @@ const QRCode = require('qrcode-svg');
 const {progressAtAmount} = require('./certificate-valuation.cjs');
 const {certificateLocationFields} = require('./document-locations.cjs');
 
-const MODEL_VERSION = 14;
+const MODEL_VERSION = 15;
 const reportColors = {text:'#183148', muted:'#3c5266', header:'#e5eef1', headerLine:'#b5cbd1', group:'#f3f7f8', groupText:'#26525a',
   subtotal:'#edf4f5', building:'#98c3e0', unit:'#acd3ac', workType:'#a2cbc6'};
 const printMoney = new Intl.NumberFormat('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 });
@@ -189,6 +189,8 @@ function certificateReportOptions(header = {}, settings = {}) {
     show_building_subtotals:header.show_building_subtotals ?? settings.show_building_subtotals ?? (subtotal === true && groupBy === 'building'),
     show_unit_subtotals:header.show_unit_subtotals ?? settings.show_unit_subtotals ?? (subtotal === true && groupBy === 'unit'),
     show_work_type_subtotals:header.show_work_type_subtotals ?? settings.show_work_type_subtotals ?? (subtotal === true && groupBy === 'work_type'),
+    ...Object.fromEntries(['show_summary_building','show_summary_work_type','show_summary_quantities','show_detail_quantities']
+      .map(key=>[key,header[key]??settings[key]??true])),
   };
 }
 
@@ -443,24 +445,26 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   const font = (value) => /^[a-z0-9 ,"'-]+$/i.test(value || '') ? value : 'Arial,Tahoma,sans-serif';
   // The cover is a complete work-type summary. Detail display preferences must
   // never hide its totals or add nested totals that count the same work twice.
-  const coverKind = buildings.size ? 'building' : units.size ? 'unit' : 'work_type';
+  const coverKind = grouping.show_summary_building!==false?(buildings.size ? 'building' : units.size ? 'unit' : 'work_type'):'work_type';
   const summaryGroups = new Map();
   for (const line of lines) {
-    const location = coverKind === 'building' ? line.building_unit : coverKind === 'unit' ? line.floor_apartment : '';
-    const workType = line.work_type || t.description;
+    const location = grouping.show_summary_building===false?'':coverKind === 'building' ? line.building_unit : coverKind === 'unit' ? line.floor_apartment : '';
+    const workType = grouping.show_summary_work_type===false?'':line.work_type || t.description;
     const key = JSON.stringify([location.toLowerCase(),workType.toLowerCase()]);
     if (!summaryGroups.has(key)) summaryGroups.set(key,{path:[
-      ...(location ? [{kind:coverKind,name:location}] : []),{kind:'work_type',name:workType}],lines:[]});
+      ...(location ? [{kind:coverKind,name:location}] : []),...(workType?[{kind:'work_type',name:workType}]:[])],lines:[]});
     summaryGroups.get(key).lines.push(line);
   }
   const coverRows = [...summaryGroups.values()].map(({path,lines:groupLines}) => ({
-    name:path.map(({name}) => name).join(' / '),building:path.find(group=>group.kind==='building')?.name||'',
+    name:path.map(({name}) => name).join(' / ')||t.total,building:path.find(group=>group.kind==='building')?.name||'',
     work_description:path.find(group=>group.kind==='work_type')?.name||'',path,...workRollup(groupLines,moneyKeys),
   }));
-  const coverTextColumns=buildings.size&&lines.some(line=>line.work_type)?[
+  const coverTextColumns=grouping.show_summary_building!==false&&grouping.show_summary_work_type!==false&&buildings.size&&lines.some(line=>line.work_type)?[
     {key:'building',label:t.building_unit,weight:16,kind:'text'},
     {key:'work_description',label:t.description,weight:34,kind:'text'},
-  ]:[{key:'name',label:t[({building:'building_unit',unit:'floor_apartment'})[coverKind]||'work_type'],weight:34,kind:'text'}];
+  ]:[{key:'name',label:grouping.show_summary_work_type===false?(grouping.show_summary_building!==false&&buildings.size?t.building_unit:
+    grouping.show_summary_building!==false&&units.size?t.floor_apartment:t.total):
+    t[({building:'building_unit',unit:'floor_apartment'})[coverKind]||'work_type'],weight:34,kind:'text'}];
   return {
     modelVersion: MODEL_VERSION, locale, direction: locale === 'ar' ? 'rtl' : 'ltr', labels: t,
     variant, issued, historical, approved, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',
@@ -485,7 +489,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
     detailGroups, detailBands:bands, coverRows,coverTextColumns,
-    workTotals, financeRows,
+    workTotals, financeRows,showSummaryQuantities:grouping.show_summary_quantities!==false,showDetailQuantities:grouping.show_detail_quantities!==false,
     holds:variant==='internal'?(totals.holds||[]).filter(hold=>Number(hold.balance)>0).map(hold=>({
       label:text(hold.label||t[hold.category]||t.other_rule),collection_date:text(hold.collection_date),balance:money(hold.balance)})):[],
   };

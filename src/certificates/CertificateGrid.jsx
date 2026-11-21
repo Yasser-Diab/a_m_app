@@ -1,6 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Clipboard, Ellipsis, Maximize2, Minimize2, Plus, Redo2, Search, Undo2 } from "lucide-react";
-import { applySmartClipboardGridToRows, fillSmartSelectionDownRows, findSmartCtrlArrowDestination, findSmartTableMatches, insertSmartRowRelative, isSmartFillDownShortcut, parseSmartClipboardGrid, removeSmartRowById, smartSelectionAfterNavigation } from "../smart-table-clipboard.mjs";
+import { ArrowDown, ArrowUp, Clipboard, Ellipsis, Filter, Maximize2, Minimize2, Plus, Redo2, Search, Undo2 } from "lucide-react";
+import {createPortal} from 'react-dom';
+import { applySmartClipboardGridToRows,expandSmartClipboardGrid, fillSmartSelectionDownRows, findSmartCtrlArrowDestination, findSmartTableMatches, insertSmartRowRelative, isSmartFillDownShortcut, parseSmartClipboardGrid, smartSelectionAfterNavigation } from "../smart-table-clipboard.mjs";
+import {ColumnFilter,SelectionStatus,TableSearchPanel} from '../table-tools.jsx';
+import {mergeVisibleRows,reorderVisibleRows,offsetIndex} from '../table-tools.mjs';
 import { Dialog, Field, Money, newKey, numberText, searchText } from "./shared.jsx";
 
 export const GRID_COLUMNS = [
@@ -77,9 +80,9 @@ function cellValue(row,key,locations) {
   return key === "building_unit" ? parts[0] || "" : parts.length > 1 ? parts.at(-1) : "";
 }
 
-const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, locations, editor, focus, onInput, onSelectRow, onMenu, selected, error, locale, addition }) {
+const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, locations, editor, focus, onInput, onSelectRow, onMenu, selected, error, locale, addition,cutKeys }) {
   const rowLabel = rowIndex + 1;
-  return <tr aria-rowindex={rowIndex + 2} className={addition ? "pc-grid-addition" : error ? "pc-row-invalid" : undefined}>
+  return <tr data-grid-row={row._gridId} aria-rowindex={rowIndex + 2} className={[addition?'pc-grid-addition':'',error?'pc-row-invalid':'',focus?'pc-active-row':''].join(' ')}>
     <th scope="row" className="pc-grid-index"><div className="pc-grid-row-buttons">
       <button type="button" data-row-selector={row._gridId} onClick={(event) => onSelectRow(row._gridId,event.shiftKey)}
         aria-label={addition ? t("صف الإضافة", "New data row") : `${t("تحديد الصف", "Select row")} ${rowLabel}`}>{addition ? "+" : rowLabel}</button>
@@ -107,12 +110,12 @@ const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, loc
         kind === "number" ? numberText(display ?? "") : display ?? ""}</bdi>;
       return <td key={key} data-row-id={row._gridId} data-column={key} aria-label={label} aria-selected={Boolean(selected?.includes(key))}
         tabIndex={focus === key ? 0 : -1}
-        className={`${applicable ? "" : "pc-grid-off"} ${selected?.includes(key) ? "pc-grid-selected" : ""}`}>{content}</td>;
+        className={`${applicable ? "" : "pc-grid-off"} ${selected?.includes(key) ? "pc-grid-selected" : ""} ${cutKeys?.has(key)?'pc-grid-cut':''}`}>{content}</td>;
     })}
   </tr>;
 });
 
-export default function CertificateGrid({ rows, onChange, readOnly, t, locale, locations = [], suggestions = [], workItems = [], workTypes = [], operationItems = [], validation = [], totals, currency, settled }) {
+export default function CertificateGrid({ rows, onChange, readOnly, t, locale, locations = [], suggestions = [], workItems = [], workTypes = [], operationItems = [], validation = [], totals, currency, settled,storageKey='certificateGridColumnWidthsV1' }) {
   const grid = useRef(null);
   const currentRows = useRef(rows);
   const additionRow = useRef(null);
@@ -121,6 +124,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   const pointerSelection = useRef(null);
   const editing = useRef(null);
   const resizing = useRef(null);
+  const forcedVisible=useRef(new Set()),clipboard=useRef(null),contextRoot=useRef(null),heights=useRef(new Map());
   const history = useRef({ past: [], future: [] });
   const [historyTick, setHistoryTick] = useState(0);
   const [page, setPage] = useState(0);
@@ -138,6 +142,10 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   const [suggestionCell, setSuggestionCell] = useState(null);
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const [message, setMessage] = useState("");
+  const [filters,setFilters]=useState({}),[columnMenu,setColumnMenu]=useState(null),[searchOpen,setSearchOpen]=useState(false);
+  const [contextMenu,setContextMenu]=useState(null),[deleting,setDeleting]=useState(null),[clipboardTick,setClipboardTick]=useState(0),[heightTick,setHeightTick]=useState(0);
+  useEffect(()=>{try{const saved=JSON.parse(localStorage.getItem(storageKey)||'{}');setWidths(Object.fromEntries(Object.entries(saved).filter(([,value])=>Number.isFinite(value)&&value>=68&&value<=1200)));}catch{setWidths({});}},[storageKey]);
+  useEffect(()=>{if(Object.keys(widths).length)localStorage.setItem(storageKey,JSON.stringify(widths));},[widths,storageKey]);
   const compactColumns = useMemo(() => GRID_COLUMNS.filter((column) => {
     const {key,modes} = column;
     if (["building_unit","floor_apartment","work_type","description","quantity","unit","rate","previous_progress","current_progress","previous","current","cumulative"].includes(key)) return true;
@@ -150,17 +158,28 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   const editableColumns = columns.filter(({key}) => gridKeys.includes(key)).map(({key}) => key);
   const locationMap = useMemo(() => new Map(locations.map((location) => [String(location.id), location])), [locations]);
   const editable = !readOnly && !sortedView;
-  const canAdd = editable && rows.filter((row) => !row.carried_forward).length < maxRows;
-  const displayRows = sortedView ? [...rows].sort((a,b) =>
-    String(cellValue(a,sortBy,locationMap) || "").localeCompare(String(cellValue(b,sortBy,locationMap) || ""),locale,{numeric:true})) :
-    canAdd ? [...rows,additionRow.current] : rows;
+  const canAdd = editable && rows.length < maxRows;
+  const filteredRows=useMemo(()=>rows.filter(row=>forcedVisible.current.has(row._gridId)||Object.entries(filters).every(([key,values])=>values.includes(String(cellValue(row,key,locationMap)??'')))),[rows,filters,locationMap]);
+  const viewRows=useMemo(()=>sortedView?[...filteredRows].sort((a,b)=>String(cellValue(a,sortBy,locationMap)||'').localeCompare(String(cellValue(b,sortBy,locationMap)||''),locale,{numeric:true})):filteredRows,[filteredRows,sortedView,sortBy,locale,locationMap]);
+  const displayRows=useMemo(()=>canAdd?[...viewRows,additionRow.current]:viewRows,[viewRows,canAdd]);
+  const offsets=useMemo(()=>{const result=[0];for(const row of displayRows)result.push(result.at(-1)+(heights.current.get(row._gridId)||virtualHeight));return result;},[displayRows,heightTick]);
   const currentPage = Math.min(page, Math.max(0, Math.ceil(displayRows.length / pageSize) - 1));
-  const start = fullScreen ? Math.min(Math.max(0,displayRows.length-1),Math.max(0,Math.floor(viewport.top / virtualHeight)-8)) : currentPage * pageSize;
-  const end = fullScreen ? Math.min(displayRows.length,Math.max(start+1,Math.ceil((viewport.top + viewport.height)/virtualHeight)+8)) : start + pageSize;
+  const start = fullScreen ? Math.max(0,offsetIndex(offsets,viewport.top)-8) : currentPage * pageSize;
+  const end = fullScreen ? Math.min(displayRows.length,offsetIndex(offsets,viewport.top+viewport.height)+10) : start + pageSize;
   const visible = displayRows.slice(start,end);
   const matches = useMemo(() => findSmartTableMatches({ rows: displayRows, columnOrder: gridKeys, searchText: search }), [displayRows, search]);
   const errors = useMemo(() => new Set(validation.map((item) => String(item.line_id || item.id || ""))), [validation]);
   useLayoutEffect(() => { currentRows.current = rows; }, [rows]);
+  useLayoutEffect(()=>{heights.current.clear();setHeightTick(value=>value+1);},[widths,fullReadView]);
+  useLayoutEffect(()=>{
+    const root=grid.current;if(!root)return;let frame;
+    const observer=new ResizeObserver(entries=>{let changed=false;for(const entry of entries){const id=entry.target.dataset.gridRow,height=entry.target.getBoundingClientRect().height;
+      if(Math.abs((heights.current.get(id)||virtualHeight)-height)>.5){heights.current.set(id,height);changed=true;}}
+      if(changed){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>setHeightTick(value=>value+1));}});
+    root.querySelectorAll('tr[data-grid-row]').forEach(row=>observer.observe(row));return()=>{observer.disconnect();cancelAnimationFrame(frame);};
+  },[rows,start,end,columns,fullScreen,widths]);
+  useEffect(()=>{const end=()=>{pointerSelection.current=null;};window.addEventListener('pointerup',end);return()=>window.removeEventListener('pointerup',end);},[]);
+  useEffect(()=>{if(!contextMenu)return;const close=event=>{if(!contextRoot.current?.contains(event.target))setContextMenu(null);};document.addEventListener('pointerdown',close,true);return()=>document.removeEventListener('pointerdown',close,true);},[contextMenu]);
 
   useLayoutEffect(() => {
     const target = grid.current;
@@ -168,7 +187,9 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     function measure() { setViewport({top:target.scrollTop,height:target.clientHeight}); }
     const observer = new ResizeObserver(measure);
     observer.observe(target);
-    target.scrollTop = currentPage * pageSize * virtualHeight;
+    const activeIndex=selection?.focusCell?displayRows.findIndex(row=>row._gridId===selection.focusCell.rowId):-1;
+    target.scrollTop = offsets[activeIndex>=0?activeIndex:currentPage * pageSize]||0;
+    if(selection?.focusCell){nextFocus.current=selection.focusCell;requestAnimationFrame(focusPending);}
     measure();
     const oldOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -188,7 +209,8 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     const cell = grid.current?.querySelector(`[data-row-id="${CSS.escape(point.rowId)}"][data-column="${CSS.escape(point.columnKey)}"]`);
     const target = point.edit ? cell?.querySelector('input') : cell;
     if (!target) return;
-    target.focus();
+    target.focus({preventScroll:true});
+    cell.scrollIntoView({block:'nearest',inline:'nearest'});
     if (point.edit && !target.readOnly) {
       if (point.typing) target.setSelectionRange(target.value.length,target.value.length);
       else target.select();
@@ -203,9 +225,10 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     if (rowIndex < 0) return;
     nextFocus.current = point;
     if (fullScreen && grid.current) {
-      const targetTop = rowIndex * virtualHeight;
+      const targetTop = offsets[rowIndex]??rowIndex*virtualHeight,targetBottom=offsets[rowIndex+1]??targetTop+virtualHeight;
       const {scrollTop,clientHeight} = grid.current;
-      if (targetTop < scrollTop || targetTop + virtualHeight * 2 > scrollTop + clientHeight) grid.current.scrollTop = Math.max(0,targetTop-virtualHeight);
+      if(targetTop<scrollTop)grid.current.scrollTop=targetTop;
+      else if(targetBottom>scrollTop+clientHeight)grid.current.scrollTop=Math.max(0,targetBottom-clientHeight);
       setViewport({top:grid.current.scrollTop,height:clientHeight});
     } else setPage(Math.floor(rowIndex / pageSize));
     requestAnimationFrame(focusPending);
@@ -256,18 +279,24 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     if (!selection) return null;
     const rowIndex = (point) => displayRows.findIndex((row) => row._gridId === point.rowId);
     const indexes = [rowIndex(selection.anchorCell), rowIndex(selection.focusCell)];
-    const keys = [order.indexOf(selection.anchorCell.columnKey), order.indexOf(selection.focusCell.columnKey)];
+    let keys = [order.indexOf(selection.anchorCell.columnKey), order.indexOf(selection.focusCell.columnKey)];
+    if(order===editableColumns){const edges=[selectionColumns.indexOf(selection.anchorCell.columnKey),selectionColumns.indexOf(selection.focusCell.columnKey)];
+      const selected=selectionColumns.slice(Math.min(...edges),Math.max(...edges)+1).filter(key=>order.includes(key));keys=[order.indexOf(selected[0]),order.indexOf(selected.at(-1))];}
     if ([...indexes,...keys].includes(-1)) return null;
     return { rowStart: Math.min(...indexes), rowEnd: Math.max(...indexes), colStart: Math.min(...keys), colEnd: Math.max(...keys) };
   }
 
-  function paste(clipboard, point) {
-    const data = parseSmartClipboardGrid(clipboard);
-    const entryRows = rows;
+  function paste(text, point) {
+    let data = parseSmartClipboardGrid(text);
+    const entryRows = viewRows;
+    const bounds=range(editableColumns);
+    if(bounds&&displayRows.slice(bounds.rowStart,bounds.rowEnd+1).some(row=>row._gridId===point?.rowId)){
+      data=expandSmartClipboardGrid(data,bounds);point={rowId:displayRows[bounds.rowStart]._gridId,columnKey:editableColumns[bounds.colStart]};
+    }
     const intoAddition = point?.rowId === additionRow.current._gridId;
     const index = intoAddition ? entryRows.length : entryRows.findIndex((item) => item._gridId === point?.rowId);
     if (index < 0 || !data.length) return false;
-    if (index + data.length > maxRows) {
+    if (rows.length+Math.max(0,index+data.length-entryRows.length) > maxRows) {
       setMessage(t("يمكن إدخال 2500 بند بحد أقصى في المستخلص.", "A certificate supports up to 2,500 work rows."));
       return true;
     }
@@ -292,9 +321,22 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
       }
     });
     if (intoAddition) additionRow.current = emptyLine();
-    const edited = new Map(next.rows.map((row) => [row._gridId,row]));
-    const priorIds = new Set(rows.map((row) => row._gridId));
-    change([...rows.map((row) => edited.get(row._gridId) || row), ...next.rows.filter((row) => !priorIds.has(row._gridId))]);
+    const destinations=new Set();data.forEach((values,offset)=>editableColumns.slice(next.startColumn,next.startColumn+values.length)
+      .forEach(key=>destinations.add(next.rows[index+offset]._gridId+'\0'+key)));
+    let result=mergeVisibleRows(rows,next.rows);
+    const cut=clipboard.current;
+    if(cut?.kind==='cut'&&cut.text===text){
+      const visibleIds=new Set(viewRows.map(row=>row._gridId));
+      if(cut.cells.every(cell=>visibleIds.has(cell.id))){
+        const pending=new Map();for(const cell of cut.cells){if(destinations.has(cell.id+'\0'+cell.key))continue;
+          const row=rows.find(row=>row._gridId===cell.id);if(String(cellValue(row,cell.key,locationMap)??'')!==cell.value)continue;
+          const patch=pending.get(cell.id)||{};patch[cell.key]='';pending.set(cell.id,patch);}
+        result=result.map(row=>pending.has(row._gridId)?{...row,...pending.get(row._gridId)}:row);
+      }
+      clipboard.current=null;setClipboardTick(value=>value+1);
+    }
+    const oldIds=new Set(rows.map(row=>row._gridId));result.forEach(row=>{if(!oldIds.has(row._gridId))forcedVisible.current.add(row._gridId);});
+    change(result);
     if (intoAddition) focusCell(point,rows.length);
     setMessage(""); setSuggestionCell(null);
     return true;
@@ -313,6 +355,9 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     const text = displayRows.slice(bounds.rowStart,bounds.rowEnd+1).filter((row) => row !== additionRow.current)
       .map((row) => keys.map((key) => String(cellValue(row,key,locationMap) ?? "").replace(/[\t\r\n]+/g," ")).join("\t")).join("\n");
     if (!text) return;
+    clipboard.current={kind:event.type==='cut'?'cut':'copy',text,cells:displayRows.slice(bounds.rowStart,bounds.rowEnd+1).filter(row=>row!==additionRow.current)
+      .flatMap(row=>keys.filter(key=>gridKeys.includes(key)).map(key=>({id:row._gridId,key,value:String(cellValue(row,key,locationMap)??'')})))};
+    setClipboardTick(value=>value+1);
     event.clipboardData.setData("text/plain",text);
     event.preventDefault();
   }
@@ -390,6 +435,8 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
 
   function onCellPointerDown(event) {
     if (event.button !== 0 || event.pointerType === "touch" || event.target.matches('[data-cell-editor]')) return;
+    const selector=event.target.closest('[data-row-selector]');
+    if(selector){finishEditing();pointerSelection.current={pointerId:event.pointerId,rows:true,moved:false};rowSelection(selector.dataset.rowSelector,event.shiftKey);return;}
     const point = pointFrom(event.target);
     if (!point) return;
     event.preventDefault();
@@ -402,6 +449,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   function extendPointerSelection(event) {
     const drag = pointerSelection.current;
     if (!drag || event.pointerId !== drag.pointerId || !(event.buttons & 1)) return;
+    if(drag.rows){const row=event.target.closest('tr[data-grid-row]');if(row){rowSelection(row.dataset.gridRow,true);drag.moved=true;}return;}
     const point = pointFrom(event.target);
     if (!point || (point.rowId === drag.point.rowId && point.columnKey === drag.point.columnKey)) return;
     drag.point = point;
@@ -414,6 +462,8 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
     const key = event.key;
     const control = event.ctrlKey || event.metaKey;
+    if(control&&(event.code==='KeyF'||key.toLowerCase()==='f')){event.preventDefault();event.stopPropagation();finishEditing();setSearchOpen(true);return;}
+    if(!editing.current&&editable&&key==='Delete'){event.preventDefault();askDelete();return;}
     if (key === "Enter" && event.target.dataset.rowSelector) {
       event.preventDefault();
       const index = displayRows.findIndex((row) => row._gridId === event.target.dataset.rowSelector);
@@ -453,8 +503,9 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
       event.preventDefault(); historyMove(event.shiftKey || event.code === "KeyY" ? "future" : "past"); return;
     }
     if (!active && editable && isSmartFillDownShortcut(event)) {
-      const next = fillSmartSelectionDownRows({rows,range:range(editableColumns),columnOrder:editableColumns,createRow:emptyLine});
-      if (next) { event.preventDefault(); change(next); }
+      event.preventDefault();
+      const next = fillSmartSelectionDownRows({rows:viewRows,range:range(editableColumns),columnOrder:editableColumns,createRow:emptyLine});
+      if (next) { event.preventDefault(); change(mergeVisibleRows(rows,next)); }
       return;
     }
     if (!active && !control && !event.altKey && (key === "F2" || key.length === 1)) {
@@ -512,17 +563,17 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
 
   function toggleFullScreen() {
     if (fullScreen) {
-      setPage(Math.floor(Math.max(0,Math.floor(viewport.top/virtualHeight))/pageSize));
+      setPage(Math.floor(offsetIndex(offsets,viewport.top)/pageSize));
       if (grid.current) grid.current.scrollTop = 0;
     }
     setSuggestionCell(null);
     setFullScreen(!fullScreen);
   }
 
-  function moveMatch() {
+  function moveMatch(step=1,index) {
     if (!matches.length) return;
-    const match = matches[matchIndex % matches.length];
-    setMatchIndex((value) => value + 1);
+    const selected=index??((matchIndex+step+matches.length)%matches.length),match=matches[selected];
+    setMatchIndex(selected);
     select(match, false);
     focusCell(match);
   }
@@ -530,7 +581,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   function rowAction(action) {
     const index = rows.findIndex((row) => row._gridId === rowMenu);
     if (index < 0) return;
-    if (action === "delete") change(removeSmartRowById(rows, rowMenu).rows);
+    if (action === "delete") {askDelete([rowMenu]);return;}
     else if (["above","below","copy"].includes(action) && canAdd) {
       const source = rows[index];
       change(insertSmartRowRelative({ rows, targetRowId: rowMenu, placement: action === "above" ? "above" : "below",
@@ -546,10 +597,40 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     setRowMenu(null);
   }
 
+  function selectedRowIds(){const bounds=range();return bounds?displayRows.slice(bounds.rowStart,bounds.rowEnd+1).filter(row=>row!==additionRow.current).map(row=>row._gridId):[];}
+  function askDelete(ids=selectedRowIds()){
+    if(!editable||!ids.length)return;setDeleting(ids);setContextMenu(null);setRowMenu(null);
+  }
+  function deleteSelected(){const ids=new Set(deleting);change(rows.filter(row=>!ids.has(row._gridId)));setDeleting(null);setSelection(null);}
+  function insertAbove(){
+    const ids=selectedRowIds(),first=ids[0]||selection?.focusCell.rowId,index=rows.findIndex(row=>row._gridId===first),count=Math.max(1,ids.length);
+    if(!canAdd||rows.length+count>maxRows)return;
+    const added=Array.from({length:count},emptyLine);added.forEach(row=>forcedVisible.current.add(row._gridId));
+    const at=index<0?rows.length:index;change([...rows.slice(0,at),...added,...rows.slice(at)]);
+    setSelection({anchorCell:{rowId:added[0]._gridId,columnKey:selectionColumns[0]},focusCell:{rowId:added.at(-1)._gridId,columnKey:selectionColumns.at(-1)}});
+    focusCell({rowId:added[0]._gridId,columnKey:'description'},Math.max(0,displayRows.findIndex(row=>row._gridId===first)));setContextMenu(null);
+  }
+  function cutFromMenu(){let text='';copySelection({type:'cut',target:grid.current,clipboardData:{setData:(_type,value)=>{text=value;}},preventDefault(){}});
+    if(text)navigator.clipboard?.writeText(text).catch(()=>{});setContextMenu(null);}
+  function openContext(event){
+    if(!editable||event.target.matches('[data-cell-editor]'))return;
+    const point=pointFrom(event.target),row=event.target.closest('tr[data-grid-row]');if(!row)return;
+    event.preventDefault();finishEditing();const bounds=range(),index=displayRows.findIndex(item=>item._gridId===row.dataset.gridRow);
+    if(!bounds||index<bounds.rowStart||index>bounds.rowEnd)point?select(point,false):rowSelection(row.dataset.gridRow,false);
+    setContextMenu({left:Math.max(8,Math.min(event.clientX,window.innerWidth-275)),top:Math.max(8,Math.min(event.clientY,window.innerHeight-320))});
+  }
+  const closeFilter=useCallback(()=>setColumnMenu(null),[]);
+  const filterValues=columnMenu?[...new Set(rows.map(row=>String(cellValue(row,columnMenu.key,locationMap)??'')))].sort((a,b)=>a.localeCompare(b,locale,{numeric:true})).map(value=>({value,label:cellChoices(GRID_COLUMNS.find(col=>col.key===columnMenu.key)?.kind,t)?.find(choice=>choice.key===value)?.label??value})):[];
+
   const selectedRange = range();
+  const selectedValues=useMemo(()=>selectedRange?displayRows.slice(selectedRange.rowStart,selectedRange.rowEnd+1).filter(row=>row!==additionRow.current)
+    .flatMap(row=>selectionColumns.slice(selectedRange.colStart,selectedRange.colEnd+1).map(key=>cellValue(row,key,locationMap))):[],[displayRows,selection,columns,locationMap]);
+  const cutMap=useMemo(()=>{const result=new Map();for(const cell of clipboard.current?.kind==='cut'?clipboard.current.cells:[]){const keys=result.get(cell.id)||new Set();keys.add(cell.key);result.set(cell.id,keys);}return result;},[clipboardTick]);
+  const tableWidth=72+columns.reduce((sum,col)=>sum+(widths[col.key]||col.width||105),0);
   const menuSource = rows.find((row) => row._gridId === rowMenu);
   return <section className={`pc-grid-section${fullScreen ? " pc-grid-fullscreen" : ""}`} data-history={historyTick}
-    onKeyDown={(event) => { if (event.key === "Escape" && fullScreen && !event.defaultPrevented) toggleFullScreen(); }}>
+    onKeyDown={(event) => { if(event.key==='Escape'&&contextMenu){event.preventDefault();setContextMenu(null);}
+      else if (event.key === "Escape" && fullScreen && !event.defaultPrevented) toggleFullScreen(); }}>
     <div className="pc-toolbar pc-grid-toolbar">
       <h3>{t("بنود الأعمال", "Work rows")}</h3>
       <button type="button" aria-pressed={fullReadView} onClick={() => { setFullReadView(!fullReadView); setSuggestionCell(null); }}>
@@ -561,17 +642,19 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
       </button>
       {!readOnly && <>
         <button type="button" onClick={addRow} disabled={!canAdd}><Plus size={16} />{t("بند", "Add row")}</button>
+        <button type="button" disabled={!editable||!selectedRowIds().length} onClick={()=>askDelete()}>{t('حذف الصفوف','Delete rows')}</button>
         <button type="button" title={t("تراجع", "Undo")} aria-label={t("تراجع", "Undo")} disabled={!editable || !history.current.past.length} onClick={() => historyMove("past")}><Undo2 size={17} /></button>
         <button type="button" title={t("إعادة", "Redo")} aria-label={t("إعادة", "Redo")} disabled={!editable || !history.current.future.length} onClick={() => historyMove("future")}><Redo2 size={17} /></button>
         {navigator.clipboard?.readText && <button type="button" title={t("لصق", "Paste")} aria-label={t("لصق", "Paste")} disabled={!editable || !selection} onClick={() => navigator.clipboard.readText().then((value) => paste(value, selection.focusCell)).catch(() => {})}><Clipboard size={17} /></button>}
       </>}
-      <div className="pc-grid-search"><input aria-label={t("البحث في البنود", "Search rows")} placeholder={t("بحث في البنود", "Search rows")} value={search} onChange={(event) => { setSearch(event.target.value); setMatchIndex(0); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); moveMatch(); } }} />
-        <button type="button" aria-label={t("النتيجة التالية", "Next result")} disabled={!matches.length} onClick={moveMatch}><Search size={16} />{search && <bdi>{matches.length}</bdi>}</button></div>
+      <button type="button" onClick={()=>setSearchOpen(true)}><Search size={16}/>{t('بحث في الجدول','Find in table')} <kbd>Ctrl+F</kbd></button>
       <select aria-label={t("ترتيب العرض", "Display order")} value={sortedView ? sortBy : ""} onChange={(event) => { setSortBy(event.target.value); setSortedView(Boolean(event.target.value)); setPage(0); }}>
         <option value="">{t("ترتيب الإدخال", "Entry order")}</option><option value="work_type">{t("نوع الأعمال", "Work type")}</option><option value="description">{t("الوصف", "Description")}</option><option value="work_item">{t("رمز البند", "Item code")}</option>
       </select>
     </div>
-    {sortedView && !readOnly && <div className="pc-toolbar pc-grid-sort-note"><span>{t("العرض مرتب مؤقتًا.", "This view is sorted temporarily.")}</span><button type="button" onClick={() => { change(displayRows); setSortedView(false); }}>{t("اعتماد الترتيب", "Keep this order")}</button></div>}
+    {sortedView && !readOnly && <div className="pc-toolbar pc-grid-sort-note"><span>{t("العرض مرتب مؤقتًا.", "This view is sorted temporarily.")}</span><button type="button" onClick={() => { change(reorderVisibleRows(rows,viewRows)); setSortedView(false); }}>{t("اعتماد الترتيب", "Keep this order")}</button></div>}
+    {!!Object.keys(filters).length&&<div className="pc-toolbar"><span>{t('الصفوف الظاهرة','Visible rows')}: <bdi>{viewRows.length} / {rows.length}</bdi></span>
+      <button type="button" onClick={()=>{setFilters({});setPage(0);setSelection(null);forcedVisible.current.clear();}}>{t('إزالة كل التصفيات','Clear all filters')}</button></div>}
     {message && <p className="pc-problem" role="status">{message}</p>}
     <div ref={grid} className="pc-grid-scroll" tabIndex={0} aria-label={t("جدول بنود المستخلص", "Certificate work grid")}
       onKeyDown={onKeyDown}
@@ -581,6 +664,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
       }}
       onPointerDown={onCellPointerDown}
       onPointerMove={extendPointerSelection}
+      onContextMenu={openContext}
       onClick={(event) => {
         if (event.nativeEvent.pointerType !== "touch") return;
         const point = pointFrom(event.target);
@@ -594,6 +678,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
         if (event.target.matches('[data-cell-editor]')) finishEditing();
       }}
       onCopy={copySelection}
+      onCut={event=>{if(editable)copySelection(event);}}
       onPaste={(event) => {
         const {rowSelector} = event.target.dataset;
         const value = event.clipboardData.getData("text/plain");
@@ -603,9 +688,12 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
           if (paste(value,point)) event.preventDefault();
         }
       }}>
-      <table className="pc-grid" role="grid" aria-multiselectable="true" aria-rowcount={displayRows.length + 1}>
+      <table className="pc-grid" role="grid" style={{width:tableWidth,minWidth:tableWidth,maxWidth:tableWidth}} aria-multiselectable="true" aria-rowcount={displayRows.length + 1}>
         <colgroup><col style={{width:72}} />{columns.map(({ key, width }) => <col key={key} style={{ width:widths[key] || width || 105 }} />)}</colgroup>
         <thead><tr><th scope="col" className="pc-grid-index">#</th>{columns.map(({key,label,width}) => <th scope="col" key={key}>{t(...label)}
+          <button type="button" className={`pc-grid-filter${filters[key]?' active':''}`} aria-label={t('تصفية ','Filter ')+t(...label)} onClick={event=>{
+            const rect=event.currentTarget.getBoundingClientRect();finishEditing();setColumnMenu({key,left:Math.max(8,Math.min(rect.left,window.innerWidth-340)),top:Math.max(8,Math.min(rect.bottom,window.innerHeight-470))});
+          }}><Filter size={12}/></button>
           <button type="button" className="pc-grid-resizer" aria-label={`${t("تغيير عرض العمود","Resize column")} ${t(...label)}`}
             onPointerDown={(event) => {
               if (event.button !== 0) return;
@@ -618,7 +706,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
               const drag = resizing.current;
               if (!drag || drag.pointerId !== event.pointerId || drag.key !== key) return;
               const change = (event.clientX-drag.x)*(locale === "ar" ? -1 : 1);
-              const next = Math.max(68,Math.min(650,drag.width+change));
+              const next = Math.max(68,Math.min(1200,drag.width+change));
               setWidths((current) => ({...current,[key]:next}));
             }}
             onLostPointerCapture={(event) => {
@@ -628,11 +716,11 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
               if (!["ArrowLeft","ArrowRight"].includes(event.key)) return;
               event.preventDefault();
               const delta = (event.key === "ArrowRight" ? 12 : -12)*(locale === "ar" ? -1 : 1);
-              setWidths((current) => ({...current,[key]:Math.max(68,Math.min(650,(current[key] || width || 105)+delta))}));
+              setWidths((current) => ({...current,[key]:Math.max(68,Math.min(1200,(current[key] || width || 105)+delta))}));
             }} />
         </th>)}</tr></thead>
         <tbody>
-        {fullScreen && start > 0 && <tr className="pc-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:start*virtualHeight}} /></tr>}
+        {fullScreen && start > 0 && <tr className="pc-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:offsets[start]}} /></tr>}
         {visible.map((row, index) => {
           const absolute = start + index;
           const selected = selectedRange && absolute >= selectedRange.rowStart && absolute <= selectedRange.rowEnd
@@ -640,14 +728,34 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
           return <WorkRow key={row._gridId} row={row} rowIndex={absolute} columns={columns} t={t} readOnly={!editable} locations={locationMap}
             editor={editor?.rowId === row._gridId ? editor : null}
             focus={selection?.focusCell.rowId === row._gridId ? selection.focusCell.columnKey : null}
-            onInput={updateEditor} onSelectRow={rowSelection} onMenu={setRowMenu} selected={selected} error={errors.has(String(row.id)) || errors.has(String(row.identity))}
+            onInput={updateEditor} onSelectRow={rowSelection} onMenu={setRowMenu} selected={selected} cutKeys={cutMap.get(row._gridId)} error={errors.has(String(row.id)) || errors.has(String(row.identity))}
             locale={locale} addition={canAdd && row === additionRow.current} />;
         })}
-        {fullScreen && end < displayRows.length && <tr className="pc-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:(displayRows.length-end)*virtualHeight}} /></tr>}
+        {fullScreen && end < displayRows.length && <tr className="pc-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:offsets.at(-1)-offsets[end]}} /></tr>}
         </tbody>
       </table>
       {!displayRows.length && <p className="pc-grid-empty">{t("لا توجد بنود بعد.", "No work rows yet.")}</p>}
     </div>
+    <SelectionStatus values={selectedValues} uiLanguage={locale}/>
+    {searchOpen&&<TableSearchPanel initialQuery={search} results={matches} currentIndex={matchIndex} columnLabel={key=>t(...GRID_COLUMNS.find(col=>col.key===key).label)}
+      onSearchChange={setSearch} onClose={()=>{setSearchOpen(false);if(selection?.focusCell)focusCell(selection.focusCell);}} onPrevious={()=>moveMatch(-1)} onNext={()=>moveMatch(1)} onJump={(_match,index)=>moveMatch(0,index)} uiLanguage={locale}/>}
+    {columnMenu&&<ColumnFilter column={t(...GRID_COLUMNS.find(col=>col.key===columnMenu.key).label)} values={filterValues} selected={filters[columnMenu.key]}
+      t={t} position={{left:columnMenu.left,top:columnMenu.top}} onClose={closeFilter} onApply={values=>{
+        setFilters(previous=>{const next={...previous};if(values)next[columnMenu.key]=values;else delete next[columnMenu.key];return next;});
+        forcedVisible.current.clear();setColumnMenu(null);setSelection(null);setPage(0);if(grid.current)grid.current.scrollTop=0;
+      }}/>}
+    {contextMenu&&createPortal(<section ref={contextRoot} className="pc-grid-context-menu" role="menu" aria-label={t('إجراءات التحديد','Selection actions')}
+      style={contextMenu} dir={locale==='ar'?'rtl':'ltr'} onKeyDown={event=>{if(event.key==='Escape')setContextMenu(null);}}>
+      <button type="button" role="menuitem" className="danger" onClick={()=>askDelete()}>{t('حذف الصفوف المحددة','Delete selected rows')} <bdi>({selectedRowIds().length})</bdi></button>
+      {clipboard.current?.kind==='cut'&&<button type="button" role="menuitem" onClick={()=>{paste(clipboard.current.text,selection?.focusCell);setContextMenu(null);}}>{t('لصق الخلايا المقصوصة','Paste cut cells')}</button>}
+      <button type="button" role="menuitem" onClick={cutFromMenu}>{t('قص النطاق','Cut range')}</button>
+      <button type="button" role="menuitem" disabled={!canAdd} onClick={insertAbove}>{t('إدراج أعلى التحديد','Insert above selection')} <bdi>({Math.max(1,selectedRowIds().length)})</bdi></button>
+      <button type="button" role="menuitem" onClick={()=>setContextMenu(null)}>{t('إلغاء','Cancel')}</button>
+    </section>,document.body)}
+    {deleting&&<Dialog title={t('حذف الصفوف المحددة','Delete selected rows')} onClose={()=>setDeleting(null)} t={t}>
+      <p>{t(`حذف ${deleting.length} من الصفوف المحددة بالكامل؟`,`Delete ${deleting.length} selected rows completely?`)}</p>
+      <div className="pc-toolbar"><button type="button" className="danger" onClick={deleteSelected}>{t('تأكيد الحذف','Confirm deletion')}</button>
+        <button type="button" onClick={()=>setDeleting(null)}>{t('إلغاء','Cancel')}</button></div></Dialog>}
     {suggestionCell && suggestionsForCell.length > 0 && <div className="pc-grid-suggestions" role="listbox"
       style={{width:suggestionCell.width,left:suggestionCell.left,top:suggestionCell.top,bottom:suggestionCell.bottom}}>
       {suggestionsForCell.map(({key,label},index) => <div role="option" key={key} aria-selected={suggestionIndex === index} dir="auto"

@@ -10,6 +10,7 @@ const production = require("./production.cjs");
 const finance = require("./finance.cjs");
 const management = require("./management-reports.cjs");
 const sourceRefresh=require("./source-refresh.cjs");
+const {editedReport,saveReportEdit}=require('./report-edits.cjs');
 const {report,appendDrawings,reportFilename} = require("./reports.cjs");
 const {awardReference}=require("./references.cjs");
 
@@ -241,9 +242,16 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   post(base+"/orders/:orderId/loading","ops_load",(req,access,id)=>production.loadBatch(db,order(req,id),req.body,access.user));
   const prepareReport=(req,access,id)=>db.transaction(()=>{
     const current=production.prepareOutput(db,order(req,id),req.body,access.user);
-    return {current,...report(db,core.operation(db,id),current,req.body,branding())};
+    const output=report(db,core.operation(db,id),current,req.body,branding());
+    return {current,...output,...editedReport(db,current,req.body,output.html)};
   });
-  endpoint("post",base+"/orders/:orderId/report","ops_export",(req,access,id)=>({html:prepareReport(req,access,id).html}));
+  endpoint("post",base+"/orders/:orderId/report","ops_export",(req,access,id)=>{
+    const {html,edit_version,document_ref,report_key,customized}=prepareReport(req,access,id);return {html,edit_version,document_ref,report_key,customized};
+  });
+  post(base+'/orders/:orderId/report-edits','ops_edit',(req,access,id)=>{
+    const current=production.prepareOutput(db,order(req,id),req.body,access.user);
+    return saveReportEdit(db,current,req.body,access.user);
+  });
   endpoint("post",base+"/orders/:orderId/pdf","ops_export",async(req,access,id,res)=>{
     const {current,html,pdfDrawings}=prepareReport(req,access,id);
     const rendered=await renderPdf(html,{report_language:req.body.locale==="ar"?"ar":"en",prepared_by:access.user.display_name || access.user.username});

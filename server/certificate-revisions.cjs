@@ -30,7 +30,8 @@ function normalizeHeader(input = {}, project, profile, originalType) {
   if (type==="correction"&&input.recover_advance===true) header.recover_advance=true;
   if (["none","building","unit","work_type"].includes(input.group_by ?? profile.settings.group_by))
     header.group_by = input.group_by ?? profile.settings.group_by;
-  for (const key of ["show_building_subtotals", "show_unit_subtotals", "show_work_type_subtotals"]) {
+  for (const key of ["show_building_subtotals", "show_unit_subtotals", "show_work_type_subtotals",
+    "show_summary_building","show_summary_work_type","show_summary_quantities","show_detail_quantities"]) {
     const flag = input[key] ?? profile.settings[key];
     if (typeof flag === "boolean") header[key] = flag;
   }
@@ -167,7 +168,8 @@ function certificateDocumentInput(database, row, lines = null) {
   }
   const ledger = allocationLedger(database,project.id,profile,header.collection_cutoff,{workCutoff:header.work_to,
     previousCutoff:baseline?.header?.collection_cutoff ?? DATE_FLOOR,locationId:header.location_id,revisionId:row.id,seriesKey:row.series_key});
-  const calculated = calculateValuation(lines || getLines(database, row.id), baseline, profile, ledger,{recoverAdvance:header.recover_advance===true});
+  const calculated = calculateValuation(lines || getLines(database, row.id), baseline, profile, ledger,
+    {recoverAdvance:header.recover_advance===true,correction:row.type==='correction'});
   const validation = [...calculated.errors];
   if (!calculated.lines.some((line) => !line.carried_forward) && row.type !== "reopen"&&!header.recover_advance)
     validation.push({field:"lines", message:"Enter at least one work row"});
@@ -375,7 +377,10 @@ function makeRevision(database, row, action, reason, user, recoverAdvance=false)
   const header = {...source.header, type, work_from:advanceFix?source.header.work_from:null, work_to:workTo, collection_cutoff:collectionCutoff,
     rule_override:null, override_reason:null,recover_advance:Boolean(advanceFix)};
   const lines = type === "void" || row.status === "historical" ? source.lines.filter((line) => !line.carried_forward).map((line) =>
-    ({...line, mode:"adjustment", adjustment_amount:type === "void" ? -line.current : 0, recognition:"incremental", reason})) : [];
+    ({...line, mode:"adjustment", adjustment_amount:type === "void" ? -line.current : 0, recognition:"incremental", reason})) :
+    type==='correction'&&!advanceFix?source.lines.map(line=>({...line,carried_forward:false,recognition:'cumulative',
+      ...(line.mode==='adjustment'?{adjustment_amount:0}:line.mode==='lump'&&line.claim_amount!=null?
+        {claim_amount:line.cumulative,progress:null}:{progress:line.cumulative_progress??line.previous_progress??line.progress}),reason})):[];
   return createDraft(database, project, {header, lines}, user, {type,rootId:root,revisesId:row.id,number:row.revision+1,reason});
 }
 

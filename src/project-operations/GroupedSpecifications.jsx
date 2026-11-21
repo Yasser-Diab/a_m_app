@@ -3,6 +3,7 @@ import {Field,queryString,useResource} from "../certificates/shared.jsx";
 import {ErrorMessage,Page,Pick,Table} from "./shared.jsx";
 import {SpecificationError,applySpecificationEdits,editSpecification,resolveSpecificationEdits} from "./specification-edits.jsx";
 import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText,hasTrim} from "./terminology.js";
+import {SelectionStatus} from '../table-tools.jsx';
 
 const measurementFields=[
   ["tag","رقم الفتحة","Opening tag"],["quantity","العدد","Count"],
@@ -65,6 +66,7 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
   const [busy,setBusy]=useState(false);
   const [problem,setProblem]=useState(null);
   const [message,setMessage]=useState("");
+  const [measurementCell,setMeasurementCell]=useState(null);
   const groupList=useResource(request,boqId?url+queryString({boq_id:boqId}):null,revision);
   const [groupCache,setGroupCache]=useState(null);
   useEffect(()=>{if (groupList.data) setGroupCache({boqId,data:groupList.data});},[boqId,groupList.data]);
@@ -185,10 +187,12 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
             ...measurementFields.map(([key])=><input type={key==="tag"?"text":"number"} aria-label={item.code+" · "+label(key)}
               title={label(key)} disabled={!editAllowed||busy} value={item.technical[key]??""} min={0}
               step={key==="quantity"?1:"any"} dir={key==="tag"?"auto":"ltr"}
+              onFocus={()=>setMeasurementCell({id:item.id,key})}
               onChange={(event)=>change([items.find(({id})=>id===item.id)],key,event.target.value)}/>),
             <bdi>{[item.technical.building,item.technical.floor,item.technical.room].filter(Boolean).join(" / ")||"—"}</bdi>,
           ]])}/>
         <Page data={{page:currentPage,total:items.length,limit}} onPage={setPage} t={t}/>
+        <SelectionStatus uiLanguage={uiLanguage} values={measurementCell?[displayed.find(item=>item.id===measurementCell.id)?.technical[measurementCell.key]]:[]}/>
       </section>
     </form>}
     {!data&&!groupList.pending&&!group.pending&&!groups.length&&!groupList.error&&<p>{t("لا توجد بنود في هذا الجدول.","This BOQ has no active items.")}</p>}

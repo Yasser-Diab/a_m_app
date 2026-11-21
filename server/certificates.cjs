@@ -295,7 +295,7 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
 
   router.get("/access",(req,res) => {
     const {user,...access} = accessFor(database,req);
-    res.json(access);
+    res.json({...access,user_id:user.id});
   });
   router.get("/admin/feature",(req,res) => {
     admin(req);

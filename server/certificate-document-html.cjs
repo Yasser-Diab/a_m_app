@@ -178,18 +178,18 @@ function detailRows(model) {
   return [...bands.flatMap(({kind,path,line,totals},index) => {
     const attributes = `data-path="${escapeHtml(JSON.stringify(path))}" ${bandAttributes(path)}`;
     if (kind === 'group') return [`<tr class="group group-${path.at(-1).kind}" ${attributes} data-group-row="true" data-keep-next="true"><th scope="rowgroup" colspan="${columns.length}"><bdi dir="auto">${escapeHtml(path.at(-1).name)}</bdi></th></tr>`];
-    if (kind === 'subtotal') return [subtotalRow(totals,columns,moneyKeys,subtotalLabelParts(model,path.at(-1)),attributes + (bands[index+1]?.kind === 'subtotal' ? ' data-keep-next="true"' : ''))];
+    if (kind === 'subtotal') return [subtotalRow(model.showDetailQuantities===false?{...totals,count:null,quantities:[]}:totals,columns,moneyKeys,subtotalLabelParts(model,path.at(-1)),attributes + (bands[index+1]?.kind === 'subtotal' ? ' data-keep-next="true"' : ''))];
     const fragments = splitWideLine(line,columns,landscape);
     return fragments.map((fragment,i) => `<tr ${attributes}${i === fragments.length-1 && bands[index+1]?.kind === 'subtotal' ? ' data-keep-next="true"' : ''}>${rowCells(fragment,columns)}</tr>`);
-  }), subtotalRow(workTotals, columns, moneyKeys, labels.total)];
+  }), subtotalRow(model.showDetailQuantities===false?{...workTotals,count:null,quantities:[]}:workTotals, columns, moneyKeys, labels.total)];
 }
 
 function buildCertificateHtml(model) {
   const { labels, locale, direction, columns, coverRows, moneyKeys, workTotals, receiptColumns, landscape, paper } = model;
   const coverTextColumns=model.coverTextColumns||[{key:'name',label:model.groupLabel||labels.work_type,weight:34,kind:'text'}];
   const coverColumns = [...coverTextColumns,
-    ...(workTotals.count != null ? [{key:'count',label:labels.count,weight:8,kind:'number'}] : []),
-    ...(workTotals.quantities?.length ? [{key:'billed_quantity',label:labels.billed_quantity,weight:26,kind:'quantity'}] : []),
+    ...(model.showSummaryQuantities!==false&&workTotals.count != null ? [{key:'count',label:labels.count,weight:8,kind:'number'}] : []),
+    ...(model.showSummaryQuantities!==false&&workTotals.quantities?.length ? [{key:'billed_quantity',label:labels.billed_quantity,weight:26,kind:'quantity'}] : []),
     ...moneyKeys.map((key) => ({ key, label: labels[key], weight: 18, kind: 'money' }))];
   const size = paper === 'Letter' ? [215.9, 279.4] : [210, 297];
   const [width, height] = landscape ? size.toReversed() : size;

@@ -7,6 +7,7 @@ import {
 } from "../smart-table-clipboard.mjs";
 import {SpecificationError,applySpecificationEdits,editSpecification,resolveSpecificationEdits} from "./specification-edits.jsx";
 import {technicalText,fieldOptions,configurationTags,perimeterText,hasTrim} from "./terminology.js";
+import {SelectionStatus} from '../table-tools.jsx';
 
 const mainKeys=["tag","category","system","quantity","width_mm","height_mm","profile","color","infill"];
 const lockColumns=["leaves","lock_right","lock_left","central_lock_handle"];
@@ -271,7 +272,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
         }} onDoubleClick={(event)=>{const p=point(event.target);if (p) start(p);}}>
         <thead><tr><th scope="col">{t("البند","Item")}</th><th scope="col">{t("وصف البند","BOQ description")}</th>
           {columns.map((key)=><th key={key} scope="col">{definitions.get(key)[locale]}</th>)}</tr></thead>
-        <tbody>{records.map((row,r)=><tr key={row.id}>
+        <tbody>{records.map((row,r)=><tr key={row.id} className={activePoint?.row===r?'table-active-row':''}>
           <th scope="row"><button type="button" className="pc-name" onClick={()=>openItem(row.id)}>{row.code}</button></th>
           <td className="ops-description" title={row.commercial.description}>
             <bdi>{row.commercial.description}</bdi>
@@ -293,6 +294,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
         </tr>)}</tbody>
       </table>
     </div>
+    <SelectionStatus uiLanguage={locale} values={range?records.slice(range.rowStart,range.rowEnd+1).flatMap(row=>columns.slice(range.colStart,range.colEnd+1).map(key=>value(row,key))):[]}/>
     {pagination}
   </section>;
 }

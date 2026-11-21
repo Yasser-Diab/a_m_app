@@ -58,6 +58,7 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   td.number{white-space:nowrap;font-variant-numeric:tabular-nums}.work-group h3{font-size:10.5pt}
   thead{display:table-header-group;background:#e5eef1}tr{break-inside:avoid}
   .loading-sheet{table-layout:fixed;font-size:8.5pt}.loading-sheet td{height:12mm}
+  .loading-sheet tbody.opening-band-0{background:#f1f6f8}.loading-sheet tbody.opening-band-1{background:#fff}
   .loading-sheet td:nth-child(-n+8){white-space:nowrap}.loading-sheet th{font-size:8pt;overflow-wrap:normal;hyphens:none}
   .drawings{display:flex;flex-wrap:wrap;gap:8px}
   figure{max-width:47%;margin:6px 0 0;break-inside:avoid}figure img{max-width:100%;max-height:66mm;object-fit:contain}
@@ -272,12 +273,17 @@ function maintenanceBlock(order,locale) {
 function loadingBlock(order,locale) {
   const t=(ar,en)=>label(ar,en,locale);
   const details=new Map(order.items.map((item)=>[item.id,item.specification]));
-  const rows=order.balances.map((entry)=>{
+  const priority={frames:0,sliding:1,hinged:2,fixed:3,other:4,items:5,screens:6};
+  const ordered=order.items.flatMap(item=>order.balances.filter(entry=>entry.order_item_id===item.id).sort((a,b)=>(priority[a.kind]??5)-(priority[b.kind]??5)));
+  let last=null,band=-1;
+  const rows=ordered.map((entry)=>{
+    const begin=last!==entry.order_item_id;if(begin){last=entry.order_item_id;band++;}
     const spec=details.get(entry.order_item_id);
     const tech=spec.technical;
     const values=[tech.tag||spec.code,(tech.width_mm??"—")+" × "+(tech.height_mm??"—"),t(...panelLabels[entry.kind]),
       entry.required,entry.loaded,"","",entry.remaining,""];
-    return "<tr>"+values.map((value,index)=>'<td'+(index>2&&index<8?' class="number"':"")+'><bdi dir="'+direction(value)+'">'+escape(value)+"</bdi></td>").join("")+"</tr>";
+    return (begin?(band?'</tbody>':'')+`<tbody class="opening-band-${band%2}" data-opening="${entry.order_item_id}">`:'')+
+      "<tr>"+values.map((value,index)=>'<td'+(index>2&&index<8?' class="number"':"")+'><bdi dir="'+direction(value)+'">'+escape(value)+"</bdi></td>").join("")+"</tr>";
   }).join("");
   const frames=order.balances.filter(({kind})=>kind==="frames").reduce((sum,entry)=>sum+entry.required,0);
   const leaves=order.balances.filter(({kind})=>["sliding","hinged","other"].includes(kind)).reduce((sum,entry)=>sum+entry.required,0);
@@ -287,7 +293,7 @@ function loadingBlock(order,locale) {
     (screens?' · '+escape(t("إجمالي ضلف السلك","Total flyscreen leaves"))+' '+screens:'')+'</p>'+
     '<table class="loading-sheet"><colgroup>'+[14,15,15,8,10,8,10,10,10].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row([t("الفتحة","Opening"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),
       t("المحمل سابقًا","Previously loaded"),t("الحالي","Current"),t("التراكمي","Cumulative"),t("المتبقي","Remaining"),t("ملاحظات / تاريخ","Notes / date")],"th")+
-    "</thead><tbody>"+rows+"</tbody></table></section>";
+    "</thead>"+rows+(ordered.length?'</tbody>':'')+"</table></section>";
 }
 
 function approvalReport(db,order,locale) {

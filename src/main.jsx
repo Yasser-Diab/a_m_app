@@ -11,6 +11,7 @@ import React, {
 import { createRoot } from "react-dom/client";
 import { createPortal, flushSync } from "react-dom";
 import ReportPreviewFrame from "./report-preview.jsx";
+import {SelectionStatus,TableSearchPanel as SmartTableSearchPanel} from "./table-tools.jsx";
 import {
   Activity,
   AlertTriangle,
@@ -11233,165 +11234,6 @@ function ConfirmationLayer({ dialog, onResult }) {
   );
 }
 
-function SmartTableSearchPanel({
-  initialQuery,
-  results,
-  currentIndex,
-  columnLabel,
-  onSearchChange,
-  onClose,
-  onPrevious,
-  onNext,
-  onJump,
-  onReplaceAll,
-  uiLanguage = "ar",
-}) {
-  const [query, setQuery] = useState(initialQuery || "");
-  const [replacement, setReplacement] = useState("");
-  const inputRef = useRef(null);
-  const t = (ar, en) => (uiLanguage === "en" ? en || uiText(ar, "en") : ar);
-
-  useEffect(() => {
-    inputRef.current?.focus({ preventScroll: true });
-    inputRef.current?.select();
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => onSearchChange(query), 120);
-    return () => window.clearTimeout(timer);
-  }, [onSearchChange, query]);
-
-  const safeCurrentIndex =
-    results.length && currentIndex >= 0
-      ? Math.min(currentIndex, results.length - 1)
-      : 0;
-  const resultWindowStart = Math.max(
-    0,
-    Math.min(
-      safeCurrentIndex - 30,
-      Math.max(0, results.length - 80),
-    ),
-  );
-  const visibleResults = results.slice(
-    resultWindowStart,
-    resultWindowStart + 80,
-  );
-
-  function highlightedValue(result) {
-    const text = String(result.value || "");
-    const start = Math.max(0, result.matchRange?.start || 0);
-    const end = Math.max(start, result.matchRange?.end || start);
-    return (
-      <span className="smart-search-result-value">
-        {text.slice(0, start)}
-        <mark>{text.slice(start, end)}</mark>
-        {text.slice(end)}
-      </span>
-    );
-  }
-
-  return (
-    <section
-      className="smart-table-search-panel"
-      dir={uiLanguage === "en" ? "ltr" : "rtl"}
-      aria-label={t("بحث واستبدال في الجدول", "Search and replace in table")}
-    >
-      <div className="smart-search-head">
-        <strong>{t("بحث في الجدول", "Search Table")}</strong>
-        <button
-          type="button"
-          className="icon-button"
-          title={t("إغلاق البحث", "Close search")}
-          onClick={onClose}
-        >
-          <X size={16} />
-        </button>
-      </div>
-      <input
-        ref={inputRef}
-        data-smart-search-input="true"
-        value={query}
-        placeholder={t("اكتب النص أو الرقم المطلوب...", "Type the required text or number...")}
-        onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            onClose();
-            return;
-          }
-          if (event.key === "Enter") {
-            event.preventDefault();
-            if (event.shiftKey) onPrevious();
-            else onNext();
-          }
-        }}
-      />
-      <label className="smart-search-replace-field">
-        <span>{t("استبدال بـ:", "Replace with:")}</span>
-        <input
-          value={replacement}
-          onChange={(event) => setReplacement(event.target.value)}
-        />
-      </label>
-      <div className="smart-search-actions">
-        <span>
-          {results.length
-            ? uiLanguage === "en"
-              ? `${safeCurrentIndex + 1} of ${results.length}`
-              : `${safeCurrentIndex + 1} من ${results.length}`
-            : uiLanguage === "en"
-              ? "0 results"
-              : "0 نتيجة"}
-        </span>
-        <button type="button" onClick={onPrevious} disabled={!results.length}>
-          {t("السابق", "Previous")}
-        </button>
-        <button type="button" onClick={onNext} disabled={!results.length}>
-          {t("التالي", "Next")}
-        </button>
-        <button
-          type="button"
-          className="primary"
-          disabled={!query.trim() || !results.length}
-          onClick={() => onReplaceAll(query, replacement)}
-        >
-          {t("استبدال الكل", "Replace All")}
-        </button>
-      </div>
-      {!!results.length && (
-        <div className="smart-search-results" role="list">
-          {visibleResults.map((result, windowIndex) => {
-            const resultIndex = resultWindowStart + windowIndex;
-            return (
-              <article
-                key={`${result.rowId}:${result.columnKey}`}
-                className={
-                  resultIndex === safeCurrentIndex ? "current-result" : ""
-                }
-                role="listitem"
-              >
-                <div>
-                  <strong>
-                    {uiLanguage === "en" ? "Row" : "الصف"} {result.visibleRowNumber} —{" "}
-                    {columnLabel(result.columnKey)}
-                  </strong>
-                  {highlightedValue(result)}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onJump(result, resultIndex)}
-                >
-                  {t("انتقال", "Go")}
-                </button>
-              </article>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
 function SmartEntryEditor({
   api,
   lookups,
@@ -15386,6 +15228,10 @@ function SmartEntryEditor({
     focusSmartCellPoint(nextSelection?.focusCell);
   }
 
+  const selectedCellValues=useMemo(()=>{
+    const bounds=normalizedRange();if(!bounds)return [];
+    return smartViewRows.slice(bounds.rowStart,bounds.rowEnd+1).flatMap(({row})=>smartCellOrder.slice(bounds.colStart,bounds.colEnd+1).map(key=>row[key]));
+  },[smartViewRows,rangeSelection,smartCellOrder]);
   return (
     <div className="page-stack">
       <ConfirmationLayer
@@ -16079,6 +15925,7 @@ function SmartEntryEditor({
                     key={row._gridId}
                     data-smart-row-index={index}
                     className={[
+                      row._gridId===rangeSelection?.focusCell?.rowId?"table-active-row":"",
                       rowHasData(row) ? "" : "ghost-row",
                       fillPreview &&
                       index > fillPreview.sourceIndex &&
@@ -16276,6 +16123,7 @@ function SmartEntryEditor({
               </tbody>
             </table>
           </div>
+          <SelectionStatus values={selectedCellValues} uiLanguage={uiLanguage}/>
           <datalist id="smartBuildings">
             {buildingOptions.map((item) => (
               <option key={item} value={item} />

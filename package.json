@@ -1,6 +1,6 @@
 {
   "name": "easy-commercial",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Easy Commercial — Quotes, invoices, accounts, payments, and progress certificates.",
   "author": "Yasser Diab",
   "main": "electron/main.cjs",
@@ -41,6 +41,7 @@
     "express": "^5.2.1",
     "pdf-lib": "1.17.1",
     "qrcode-svg": "^1.1.0",
+    "sanitize-html": "2.18.2",
     "sql.js": "^1.13.0"
   },
   "devDependencies": {

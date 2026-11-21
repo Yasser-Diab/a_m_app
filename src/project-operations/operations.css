@@ -5,6 +5,8 @@
 .ops-section { border:1px solid var(--line);border-radius:12px;padding:12px;min-inline-size:0 }
 .ops-options { display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center }
 .ops-preview { display:block;border:1px solid var(--line);width:100%;height:min(68vh,880px);background:white;border-radius:6px }
+.ops-report-edit-frame{display:block;width:100%;height:68vh;min-height:350px;border:1px solid var(--line-strong);border-radius:8px;background:white}
+.ops-report-editor{border-top:1px solid var(--line);padding-top:12px}
 .ops-fields { display:grid;gap:14px }
 .ops-spec-fields { border-block-start:1px solid var(--line);padding-block-start:12px }
 .ops-drawing img { max-width:100%;max-height:55vh;object-fit:contain }

@@ -1,0 +1,17 @@
+.table-selection-status{display:flex;flex-wrap:wrap;gap:5px 18px;padding:5px 10px;font-size:.78rem;min-height:28px;border-top:1px solid var(--line);background:var(--surface-2);color:var(--muted);font-variant-numeric:tabular-nums}
+.table-selection-status bdi{font-weight:600;color:var(--text)}
+.table-find-panel.smart-table-search-panel{position:fixed;inset:90px 20px auto auto;z-index:1800;display:flex;flex-direction:column;width:min(640px,calc(100vw - 24px));height:min(570px,calc(100dvh - 120px));max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);min-width:min(300px,calc(100vw - 24px));min-height:260px;resize:both;overflow:hidden;text-align:start;margin:0;background:var(--surface);padding:12px;border:1px solid var(--line-strong);border-radius:12px;box-shadow:var(--shadow);gap:9px}
+.table-find-panel .smart-search-results{flex:1;min-height:0;max-height:none;overflow:auto}
+.table-find-panel .smart-search-actions,.table-find-panel .smart-search-head,.table-find-panel .smart-search-results article{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.table-find-panel .smart-search-results article{padding:6px;border-bottom:1px solid var(--line)}
+.table-find-panel .smart-search-results article>div{display:grid;min-width:0;gap:3px;overflow-wrap:anywhere}
+.table-find-panel .smart-search-result-value{white-space:normal;word-break:break-word}
+.table-column-filter{position:fixed;z-index:1810;width:min(330px,calc(100vw - 20px));max-height:70dvh;display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);box-shadow:var(--shadow);resize:both;overflow:auto}
+.table-filter-values{min-height:90px;max-height:38dvh;overflow:auto;display:grid;gap:7px}
+.table-column-filter label{display:flex;gap:8px;align-items:center;overflow-wrap:anywhere}
+.table-column-filter input[type=checkbox]{width:16px;min-width:16px;height:16px;min-height:16px;padding:0}
+.pc-grid tr.pc-active-row>.pc-grid-index,.ops-grid-table tr.table-active-row>:first-child,.smart-entry-table tr.table-active-row>.smart-row-index-cell{box-shadow:inset 6px 0 #ed8b23}
+[dir=rtl] .pc-grid tr.pc-active-row>.pc-grid-index,[dir=rtl] .ops-grid-table tr.table-active-row>:first-child,[dir=rtl] .smart-entry-table tr.table-active-row>.smart-row-index-cell{box-shadow:inset -6px 0 #ed8b23}
+.ops-quick-measurements tr:focus-within>:first-child{box-shadow:inset 6px 0 #ed8b23}
+[dir=rtl] .ops-quick-measurements tr:focus-within>:first-child{box-shadow:inset -6px 0 #ed8b23}
+@media(max-width:700px){.table-find-panel.smart-table-search-panel{inset:65px 12px auto auto!important;width:calc(100vw - 24px)!important;max-width:calc(100vw - 24px);height:min(570px,calc(100dvh - 85px))}}
