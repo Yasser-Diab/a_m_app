@@ -276,6 +276,7 @@ function cleanRules(input) {
     if(keys.has(key))fail(400,'Financial rules must have distinct identifiers');keys.add(key);
     return {key,category, label: str(entry.label), rate, amount, cap,
       collection_date:date(entry.collection_date,true),refundable:entry.refundable===true,
+      release_on_project_completion:category==='works_insurance'&&entry.release_on_project_completion===true,
       basis: entry.basis === "running" ? "running" : "work",
       sign: entry.sign === "addition" || (category === "vat" && entry.sign !== "deduction") ? "addition" : "deduction",
       enabled: entry.enabled !== false};

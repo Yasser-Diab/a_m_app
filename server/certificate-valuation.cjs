@@ -1,5 +1,5 @@
 const {certificateLocationFields} = require("./document-locations.cjs");
-const {isHold,ruleKey,applyHold}=require('./certificate-retention-math.cjs');
+const {isHold,ruleKey,applyHold,releaseCompletedWorks}=require('./certificate-retention-math.cjs');
 const SCALE = 1_000_000_000_000n;
 const MAX = 90_000_000_000;
 const UNIT_FACTORS = {mm: 1_000_000_000n, cm: 10_000_000_000n, m: SCALE};
@@ -193,6 +193,7 @@ function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=fa
   }
 
   const calculated = ordered.map((line) => calculateLine(line, prior.get(line.identity), profile.settings,{correction}));
+  const projectComplete=calculated.length>0&&calculated.every(({line})=>line.cumulative_progress!=null&&Number(line.cumulative_progress)>=100);
   const errors = calculated.flatMap(({errors: problems}) => problems);
   const groups = new Map();
   let previous = 0n, current = 0n, lastCurrent = 0n;
@@ -221,7 +222,7 @@ function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=fa
     const recoveryCapacity=net+(recoverAdvance?BigInt(toMinor(baseline?.totals?.current_earned)||0):0n);
     if (rule.category==="advance_recovery"&&recoveryCapacity<=0n) continue;
     let base = rule.basis === "running" ? net : current+priorWork;
-    const completedRelease=rule.category==='works_insurance'&&!rule.collection_date;
+    const completedRelease=releaseCompletedWorks(rule,projectComplete);
     const eligibleWork=completedRelease?calculated.reduce((sum,{line})=>sum+(Number(line.cumulative_progress)>=100?0n:BigInt(toMinor(line.current)||0)),0n):current;
     if(completedRelease)base=rule.basis==='running'&&current!==0n?
       divide(base*eligibleWork*(current<0n?-1n:1n),current<0n?-current:current):eligibleWork;
@@ -253,7 +254,7 @@ function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=fa
     let retained=null;
     if(isHold(rule)){
       const key=ruleKey(rule,ruleIndex),priorHold=holds.get(key);
-      retained=applyHold({rule,index:ruleIndex,prior:priorHold,lines:calculated.map(item=>item.line),delta,minor:toMinor,money,round:divide});
+      retained=applyHold({rule,index:ruleIndex,prior:priorHold,lines:calculated.map(item=>item.line),delta,minor:toMinor,money,round:divide,projectComplete});
       delta=retained.delta;holds.set(key,retained.hold);processedHolds.add(key);
       if(rule.category==='works_insurance'&&!rule.collection_date&&delta===0n&&retained.balance===0n)continue;
     }
@@ -265,7 +266,7 @@ function calculateValuation(lines, baseline, profile, ledger, {recoverAdvance=fa
   }
   if(!recoverAdvance)for(const [key,hold]of holds){
     if(processedHolds.has(key)||hold.category!=='works_insurance'||hold.collection_date)continue;
-    const result=applyHold({rule:{...hold,key,amount:null},index:hold.rule_index,prior:hold,lines:calculated.map(item=>item.line),delta:0n,minor:toMinor,money,round:divide});
+    const result=applyHold({rule:{...hold,key,amount:null},index:hold.rule_index,prior:hold,lines:calculated.map(item=>item.line),delta:0n,minor:toMinor,money,round:divide,projectComplete});
     holds.set(key,result.hold);
     if(result.delta!==0n){net-=result.delta;components.push({category:hold.category,label:hold.label,basis:'work',base:0,amount:-money(result.delta),
       previous:-money(result.previous),cumulative:-money(result.balance),rule_key:key,rule_version:profile.version});}

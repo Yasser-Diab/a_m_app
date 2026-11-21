@@ -23,6 +23,30 @@ async function main(){
   assert.equal(partial.totals.holds[0].lines.find(l=>l.identity==='one').balance,0);
   assert.equal(partial.totals.holds[0].lines.find(l=>l.identity==='two').balance,80);
   assert.equal(partial.totals.current_payable,820);
+  const projectRule={...rule,release_on_project_completion:true};
+  assert.equal(cleanRules([rule])[0].release_on_project_completion,false);
+  assert.equal(cleanRules([projectRule])[0].release_on_project_completion,true);
+  const projectFirst=calculate([{...line,progress:50},{...line,identity:'two',progress:50}],null,[projectRule]);
+  const projectPartial=calculate([{...line,progress:100},{...line,identity:'two',progress:80}],projectFirst,[projectRule]);
+  assert.equal(projectPartial.totals.holds[0].balance,180);
+  assert.equal(projectPartial.totals.holds[0].lines.find(l=>l.identity==='one').balance,100);
+  assert.equal(projectPartial.totals.current_payable,720);
+  const noProgress=calculate([],projectPartial,[projectRule]);assert.equal(noProgress.totals.holds[0].balance,180);
+  const projectFinal=calculate([{...line,identity:'two',progress:100}],projectPartial,[projectRule]);
+  assert.equal(projectFinal.lines.find(l=>l.identity==='one').carried_forward,true);
+  assert.equal(projectFinal.totals.current_payable,380);assert.equal(projectFinal.totals.holds[0].balance,0);
+  assert.equal(projectFinal.totals.cumulative_earned,2000);
+  const stopped=calculate([{...line,identity:'two',progress:90}],projectPartial,[]);
+  assert.equal(stopped.totals.holds[0].balance,180,'Removing a rule must retain its project-completion policy');
+  const stoppedFinal=calculate([{...line,identity:'two',progress:100}],stopped,[]);
+  assert.equal(stoppedFinal.totals.holds[0].balance,0);
+  const fixedRules=[{...projectRule,rate:null,amount:25}];
+  const fixedStart=calculate([{...line,progress:50},{...line,identity:'two',progress:50}],null,fixedRules);
+  const fixedPartial=calculate([{...line,progress:100}],fixedStart,fixedRules);
+  assert.equal(fixedPartial.totals.holds[0].balance,50);
+  assert.equal(calculate([{...line,identity:'two',progress:100}],fixedPartial,fixedRules).totals.holds[0].balance,0);
+  const datedProject=calculate([{...line,progress:100}],null,[{...projectRule,collection_date:'2026-12-01'}]);
+  assert.equal(datedProject.totals.holds[0].balance,100,'Collection dates continue to control dated retentions');
   for(const r of [{...rule,collection_date:'2026-01-01'},{...rule,category:'final_insurance'}]){
     const held=calculate([{...line,progress:100}],null,[r]);assert.equal(held.totals.current_payable,900);assert.equal(held.totals.holds[0].balance,100);
   }
@@ -106,8 +130,24 @@ async function main(){
     assert.equal((await api(c+'/retentions?project_id='+advanceProject.id)).records.length,0);
     await api(c+'/admin/users/'+viewer.id,'PUT',{capabilities:['view','view_collections'],project_ids:[project.id]});
     assert.equal((await api(c+'/retentions','GET',undefined,200,viewer.certificate_session)).records.length,0);
+    const wholeProject=await api(c+'/projects','POST',{customer_id:customer.id,name:'Whole project retention'},201),wholeScope=c+'/projects/'+wholeProject.id;
+    await api(wholeScope+'/settings','PUT',{expected_version:0,effective_at:'2026-01-01',rules:[projectRule],settings:{}});
+    assert.equal((await api(wholeScope)).settings.rules[0].release_on_project_completion,true);
+    const wholeFirst=await api(c,'POST',{project_id:wholeProject.id,header:{work_to:'2026-01-01'},lines:[
+      {...line,work_type:'Windows',progress:50},{...line,identity:'two',work_type:'Doors',progress:50}]},201);
+    await api(c+'/'+wholeFirst.id+'/action','POST',{action:'approve',version:wholeFirst.version});
+    const wholeSnapshot=db.get('SELECT snapshot_json FROM cert_revisions WHERE id=?',[wholeFirst.id]).snapshot_json;
+    const wholePartial=await api(c,'POST',{project_id:wholeProject.id,header:{work_to:'2026-02-01'},lines:[
+      {...line,work_type:'Windows',progress:100},{...line,identity:'two',work_type:'Doors',progress:80}]},201);
+    assert.equal(wholePartial.totals.holds[0].balance,180);assert.equal(wholePartial.totals.current_payable,720);
+    await api(c+'/'+wholePartial.id+'/action','POST',{action:'approve',version:wholePartial.version});
+    const wholeFinal=await api(c,'POST',{project_id:wholeProject.id,header:{work_to:'2026-03-01'},lines:[
+      {...line,identity:'two',work_type:'Doors',progress:100}]},201);
+    assert.equal(wholeFinal.totals.current_payable,380);assert.equal(wholeFinal.totals.holds[0].balance,0);
+    assert.equal(wholeFinal.lines.find(row=>row.identity==='one').carried_forward,true);
+    assert.equal(db.get('SELECT snapshot_json FROM cert_revisions WHERE id=?',[wholeFirst.id]).snapshot_json,wholeSnapshot);
     assert.equal(db.get('PRAGMA foreign_key_check'),null);
-    if(process.env.AM_RETENTION_QA_HOOK)await require(process.env.AM_RETENTION_QA_HOOK)({origin,api,manager,customer,project,scheduled,held,db,app});
+    if(process.env.AM_RETENTION_QA_HOOK)await require(process.env.AM_RETENTION_QA_HOOK)({origin,api,manager,customer,project,scheduled,held,wholeProject,wholeScope,db,app});
     console.log('Retention releases, historical balances, collection alerts, client privacy, customer data, trim defaults and scoped access passed.');
   }finally{global.fetch=realFetch;await new Promise(resolve=>http.close(resolve));app.close();}
 }

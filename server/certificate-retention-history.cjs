@@ -27,6 +27,7 @@ function withRetentionHistory(db,snapshot){
       for(const [identity,value]of shares)before.set(identity,(before.get(identity)||0n)+value);
       const lines=[...before].map(([identity,value])=>({identity,balance:money(value>0n?value:0n)}));
       balances.set(key,{key,rule_index:index,category:rule.category,label:rule.label,collection_date:rule.collection_date||null,
+        release_on_project_completion:rule.release_on_project_completion===true,
         balance:money(lines.reduce((sum,line)=>sum+BigInt(toMinor(line.balance)||0),0n)),lines});
     }
   }

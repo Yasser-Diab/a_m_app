@@ -7,9 +7,12 @@ function allocate(total,rows){
   weights.forEach((row,index)=>{const part=index===weights.length-1?remaining:total*row.weight/sum;result.set(row.identity,part);remaining-=part;});
   return result;
 }
-function applyHold({rule,index,prior,lines,delta,minor,money,round}){
+function releaseCompletedWorks(rule,projectComplete){
+  return rule.category==='works_insurance'&&!rule.collection_date&&(!rule.release_on_project_completion||projectComplete===true);
+}
+function applyHold({rule,index,prior,lines,delta,minor,money,round,projectComplete=false}){
   const previous=new Map((prior?.lines||[]).map(line=>[line.identity,BigInt(minor(line.balance)||0)]));
-  const releaseCompleted=rule.category==='works_insurance'&&!rule.collection_date;
+  const releaseCompleted=releaseCompletedWorks(rule,projectComplete);
   const eligible=lines.filter(line=>!(releaseCompleted&&Number(line.cumulative_progress)>=100));
   const weights=eligible.map(line=>({identity:line.identity,weight:BigInt(minor(line.current)||0)}));
   let shares=allocate(delta,weights.filter(row=>delta<0n?row.weight<0n:row.weight>0n));
@@ -20,8 +23,10 @@ function applyHold({rule,index,prior,lines,delta,minor,money,round}){
     const next=releaseCompleted&&Number(line.cumulative_progress)>=100?0n:before+(shares.get(line.identity)||0n);
     balances.set(line.identity,next<0n?0n:next);
   }
+  if(releaseCompleted&&rule.release_on_project_completion)for(const identity of balances.keys())balances.set(identity,0n);
   const before=[...previous.values()].reduce((sum,value)=>sum+value,0n),balance=[...balances.values()].reduce((sum,value)=>sum+value,0n);
   return {delta:balance-before,previous:before,balance,hold:{key:ruleKey(rule,index),rule_index:index,category:rule.category,label:rule.label||prior?.label||'',
-    collection_date:rule.collection_date||null,balance:money(balance),lines:[...balances].map(([identity,value])=>({identity,balance:money(value)}))}};
+    collection_date:rule.collection_date||null,release_on_project_completion:rule.release_on_project_completion===true,
+    balance:money(balance),lines:[...balances].map(([identity,value])=>({identity,balance:money(value)}))}};
 }
-module.exports={holdCategories,isHold,ruleKey,allocate,applyHold};
+module.exports={holdCategories,isHold,ruleKey,allocate,applyHold,releaseCompletedWorks};

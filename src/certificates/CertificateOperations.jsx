@@ -191,7 +191,12 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
           {rule.sign!=='addition'&&rule.category!=='advance_recovery'&&<>
             <Field label={t('تاريخ تحصيل الاستقطاع (اختياري — داخلي)','Retention collection date (optional — internal)')}><input type="date" dir="ltr" value={rule.collection_date||''} onChange={event=>updateRule(rule.key,'collection_date',event.target.value)}/></Field>
             {!['retention','final_insurance','works_insurance'].includes(rule.category)&&<label className="pc-check"><input type="checkbox" checked={Boolean(rule.refundable)} onChange={event=>updateRule(rule.key,'refundable',event.target.checked)}/>{t('استقطاع مسترد','Refundable deduction')}</label>}
-            {rule.category==='works_insurance'&&!rule.collection_date&&<p className="pc-caption">{t('يُرد المحتجز السابق وتتوقف خصومات البند عند اكتماله 100%.','Previously held amounts are released and deductions stop when the item reaches 100%.')}</p>}
+            {rule.category==='works_insurance'&&!rule.collection_date&&<>
+              <label className="pc-check"><input type="checkbox" checked={rule.release_on_project_completion===true}
+                onChange={event=>updateRule(rule.key,'release_on_project_completion',event.target.checked)}/>{t('الاحتفاظ بالاستقطاع حتى اكتمال جميع بنود المشروع 100%','Keep this deduction until all project items reach 100%')}</label>
+              <p className="pc-caption">{rule.release_on_project_completion?t('يستمر الاستقطاع على جميع البنود، ويُرد المحتجز السابق بالكامل عند اكتمال جميع البنود، بما فيها المرحلة من المستخلصات السابقة.','Continue deducting on all items and release the accumulated hold when every item, including work carried forward from previous certificates, reaches 100%.'):
+                t('يُرد المحتجز السابق وتتوقف خصومات البند عند اكتماله 100%.','Previously held amounts are released and deductions stop when the item reaches 100%.')}</p>
+            </>}
           </>}
         </div>
       </div>)}
