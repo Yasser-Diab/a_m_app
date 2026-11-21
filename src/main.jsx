@@ -11535,10 +11535,13 @@ function SmartEntryEditor({
     ...(hasPartyHistory ? [] : lookupValues(lookups.floorApartments)),
   ]);
   const workTypeOptions = uniqueValues([
+    ...(entryForm.work_types || []),
+    entryForm.work_type,
+    ...rows.map((row) => row.work_type),
     ...historyRows
       .filter((row) => !entryForm.project || row.project === entryForm.project)
       .map((row) => row.work_type),
-    ...(hasPartyHistory ? [] : lookupValues(lookups.workTypes)),
+    ...lookupValues(lookups.workTypes),
   ]);
   const selectedWorkTypes = uniqueValues(
     entryForm.work_types?.length
@@ -12724,7 +12727,8 @@ function SmartEntryEditor({
     setEntryForm((current) => ({ ...current, ...patch }));
     const rowFieldKeys = ["work_type", "building_unit", "floor_apartment"];
     const changedRowKeys = rowFieldKeys.filter((key) =>
-      Object.prototype.hasOwnProperty.call(patch, key),
+      Object.prototype.hasOwnProperty.call(patch, key) &&
+      !(key === "work_type" && Array.isArray(patch.work_types) && patch.work_types.length !== 1),
     );
     if (changedRowKeys.length) {
       const nextRows = rowsRef.current.map((row) => {
@@ -15553,6 +15557,8 @@ function SmartEntryEditor({
                 allLabel={t("اختر أنواع الأعمال", "Choose work types")}
                 multipleLabel={t("أنواع أعمال", "Work types")}
                 clearLabel={t("مسح الاختيار", "Clear selection")}
+                customLabel={t("إضافة نوع أعمال أو اختياره", "Add or choose a work type")}
+                addLabel={t("إضافة نوع الأعمال", "Add work type")}
                 onChange={(values) =>
                   updateFixed({
                     work_types: values,
@@ -20123,8 +20129,9 @@ function initialsForName(value = "") {
   return [...words[0]][0]?.toUpperCase() || "؟";
 }
 
-function ComboField({ label, value, options = [], onChange }) {
+function ComboField({ label, value, options = [], onChange, closeSuggestionsKey }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => setOpen(false), [closeSuggestionsKey]);
   const language = document.documentElement.lang === "en" ? "en" : "ar";
   const t = (ar, en) => (language === "en" ? en || uiText(ar, "en") : ar);
   const cleanOptions = uniqueValues(options);
@@ -20201,8 +20208,19 @@ function MultiComboField({
   allLabel = "كل المشروعات",
   multipleLabel = "مشروعات محددة",
   clearLabel = "عرض الكل",
+  customLabel,
+  addLabel,
 }) {
+  const [customValue, setCustomValue] = useState("");
+  const [customCycle, setCustomCycle] = useState(0);
   const selected = new Set(values);
+  const addCustom = () => {
+    const value = customValue.trim();
+    if (!value) return;
+    if (!values.some(item => normalizeArabic(item).toLowerCase() === normalizeArabic(value).toLowerCase())) onChange([...values,value]);
+    setCustomValue("");
+    setCustomCycle(value => value + 1);
+  };
   const labelFor = (value) =>
     options.find((option) => option.value === value)?.label || value;
   const toggleValue = (value) => {
@@ -20214,6 +20232,12 @@ function MultiComboField({
   return (
     <div className="field multi-combo-field">
       <span>{label}</span>
+      {customLabel && <div className="multi-combo-add" onKeyDown={event => {
+        if (event.key === "Enter" && customValue.trim()) { event.preventDefault(); event.stopPropagation(); addCustom(); }
+      }}>
+        <ComboField label={customLabel} value={customValue} options={options.map(option => option.value)} onChange={setCustomValue} closeSuggestionsKey={customCycle}/>
+        <button type="button" disabled={!customValue.trim()} onClick={addCustom}>{addLabel}</button>
+      </div>}
       <details>
         <summary>
           {values.length

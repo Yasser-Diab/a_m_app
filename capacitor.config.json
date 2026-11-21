@@ -1,7 +1,7 @@
 {
   "appId": "com.sherifalihassan.priceoffer",
   "appName": "Easy Commercial",
-  "appVersion": "2.0.5",
+  "appVersion": "2.0.6",
   "webDir": "dist",
   "server": {
     "androidScheme": "http",

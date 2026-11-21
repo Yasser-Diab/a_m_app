@@ -5185,11 +5185,29 @@ function getReportRows(database, query, type) {
   return { rows, document, isLatestCertificate };
 }
 
-function getReportPaymentRows(database, query, type) {
+function getReportPaymentRows(database, query, type, {document, rows = []} = {}) {
   let options = { ...documentOptions(type), rowKind: "payment" };
   const paymentQuery = { ...query };
+  const contractorScope = [];
+  const contractorParams = [];
   if (type === "contractor") {
     options = { rowKind: "payment" };
+    // Work and payment documents have different IDs. Retain the selected work
+    // document's owner before dropping its identity from the payment query.
+    const owners = document ? [document] : query.party_id ? [{party_id:query.party_id}] : rows;
+    const ids = [...new Set(owners.map(row => Number(row.party_id)).filter(id => Number.isInteger(id) && id > 0))];
+    const names = [...new Set(owners.filter(row => !Number(row.party_id)).map(row =>
+      normalizeArabic(row.search_party_name || row.customer_name || row.customer_display_name || "")).filter(Boolean))];
+    if (ids.length) {
+      contractorScope.push(`wi.party_id IN (${ids.map(() => "?").join(",")})`);
+      contractorParams.push(...ids);
+    }
+    if (names.length) {
+      contractorScope.push(`wi.search_party_name IN (${names.map(() => "?").join(",")})`);
+      contractorParams.push(...names);
+    }
+    delete paymentQuery.party_id;
+    delete paymentQuery.customer;
     delete paymentQuery.certificate_no;
     delete paymentQuery.work_type;
     delete paymentQuery.document_id;
@@ -5207,9 +5225,9 @@ function getReportPaymentRows(database, query, type) {
     `SELECT wi.*, d.discount_type, d.discount_value, d.status AS real_document_status
      FROM work_items wi
      LEFT JOIN documents d ON d.id = wi.document_id
-     WHERE ${where}${dateLimit ? " AND COALESCE(wi.entry_date, '') <= ?" : ""}
+     WHERE ${where}${type === "contractor" ? ` AND wi.party_role = 'contractor' AND (${contractorScope.join(" OR ") || "0"})` : ""}${dateLimit ? " AND COALESCE(wi.entry_date, '') <= ?" : ""}
      ORDER BY COALESCE(wi.entry_date, ''), wi.serial, wi.id`,
-    dateLimit ? [...params, dateLimit] : params,
+    [...params,...contractorParams,...(dateLimit ? [dateLimit] : [])],
   ).map((row) => ({ ...row, project: normalizedProject(row.project) }));
 }
 
@@ -6268,7 +6286,7 @@ function contractorModernDetailTableHtml(data, showDimensions, dimensionUnit) {
   if (!rows.length) return "";
   const locale = reportLocaleFrom(data.report_language);
   const showProjectColumn = Number(data.project_selection_count || 0) !== 1;
-  const columnCount = showProjectColumn ? 11 : 10;
+  const columnCount = showProjectColumn ? 12 : 11;
   const groups = contractorCertificateGroups(rows);
   const ranges = groups.map((group, index) => {
     const dates = (group.rows || []).map((row) => dateSortValue(row.entry_date));
@@ -6308,9 +6326,10 @@ function contractorModernDetailTableHtml(data, showDimensions, dimensionUnit) {
         body.push(`
           <tr class="payment-row contractor-payment-inline">
             <td class="nowrap date-cell">${escapeHtml(reportDateCell(row.entry_date))}</td>
-            <td class="desc">${escapeHtml(row.work_type || row.description || reportText(locale, "collection"))}</td>
+            <td class="work-type-cell">${escapeHtml(row.work_type || reportText(locale, "collection"))}</td>
+            <td class="desc">${escapeHtml(row.collection_note || row.notes || row.description || "")}</td>
             ${showProjectColumn ? `<td class="project-cell">${escapeHtml(normalizedProject(row.project))}</td>` : ""}
-            <td class="location-cell">${escapeHtml(row.collection_note || row.notes || reportText(locale, "paymentDetails"))}</td>
+            <td class="location-cell">${escapeHtml(locationText(row))}</td>
             <td class="nowrap unit-cell"></td>
             <td class="number-cell"></td>
             <td class="number-cell"></td>
@@ -6324,7 +6343,8 @@ function contractorModernDetailTableHtml(data, showDimensions, dimensionUnit) {
       body.push(`
         <tr>
           <td class="nowrap date-cell">${escapeHtml(reportDateCell(row.entry_date || group.date))}</td>
-          <td class="desc">${escapeHtml(row.work_type || reportDescriptionText(row) || "")}</td>
+          <td class="work-type-cell">${escapeHtml(row.work_type || "")}</td>
+          <td class="desc">${reportDescriptionHtml(row)}</td>
           ${showProjectColumn ? `<td class="project-cell">${escapeHtml(normalizedProject(row.project))}</td>` : ""}
           <td class="location-cell">${escapeHtml(contractorLocationText(row, false)).replace(/\n/g, "<br>")}</td>
           <td class="nowrap unit-cell">${escapeHtml(reportUnitLabel(row.unit_code, locale))}</td>
@@ -6340,7 +6360,7 @@ function contractorModernDetailTableHtml(data, showDimensions, dimensionUnit) {
       const subtotal = contractorGroupTotals(group.rows);
       body.push(`
         <tr class="subtotal">
-          <td colspan="${showProjectColumn ? 5 : 4}">${locale === "en" ? "Certificate Work Total No." : "إجمالي أعمال مستخلص رقم"} ${escapeHtml(group.key)}</td>
+          <td colspan="${showProjectColumn ? 6 : 5}">${locale === "en" ? "Certificate Work Total No." : "إجمالي أعمال مستخلص رقم"} ${escapeHtml(group.key)}</td>
           <td class="number-cell">${displayNumber(subtotal.item_count, true)}</td>
           <td class="number-cell">${displayNumber(subtotal.quantity, true)}</td>
           <td></td>
@@ -6352,7 +6372,7 @@ function contractorModernDetailTableHtml(data, showDimensions, dimensionUnit) {
   });
   return `
     <table class="report-table contractor-detail contractor-modern-detail">
-      <thead><tr><th>${reportText(locale, "date")}</th><th>${reportText(locale, "description")}</th>${showProjectColumn ? `<th>${reportText(locale, "project")}</th>` : ""}<th>${reportText(locale, "location")}</th><th>${reportText(locale, "unit")}</th><th>${reportText(locale, "itemCount")}</th><th>${reportText(locale, "quantity")}</th><th>${reportText(locale, "workRate")}</th><th>${reportText(locale, "rate")}</th><th>${reportText(locale, "grossTotal")}</th><th>${reportText(locale, "afterWorkRate")}</th></tr></thead>
+      <thead><tr><th>${reportText(locale, "date")}</th><th>${locale === "en" ? "Work type" : "نوع الأعمال"}</th><th>${reportText(locale, "description")}</th>${showProjectColumn ? `<th>${reportText(locale, "project")}</th>` : ""}<th>${reportText(locale, "location")}</th><th>${reportText(locale, "unit")}</th><th>${reportText(locale, "itemCount")}</th><th>${reportText(locale, "quantity")}</th><th>${reportText(locale, "workRate")}</th><th>${reportText(locale, "rate")}</th><th>${reportText(locale, "grossTotal")}</th><th>${reportText(locale, "afterWorkRate")}</th></tr></thead>
       <tbody>${body.join("")}</tbody>
     </table>`;
 }
@@ -6543,7 +6563,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
   const locale = reportLocaleFrom(data.report_language);
   if (data.type === "contractor") {
     const showProjectColumn = Number(data.project_selection_count || 0) !== 1;
-    const columnCount = showProjectColumn ? 11 : 10;
+    const columnCount = showProjectColumn ? 12 : 11;
     const groups = contractorCertificateGroups(rows);
     const body = [];
     for (const group of groups) {
@@ -6554,7 +6574,8 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
         body.push(`
           <tr>
             <td class="nowrap date-cell">${escapeHtml(reportDateCell(row.entry_date || group.date))}</td>
-            <td class="desc">${escapeHtml(row.work_type || reportDescriptionText(row) || "")}</td>
+            <td class="work-type-cell">${escapeHtml(row.work_type || "")}</td>
+            <td class="desc">${reportDescriptionHtml(row)}</td>
             ${showProjectColumn ? `<td class="project-cell">${escapeHtml(normalizedProject(row.project))}</td>` : ""}
             <td class="location-cell">${escapeHtml(contractorLocationText(row, false)).replace(/\n/g, "<br>")}</td>
             <td class="nowrap unit-cell">${escapeHtml(reportUnitLabel(row.unit_code, locale))}</td>
@@ -6570,7 +6591,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
         const subtotal = contractorGroupTotals(group.rows);
         body.push(`
           <tr class="subtotal">
-            <td colspan="${showProjectColumn ? 5 : 4}">${locale === "en" ? "Certificate Total No." : "إجمالي مستخلص رقم"} ${escapeHtml(group.key)}</td>
+            <td colspan="${showProjectColumn ? 6 : 5}">${locale === "en" ? "Certificate Total No." : "إجمالي مستخلص رقم"} ${escapeHtml(group.key)}</td>
             <td class="number-cell">${displayNumber(subtotal.item_count, true)}</td>
             <td class="number-cell">${displayNumber(subtotal.quantity, true)}</td>
             <td></td>
@@ -6582,7 +6603,7 @@ function detailReportTableHtml(data, showDimensions, dimensionUnit) {
     }
     return `
       <table class="report-table contractor-detail">
-        <thead><tr><th>${reportText(locale, "date")}</th><th>${reportText(locale, "description")}</th>${showProjectColumn ? `<th>${reportText(locale, "project")}</th>` : ""}<th>${reportText(locale, "location")}</th><th>${reportText(locale, "unit")}</th><th>${reportText(locale, "itemCount")}</th><th>${reportText(locale, "quantity")}</th><th>${reportText(locale, "workRate")}</th><th>${reportText(locale, "rate")}</th><th>${reportText(locale, "grossTotal")}</th><th>${reportText(locale, "afterWorkRate")}</th></tr></thead>
+        <thead><tr><th>${reportText(locale, "date")}</th><th>${locale === "en" ? "Work type" : "نوع الأعمال"}</th><th>${reportText(locale, "description")}</th>${showProjectColumn ? `<th>${reportText(locale, "project")}</th>` : ""}<th>${reportText(locale, "location")}</th><th>${reportText(locale, "unit")}</th><th>${reportText(locale, "itemCount")}</th><th>${reportText(locale, "quantity")}</th><th>${reportText(locale, "workRate")}</th><th>${reportText(locale, "rate")}</th><th>${reportText(locale, "grossTotal")}</th><th>${reportText(locale, "afterWorkRate")}</th></tr></thead>
         <tbody>${body.join("")}</tbody>
       </table>`;
   }
@@ -7011,7 +7032,7 @@ function renderReportHtmlV2(data) {
     .line-items .desc{width:auto;min-width:0;max-width:none}
     .line-items .number-cell,.line-items .unit-cell,.line-items .dimension-cell,.line-items .work-rate-cell{width:auto;min-width:0;text-align:center;vertical-align:middle}
     .rate-main{display:block}.rate-vat-note{display:block;margin-top:1px;color:#666;font-size:6.5px;font-weight:600;line-height:1.1;white-space:nowrap;unicode-bidi:isolate}.rate-vat-note small{font-size:5px;font-weight:600;letter-spacing:.02em}
-    .contractor-detail .desc{width:27%}.contractor-detail .project-cell{width:16%;white-space:normal}
+    .contractor-detail .work-type-cell{width:15%;white-space:normal}.contractor-detail .desc{width:30%;overflow-wrap:anywhere}.contractor-detail .project-cell{width:14%;white-space:normal}
     .location-cell{white-space:pre-line;line-height:1.45}
     tbody tr:nth-child(odd):not(.group-row):not(.subtotal) td{background:var(--table-odd-bg)}
     .desc{text-align:${locale === "en" ? "left" : "right"};width:auto;max-width:100%;line-height:1.45;white-space:normal;word-break:normal;word-wrap:break-word;overflow-wrap:anywhere;unicode-bidi:plaintext;vertical-align:top}
@@ -7298,6 +7319,7 @@ async function writeCleanXlsx(data, outputPath) {
     : isContractor
       ? [
           { header: reportText(locale, "date"), key: "entry_date", width: 14 },
+          { header: locale === "en" ? "Work type" : "نوع الأعمال", key: "work_type", width: 24 },
           { header: reportText(locale, "description"), key: "description", width: 36 },
           ...(showContractorProject
             ? [{ header: reportText(locale, "project"), key: "project", width: 22 }]
@@ -7450,7 +7472,8 @@ async function writeCleanXlsx(data, outputPath) {
       for (const row of groupData.rows) {
         sheet.addRow([
           row.entry_date || groupData.date || "",
-          row.work_type || reportDescriptionText(row) || "",
+          row.work_type || "",
+          reportDescriptionText(row),
           ...(showContractorProject ? [normalizedProject(row.project)] : []),
           contractorLocationText(row, false),
           reportUnitLabel(row.unit_code, locale),
@@ -7468,6 +7491,7 @@ async function writeCleanXlsx(data, outputPath) {
           locale === "en"
             ? `Certificate Total No. ${groupData.key}`
             : `إجمالي مستخلص رقم ${groupData.key}`,
+          "",
           "",
           ...(showContractorProject ? [""] : []),
           "",
@@ -7689,7 +7713,7 @@ function buildReportData(database, query, type, certificateAccess) {
       : query;
   const paymentRows =
     type === "contractor"
-      ? getReportPaymentRows(database, paymentQuery, type)
+      ? getReportPaymentRows(database, paymentQuery, type, {document, rows})
       : [];
   const dimensionUnit = query.dimension_unit === "m" ? "m" : "cm";
   const totals = totalsForRows(rows, document);
