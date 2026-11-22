@@ -1,5 +1,8 @@
-import {useCallback,useEffect,useId,useMemo,useState} from "react";
+import {useCallback,useEffect,useId,useMemo,useRef,useState} from "react";
 import {Field,queryString,useResource} from "../certificates/shared.jsx";
+import {TableSearchPanel} from '../table-tools.jsx';
+import {tableReplacementCandidates} from '../table-tools.mjs';
+import {findSmartTableMatches,normalizeSmartNumericClipboardValue} from '../smart-table-clipboard.mjs';
 
 export function useOperationsApi(api,session) {
   return useMemo(()=>(path,{method="GET",body,signal}={})=>api.request("/api/project-operations"+path,{
@@ -61,12 +64,53 @@ export function Page({data,onPage,t}) {
   </div>;
 }
 
-export function Table({headers,rows,empty}) {
+export function Table({headers,rows,empty,cellClassName}) {
   if (!rows.length) return <p className="pc-empty">{empty}</p>;
   return <div className="pc-table-scroll"><table className="pc-table">
     <thead><tr>{headers.map((title,index)=><th key={index} scope="col">{title}</th>)}</tr></thead>
-    <tbody>{rows.map(([key,cells])=><tr key={key}>{cells.map((cell,index)=><td key={index}>{cell}</td>)}</tr>)}</tbody>
+    <tbody>{rows.map(([key,cells])=><tr key={key} data-table-row={key}>{cells.map((cell,index)=><td key={index} data-table-column={index} className={cellClassName?.(key,index)}>{cell}</td>)}</tr>)}</tbody>
   </table></div>;
+}
+
+// Native-input entry tables use the same find/replace panel as the worksheets.
+export function SearchableTable({records,columns,onChanges,t,...table}) {
+  const owner=useRef(null),[open,setOpen]=useState(false),[query,setQuery]=useState(''),[index,setIndex]=useState(0),[message,setMessage]=useState('');
+  const keys=columns.map(column=>column.key),labels=Object.fromEntries(columns.map(column=>[column.key,column.label]));
+  const matches=findSmartTableMatches({rows:records,columnOrder:keys,searchText:query}).map(match=>({...match,
+    replaceable:Boolean(onChanges&&columns.find(column=>column.key===match.columnKey)?.editable)}));
+  const safeIndex=Math.min(index,Math.max(0,matches.length-1)),current=matches[safeIndex];
+  const hits=new Set(open?matches.map(match=>match.rowId+':'+match.columnKey):[]);
+  function jump(match,nextIndex) {
+    setIndex(nextIndex);if(!match)return;
+    requestAnimationFrame(()=>{const row=[...owner.current.querySelectorAll('[data-table-row]')].find(node=>node.dataset.tableRow===String(match.rowId));
+      const cell=row?.querySelector(`[data-table-column="${keys.indexOf(match.columnKey)}"]`),input=cell?.querySelector('input,textarea,select');
+      (input||cell)?.scrollIntoView({block:'nearest',inline:'nearest'});input?.focus({preventScroll:true});});
+  }
+  function replace(text,replacement,match=null) {
+    const changes=[];let count=0,skipped=0;
+    for(const candidate of tableReplacementCandidates({rows:records,columns:keys,query:text,replacement,current:match})) {
+      const column=columns.find(column=>column.key===candidate.key);if(!column.editable)continue;
+      let value=candidate.value;
+      if(column.type==='number'&&value.trim()!=='') {
+        value=normalizeSmartNumericClipboardValue(value);const number=Number(value),maximum=typeof column.max==='function'?column.max(candidate.row):column.max;
+        if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)||!Number.isFinite(number)||column.integer&&!Number.isInteger(number)||column.min!=null&&number<column.min||maximum!=null&&number>maximum){skipped++;continue;}
+      }
+      if(String(candidate.row[candidate.key]??'')===value)continue;
+      changes.push({rowId:candidate.row._gridId,key:candidate.key,value});count+=candidate.replacements;
+    }
+    if(changes.length)onChanges(changes);
+    setMessage(t(`تم استبدال ${count} تطابق.`,`${count} matches replaced.`)+(skipped?t(` تم تجاوز ${skipped} قيمة غير صالحة.`,` ${skipped} invalid values skipped.`):''));
+  }
+  return <div ref={owner} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.code==='KeyF'){event.preventDefault();event.stopPropagation();setOpen(true);}}}>
+    <div className="pc-toolbar"><button type="button" onClick={()=>setOpen(true)}>{t('بحث واستبدال','Find and replace')} · Ctrl+F</button></div>
+    <Table {...table} cellClassName={(id,column)=>open&&current?.rowId===String(id)&&current.columnKey===keys[column]?'table-search-current':hits.has(String(id)+':'+keys[column])?'table-search-hit':undefined}/>
+    {message&&<small role="status">{message}</small>}
+    {open&&<TableSearchPanel initialQuery={query} results={matches} currentIndex={safeIndex} columnLabel={key=>labels[key]} uiLanguage={t('ar','en')} ownerRef={owner}
+      onSearchChange={value=>{setQuery(value);setIndex(0);}} onClose={()=>setOpen(false)} onJump={jump}
+      onPrevious={()=>{const next=(safeIndex-1+matches.length)%matches.length;if(matches.length)jump(matches[next],next);}}
+      onNext={()=>{const next=(safeIndex+1)%matches.length;if(matches.length)jump(matches[next],next);}}
+      onReplace={onChanges?replace:undefined} onReplaceAll={onChanges?(text,replacement)=>replace(text,replacement):undefined}/>}
+  </div>;
 }
 
 export const panelNames = {frames:["حلوق","Frames"],screens:["ضلف سلك","Flyscreen leaves"],sliding:["ضلف جرار","Sliding leaves"],hinged:["ضلف مفصلي","Hinged leaves"],

@@ -2,8 +2,9 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { ArrowDown, ArrowUp, Clipboard, Ellipsis, Filter, Maximize2, Minimize2, Plus, Redo2, Search, Undo2 } from "lucide-react";
 import {createPortal} from 'react-dom';
 import { applySmartClipboardGridToRows,expandSmartClipboardGrid, fillSmartSelectionDownRows, findSmartCtrlArrowDestination, findSmartTableMatches, insertSmartRowRelative, isSmartFillDownShortcut, parseSmartClipboardGrid, smartSelectionAfterNavigation } from "../smart-table-clipboard.mjs";
-import {ColumnFilter,SelectionStatus,TableSearchPanel} from '../table-tools.jsx';
-import {mergeVisibleRows,reorderVisibleRows,offsetIndex} from '../table-tools.mjs';
+import {ColumnFilter,SelectionStatus,TableSearchPanel,SearchMatchText} from '../table-tools.jsx';
+import {mergeVisibleRows,reorderVisibleRows,offsetIndex,tableReplacementCandidates} from '../table-tools.mjs';
+import {normalizeSmartNumericClipboardValue} from '../smart-table-clipboard.mjs';
 import { Dialog, Field, Money, newKey, numberText, searchText } from "./shared.jsx";
 
 export const GRID_COLUMNS = [
@@ -80,7 +81,7 @@ function cellValue(row,key,locations) {
   return key === "building_unit" ? parts[0] || "" : parts.length > 1 ? parts.at(-1) : "";
 }
 
-const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, locations, editor, focus, onInput, onSelectRow, onMenu, selected, error, locale, addition,cutKeys }) {
+const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, locations, editor, focus, onInput, onSelectRow, onMenu, selected, error, locale, addition,cutKeys,query='',currentSearchColumn }) {
   const rowLabel = rowIndex + 1;
   return <tr data-grid-row={row._gridId} aria-rowindex={rowIndex + 2} className={[addition?'pc-grid-addition':'',error?'pc-row-invalid':'',focus?'pc-active-row':''].join(' ')}>
     <th scope="row" className="pc-grid-index"><div className="pc-grid-row-buttons">
@@ -106,11 +107,11 @@ const WorkRow = memo(function WorkRow({ row, rowIndex, columns, t, readOnly, loc
         readOnly={Boolean(choices)} aria-haspopup={choices ? "listbox" : undefined} inputMode={kind === "number" ? "decimal" : undefined}
         dir={kind === "number" ? "ltr" : "auto"} value={choices ? display ?? "" : editor.value}
         aria-autocomplete={suggestionKeys.has(key) ? "list" : undefined} onChange={(event) => onInput(event.target.value)} />;
-      else if (applicable) content = <bdi className="pc-grid-cell-value">{key === "progress" && readOnly ? `${numberText(value ?? 100)}%` :
-        kind === "number" ? numberText(display ?? "") : display ?? ""}</bdi>;
+      else if (applicable) content = <bdi className="pc-grid-cell-value table-search-text"><SearchMatchText value={key === "progress" && readOnly ? `${numberText(value ?? 100)}%` :
+        kind === "number" ? numberText(display ?? "") : display ?? ""} query={query} active={currentSearchColumn===key}/></bdi>;
       return <td key={key} data-row-id={row._gridId} data-column={key} aria-label={label} aria-selected={Boolean(selected?.includes(key))}
         tabIndex={focus === key ? 0 : -1}
-        className={`${applicable ? "" : "pc-grid-off"} ${selected?.includes(key) ? "pc-grid-selected" : ""} ${cutKeys?.has(key)?'pc-grid-cut':''}`}>{content}</td>;
+        className={`${applicable ? "" : "pc-grid-off"} ${selected?.includes(key) ? "pc-grid-selected" : ""} ${cutKeys?.has(key)?'pc-grid-cut':''} ${currentSearchColumn===key?'table-search-current':''}`}>{content}</td>;
     })}
   </tr>;
 });
@@ -167,7 +168,16 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   const start = fullScreen ? Math.max(0,offsetIndex(offsets,viewport.top)-8) : currentPage * pageSize;
   const end = fullScreen ? Math.min(displayRows.length,offsetIndex(offsets,viewport.top+viewport.height)+10) : start + pageSize;
   const visible = displayRows.slice(start,end);
-  const matches = useMemo(() => findSmartTableMatches({ rows: displayRows, columnOrder: gridKeys, searchText: search }), [displayRows, search]);
+  const displayedValue=(row,key)=>{
+    const column=columns.find(column=>column.key===key),raw=cellValue(row,key,locationMap);
+    const choices=cellChoices(column?.kind,t);
+    if(choices)return choices.find(choice=>choice.key===raw)?.label??raw??'';
+    return column?.kind==='number'?numberText(raw??''):raw??'';
+  };
+  const matches = useMemo(() => findSmartTableMatches({rows:viewRows.map(row=>({_gridId:row._gridId,...Object.fromEntries(columns.map(column=>[column.key,displayedValue(row,column.key)]))})),
+    columnOrder:selectionColumns,searchText:search}).map(match=>({...match,replaceable:editable&&gridKeys.includes(match.columnKey)&&applies(viewRows[match.rowIndex],columns.find(column=>column.key===match.columnKey))})),
+  [viewRows,search,columns,editable,locationMap,t]);
+  const currentMatch=matches[Math.max(0,Math.min(matchIndex,matches.length-1))];
   const errors = useMemo(() => new Set(validation.map((item) => String(item.line_id || item.id || ""))), [validation]);
   useLayoutEffect(() => { currentRows.current = rows; }, [rows]);
   useLayoutEffect(()=>{heights.current.clear();setHeightTick(value=>value+1);},[widths,fullReadView]);
@@ -578,6 +588,26 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     focusCell(match);
   }
 
+  function replaceSearch(query,replacement,current=null){
+    if(!editable)return;
+    const candidates=tableReplacementCandidates({rows:viewRows,columns:selectionColumns,query,replacement,current,valueFor:displayedValue});
+    const patches=new Map();let count=0,skipped=0;
+    for(const candidate of candidates){
+      const {row,key}=candidate,column=columns.find(column=>column.key===key);
+      if(!gridKeys.includes(key)||!applies(row,column)){skipped++;continue;}
+      let value=candidate.value;
+      const choices=cellChoices(column.kind,t);
+      if(choices){const choice=choices.find(choice=>searchText(choice.key)===searchText(value)||searchText(choice.label)===searchText(value));if(!choice){skipped++;continue;}value=choice.key;}
+      if(column.kind==='number'){value=normalizeSmartNumericClipboardValue(value);if(value!==''&&(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)||!Number.isFinite(Number(value)))){skipped++;continue;}}
+      if(String(cellValue(row,key,locationMap)??'')===String(value))continue;
+      const patch=patches.get(row._gridId)||{};
+      if(['building_unit','floor_apartment'].includes(key)&&!Object.hasOwn(patch,'location_id'))Object.assign(patch,{building_unit:cellValue(row,'building_unit',locationMap),floor_apartment:cellValue(row,'floor_apartment',locationMap),location_id:null});
+      patch[key]=value;patches.set(row._gridId,patch);count++;
+    }
+    if(count)change(currentRows.current.map(row=>patches.has(row._gridId)?{...row,...patches.get(row._gridId)}:row));
+    setMessage(t(`تم الاستبدال في ${count} خلية${skipped?`؛ تعذر استبدال ${skipped}`:''}.`,`Replaced ${count} cells${skipped?`; skipped ${skipped} unavailable or invalid cells`:''}.`));
+  }
+
   function rowAction(action) {
     const index = rows.findIndex((row) => row._gridId === rowMenu);
     if (index < 0) return;
@@ -729,7 +759,8 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
             editor={editor?.rowId === row._gridId ? editor : null}
             focus={selection?.focusCell.rowId === row._gridId ? selection.focusCell.columnKey : null}
             onInput={updateEditor} onSelectRow={rowSelection} onMenu={setRowMenu} selected={selected} cutKeys={cutMap.get(row._gridId)} error={errors.has(String(row.id)) || errors.has(String(row.identity))}
-            locale={locale} addition={canAdd && row === additionRow.current} />;
+            locale={locale} addition={canAdd && row === additionRow.current} query={searchOpen?search:''}
+            currentSearchColumn={searchOpen&&currentMatch?.rowId===row._gridId?currentMatch.columnKey:null}/>;
         })}
         {fullScreen && end < displayRows.length && <tr className="pc-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:offsets.at(-1)-offsets[end]}} /></tr>}
         </tbody>
@@ -738,6 +769,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     </div>
     <SelectionStatus values={selectedValues} uiLanguage={locale}/>
     {searchOpen&&<TableSearchPanel initialQuery={search} results={matches} currentIndex={matchIndex} columnLabel={key=>t(...GRID_COLUMNS.find(col=>col.key===key).label)}
+      ownerRef={grid} onReplace={editable?(query,replacement,match)=>replaceSearch(query,replacement,match):undefined} onReplaceAll={editable?replaceSearch:undefined}
       onSearchChange={setSearch} onClose={()=>{setSearchOpen(false);if(selection?.focusCell)focusCell(selection.focusCell);}} onPrevious={()=>moveMatch(-1)} onNext={()=>moveMatch(1)} onJump={(_match,index)=>moveMatch(0,index)} uiLanguage={locale}/>}
     {columnMenu&&<ColumnFilter column={t(...GRID_COLUMNS.find(col=>col.key===columnMenu.key).label)} values={filterValues} selected={filters[columnMenu.key]}
       t={t} position={{left:columnMenu.left,top:columnMenu.top}} onClose={closeFilter} onApply={values=>{

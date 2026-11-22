@@ -7,7 +7,8 @@ import {
 } from "../smart-table-clipboard.mjs";
 import {SpecificationError,applySpecificationEdits,editSpecification,resolveSpecificationEdits} from "./specification-edits.jsx";
 import {technicalText,fieldOptions,configurationTags,perimeterText,hasTrim,partMeasurementAvailable} from "./terminology.js";
-import {ColumnFilter,SelectionStatus,TableSearchPanel} from '../table-tools.jsx';
+import {ColumnFilter,SelectionStatus,TableSearchPanel,SearchMatchText} from '../table-tools.jsx';
+import {tableReplacementCandidates} from '../table-tools.mjs';
 
 const mainKeys=["opening_description","tag","category","system","quantity","width_mm","height_mm","profile","color","infill"];
 const special={
@@ -282,10 +283,24 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
     finally {setBusy(false);}
   }
   const waiting=Object.keys(patches).length;
-  const searchResults=findSmartTableMatches({rows:records.map(row=>({_gridId:String(row.id),...Object.fromEntries(columns.map(key=>[key,show(row,key)]))})),columnOrder:columns,searchText});
+  const searchResults=findSmartTableMatches({rows:records.map(row=>({_gridId:String(row.id),...Object.fromEntries(columns.map(key=>[key,show(row,key)]))})),columnOrder:columns,searchText})
+    .map(match=>({...match,replaceable:editable(records[match.rowIndex],match.columnKey)&&definitionFor(records[match.rowIndex],match.columnKey).type!=='sides'}));
+  const currentMatch=searchResults[Math.max(0,Math.min(searchIndex,searchResults.length-1))];
   const changeSearch=useCallback(text=>{setSearchText(text);setSearchIndex(0);},[]);
   const jump=(match,index)=>{setSearchIndex(index);select({row:match.rowIndex,col:columns.indexOf(match.columnKey)});};
   const stepSearch=delta=>{if(searchResults.length){const index=(searchIndex+delta+searchResults.length)%searchResults.length;jump(searchResults[index],index);}};
+  function replaceSearch(query,replacement,current=null){
+    const candidates=tableReplacementCandidates({rows:records,columns,query,replacement,current,valueFor:show,idFor:row=>row.id});
+    const cells=[];let skipped=0;
+    for(const {row,rowIndex,key,value:nextValue} of candidates){
+      if(!editable(row,key)||definitionFor(row,key).type==='sides'){skipped++;continue;}
+      try{const next=normalize(row,key,nextValue);if(definitionFor(row,key).type==='number'&&next!==''&&(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(String(next))||!Number.isFinite(Number(next)))){skipped++;continue;}
+        if(String(value(row,key)??'')!==String(next))cells.push({p:{row:rowIndex,col:columns.indexOf(key)},raw:next,typed:true});
+      }catch{skipped++;}
+    }
+    if(cells.length)write(cells);
+    setMessage(t(`تم الاستبدال في ${cells.length} خلية${skipped?`؛ تعذر استبدال ${skipped}`:''}.`,`Replaced ${cells.length} cells${skipped?`; skipped ${skipped} unavailable or invalid cells`:''}.`));
+  }
   const width=key=>Math.max(70,Math.min(900,Number(widths[key])||(key==='opening_description'?270:key==='infill'?220:130)));
   const resize=(event,key)=>{event.preventDefault();event.stopPropagation();const start=event.clientX,initial=width(key),pointer=event.pointerId,node=event.currentTarget;node.setPointerCapture(pointer);
     const move=event=>setWidths(previous=>({...previous,[key]:Math.max(70,Math.min(900,initial+(event.clientX-start)*(locale==='ar'?-1:1)))}));
@@ -354,11 +369,13 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
             const allowed=editable(row,key);
             return <td key={key} role="gridcell" aria-selected={Boolean(marked)} aria-readonly={!allowed} data-ops-cell
               data-row={row.id} data-column={key} tabIndex={same(p,activePoint)||!selected&&r===0&&c===0?0:-1}
-              onFocus={()=>{if (!selected) setSelected({start:p,focus:p});}} className={key==='opening_description'?'ops-description':!allowed?"ops-grid-readonly":""}>
+              onFocus={()=>{if (!selected) setSelected({start:p,focus:p});}} className={(key==='opening_description'?'ops-description':!allowed?"ops-grid-readonly":"")+
+                (searchOpen&&currentMatch?.rowId===String(row.id)&&currentMatch?.columnKey===key?' table-search-current':'')}>
               {same(editing?.p,p)?<CellEdit {...{editing,setEditing,t,locale}} fieldType={definitionFor(row,key).type} suggestions={names(row,key)}
                 commit={(text,advance,restore)=>commit(p,text,advance,restore)}
                 cancel={()=>{setEditing(null);focus(p);}}
-                next={r<records.length-1?{row:r+1,col:c}:p} right={c<columns.length-1?{row:r,col:c+1}:p}/>:<><bdi>{show(row,key)}</bdi>
+                next={r<records.length-1?{row:r+1,col:c}:p} right={c<columns.length-1?{row:r,col:c+1}:p}/>:<><bdi className="table-search-text"><SearchMatchText value={show(row,key)} query={searchOpen?searchText:''}
+                  active={currentMatch?.rowId===String(row.id)&&currentMatch?.columnKey===key}/></bdi>
                   {key==='opening_description'&&Boolean(row.defaults_applied)&&<small>{t('مواصفات العميل المحفوظة · قابلة للتعديل','Saved customer defaults · editable')}</small>}</>}
             </td>;
           })}
@@ -369,7 +386,8 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
     {columnMenu&&<ColumnFilter key={columnMenu.key} t={t} zIndex={270010} column={definitions.get(columnMenu.key)[locale]} position={columnMenu.position}
       values={[...new Map(allRecords.map(row=>[filterValue(row,columnMenu.key),{value:filterValue(row,columnMenu.key),label:show(row,columnMenu.key)}])).values()]}
       selected={filters[columnMenu.key]} onClose={()=>setColumnMenu(null)} onApply={values=>{setFilters(previous=>{const next={...previous};if(values)next[columnMenu.key]=values;else delete next[columnMenu.key];return next;});setSelected(null);setColumnMenu(null);}}/>}
-    {searchOpen&&<TableSearchPanel zIndex={270010} uiLanguage={locale} initialQuery={searchText} results={searchResults} currentIndex={searchIndex} columnLabel={key=>definitions.get(key)[locale]}
+    {searchOpen&&<TableSearchPanel ownerRef={grid} uiLanguage={locale} initialQuery={searchText} results={searchResults} currentIndex={searchIndex} columnLabel={key=>definitions.get(key)[locale]}
+      onReplace={editAllowed?replaceSearch:undefined} onReplaceAll={editAllowed?(query,replacement)=>replaceSearch(query,replacement):undefined}
       onSearchChange={changeSearch} onClose={()=>{setSearchOpen(false);if(activePoint)focus(activePoint);}} onPrevious={()=>stepSearch(-1)} onNext={()=>stepSearch(1)} onJump={jump}/>}
     {contextMenu&&createPortal(<div ref={contextRoot} className="ops-grid-menu" role="menu" style={contextMenu} onKeyDown={event=>{if(event.key==='Escape')setContextMenu(null);}}>
       <button type="button" role="menuitem" onClick={()=>menuAction('copy')}>{t('نسخ التحديد','Copy selection')}</button>

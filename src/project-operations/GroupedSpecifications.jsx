@@ -1,15 +1,18 @@
-import {useEffect,useId,useMemo,useState} from "react";
+import {useEffect,useId,useMemo,useRef,useState} from "react";
 import {Field,queryString,useResource} from "../certificates/shared.jsx";
 import {ErrorMessage,Page,Pick,SystemPick,Table} from "./shared.jsx";
 import {SpecificationError,applySpecificationEdits,editSpecification,resolveSpecificationEdits} from "./specification-edits.jsx";
 import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText,hasTrim,partMeasurementAvailable} from "./terminology.js";
-import {SelectionStatus} from '../table-tools.jsx';
+import {SelectionStatus,TableSearchPanel} from '../table-tools.jsx';
+import {tableReplacementCandidates} from '../table-tools.mjs';
+import {findSmartTableMatches,normalizeSmartNumericClipboardValue,normalizeSmartSearchText} from '../smart-table-clipboard.mjs';
 
 const measurementFields=[
   ["tag","رقم الفتحة","Opening tag"],["quantity","العدد","Count"],
   ["width_mm","العرض (مم)","Width (mm)"],["height_mm","الارتفاع (مم)","Height (mm)"],
 ];
 const labels={
+  opening_description:["وصف الفتحة","Opening description"],
   category:["نوع العمل","Work type"],system:["طريقة الفتح / النظام","Opening / system"],
   profile:["نوع القطاع","Profile"],color:["اللون","Colour"],finish:["نوع التشطيب","Finish"],
   infill:["تكوين الزجاج / الحشو","Glass composition / infill"],glass_thickness:["سمك الزجاج (مم)","Glass thickness (mm)"],
@@ -67,6 +70,8 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
   const [problem,setProblem]=useState(null);
   const [message,setMessage]=useState("");
   const [measurementCell,setMeasurementCell]=useState(null);
+  const [searchOpen,setSearchOpen]=useState(false),[search,setSearch]=useState(''),[searchIndex,setSearchIndex]=useState(0);
+  const measurements=useRef(null);
   const groupList=useResource(request,boqId?url+queryString({boq_id:boqId}):null,revision);
   const [groupCache,setGroupCache]=useState(null);
   useEffect(()=>{if (groupList.data) setGroupCache({boqId,data:groupList.data});},[boqId,groupList.data]);
@@ -134,6 +139,35 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
   const pageCount=Math.max(1,Math.ceil(items.length/limit));
   const currentPage=Math.min(page,pageCount);
   const editAllowed=can("edit");
+  const searchKeys=['opening_description',...measuredFields.map(([key])=>key)];
+  const searchValue=(item,key)=>key==='opening_description'?(item.opening_description||item.commercial.description):technicalText(item.technical[key]??'',uiLanguage);
+  const searchResults=findSmartTableMatches({rows:displayed.map(item=>({_gridId:String(item.id),...Object.fromEntries(searchKeys.map(key=>[key,searchValue(item,key)]))})),columnOrder:searchKeys,searchText:search})
+    .map(match=>({...match,replaceable:editAllowed&&!busy&&(!partFields.includes(match.columnKey)||applies(displayed[match.rowIndex],match.columnKey))}));
+  const searchState=(item,key)=>searchOpen&&searchResults.some(match=>match.rowId===String(item.id)&&match.columnKey===key);
+  const jumpSearch=(match,index)=>{
+    if(!match)return;setSearchIndex(index);setPage(Math.floor(match.rowIndex/limit)+1);
+    requestAnimationFrame(()=>{const target=measurements.current?.querySelector(`[data-opening-id="${match.rowId}"][data-field="${match.columnKey}"]`);(target?.matches('input,textarea,select')?target:target?.querySelector('input,select,textarea'))?.focus({preventScroll:true});target?.scrollIntoView({block:'nearest',inline:'nearest'});});
+  };
+  function replaceSearch(query,replacement,currentMatch=null){
+    if(!editAllowed||busy)return;
+    const candidates=tableReplacementCandidates({rows:displayed,columns:searchKeys,query,replacement,current:currentMatch,valueFor:searchValue,idFor:item=>item.id});
+    let count=0,skipped=0;const next={...patches};
+    for(const {row,key,value} of candidates){
+      if(partFields.includes(key)&&!applies(row,key)){skipped++;continue;}
+      let entered=value;
+      if(key==='panel_measurement_basis'){
+        entered=value===''?'':['Fixed panel','Operable leaf'].find(option=>[option,technicalText(option,uiLanguage)].some(label=>normalizeSmartSearchText(label)===normalizeSmartSearchText(value)));
+        if(entered==null){skipped++;continue;}
+      }else if(!['opening_description','tag'].includes(key)){
+        entered=normalizeSmartNumericClipboardValue(value);
+        if(entered!==''&&(!/^\d+(?:\.\d*)?$/.test(entered)||!Number.isFinite(Number(entered))||key==='quantity'&&!Number.isInteger(Number(entered)))){skipped++;continue;}
+      }
+      if(String(key==='opening_description'?row.opening_description??'':row.technical[key]??'')===String(entered))continue;
+      next[row.id]=editSpecification(items.find(item=>item.id===row.id),next[row.id],key,entered);count++;
+    }
+    if(count)setPatches(next);
+    setMessage(t(`تم الاستبدال في ${count} خلية${skipped?`؛ تعذر استبدال ${skipped}`:''}.`,`Replaced ${count} cells${skipped?`; skipped ${skipped} invalid cells`:''}.`));
+  }
   const controls=(keys)=>keys.flatMap((key)=>{
     const matching=displayed.filter((item)=>applies(item,key));
     if (!matching.length) return [];
@@ -187,16 +221,16 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
         <summary>{t("تفاصيل الفتح والزجاج والتسكيك","Opening, glass & interlock details")}</summary>
         <fieldset className="ops-paper-fields" disabled={!editAllowed||busy}><div className="pc-form">{controls(LOOKUP_FIELDS)}</div></fieldset>
       </details>}
-      <section className="ops-quick-measurements pc-stack">
-        <h3>{t("المقاسات لكل فتحة","Opening measurements")}</h3>
+      <section ref={measurements} className="ops-quick-measurements pc-stack" onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.code==='KeyF'){event.preventDefault();event.stopPropagation();setSearchOpen(true);}}}>
+        <div className="pc-toolbar"><h3>{t("المقاسات لكل فتحة","Opening measurements")}</h3><button type="button" onClick={()=>setSearchOpen(true)}>{t('بحث واستبدال','Find and replace')} <kbd>Ctrl+F</kbd></button></div>
         <Table headers={[t("وصف الفتحة","Opening description"),...measuredFields.map(([key])=>label(key)),t("الموقع","Location")]}
           rows={displayed.slice((currentPage-1)*limit,currentPage*limit).map((item)=>[item.id,[
-            <div className="ops-opening-description"><textarea aria-label={t("وصف الفتحة","Opening description")} dir="auto" rows={2}
+            <div className="ops-opening-description"><textarea data-opening-id={item.id} data-field="opening_description" data-search-hit={searchState(item,'opening_description')} aria-label={t("وصف الفتحة","Opening description")} dir="auto" rows={2}
               disabled={!editAllowed||busy} value={item.opening_description||item.commercial.description}
               onChange={event=>change([items.find(row=>row.id===item.id)],'opening_description',event.target.value)}/>
               <button type="button" className="pc-name" onClick={()=>openItem(item.id)}>{t("التفاصيل","Details")}{item.specification_overrides?.length?t(" · مواصفات خاصة"," · Exceptions"):''}</button></div>,
-            ...measuredFields.map(([key])=>key==='panel_measurement_basis'?<Pick disabled={!editAllowed||busy||!applies(item,key)} label={item.description+' · '+label(key)} value={item.technical[key]} items={['Fixed panel','Operable leaf'].map(value=>[value,technicalText(value,uiLanguage)])} onChange={value=>change([items.find(row=>row.id===item.id)],key,value)}/>:
-              <input type={key==="tag"?"text":"number"} aria-label={item.description+" · "+label(key)}
+            ...measuredFields.map(([key])=>key==='panel_measurement_basis'?<div data-opening-id={item.id} data-field={key} data-search-hit={searchState(item,key)}><Pick disabled={!editAllowed||busy||!applies(item,key)} label={item.description+' · '+label(key)} value={item.technical[key]} items={['Fixed panel','Operable leaf'].map(value=>[value,technicalText(value,uiLanguage)])} onChange={value=>change([items.find(row=>row.id===item.id)],key,value)}/></div>:
+              <input data-opening-id={item.id} data-field={key} data-search-hit={searchState(item,key)} type={key==="tag"?"text":"number"} aria-label={item.description+" · "+label(key)}
               title={label(key)} disabled={!editAllowed||busy||partFields.includes(key)&&!applies(item,key)} value={item.technical[key]??""} min={0}
               step={key==="quantity"?1:"any"} dir={key==="tag"?"auto":"ltr"}
               onFocus={()=>setMeasurementCell({id:item.id,key})}
@@ -205,6 +239,9 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
           ]])}/>
         <Page data={{page:currentPage,total:items.length,limit}} onPage={setPage} t={t}/>
         <SelectionStatus uiLanguage={uiLanguage} values={measurementCell?[displayed.find(item=>item.id===measurementCell.id)?.technical[measurementCell.key]]:[]}/>
+        {searchOpen&&<TableSearchPanel ownerRef={measurements} uiLanguage={uiLanguage} initialQuery={search} results={searchResults} currentIndex={searchIndex} columnLabel={label} onSearchChange={setSearch} onClose={()=>setSearchOpen(false)}
+          onJump={jumpSearch} onPrevious={()=>{const index=(searchIndex-1+searchResults.length)%searchResults.length;jumpSearch(searchResults[index],index);}} onNext={()=>{const index=(searchIndex+1)%searchResults.length;jumpSearch(searchResults[index],index);}}
+          onReplace={editAllowed?replaceSearch:undefined} onReplaceAll={editAllowed?(query,replacement)=>replaceSearch(query,replacement):undefined}/>}
       </section>
     </form>}
     {!data&&!groupList.pending&&!group.pending&&!groups.length&&!groupList.error&&<p>{t("لا توجد بنود في هذا الجدول.","This BOQ has no active items.")}</p>}

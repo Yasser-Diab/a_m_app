@@ -264,21 +264,23 @@ export function normalizeSmartSearchText(value) {
 function normalizedSmartSearchValueWithMap(value) {
   const original = String(value ?? "");
   let normalized = "";
-  const sourceIndexes = [];
-  Array.from(original).forEach((character, sourceIndex) => {
+  const sourceIndexes = [],sourceEnds=[];
+  let sourceIndex=0;
+  for(const character of original) {
     const next = normalizeSmartSearchCharacter(character);
-    for (const normalizedCharacter of Array.from(next)) {
-      normalized += normalizedCharacter;
+    for (let index=0;index<next.length;index++) {
       sourceIndexes.push(sourceIndex);
+      sourceEnds.push(sourceIndex+character.length);
     }
-  });
-  return { original, normalized, sourceIndexes };
+    normalized+=next;sourceIndex+=character.length;
+  }
+  return { original, normalized, sourceIndexes,sourceEnds };
 }
 
 export function findSmartSearchMatchRanges(value, searchText) {
   const query = normalizeSmartSearchText(searchText);
   if (!query) return [];
-  const { original, normalized, sourceIndexes } =
+  const { normalized, sourceIndexes,sourceEnds } =
     normalizedSmartSearchValueWithMap(value);
   const ranges = [];
   let cursor = 0;
@@ -286,12 +288,10 @@ export function findSmartSearchMatchRanges(value, searchText) {
     const matchIndex = normalized.indexOf(query, cursor);
     if (matchIndex < 0) break;
     const start = sourceIndexes[matchIndex] ?? 0;
-    const lastMappedIndex =
-      sourceIndexes[matchIndex + query.length - 1] ?? start;
-    const end =
-      lastMappedIndex +
-      (Array.from(original).at(lastMappedIndex)?.length || 1);
-    ranges.push({ start, end });
+    const end=sourceEnds[matchIndex+query.length-1]??start;
+    const previous=ranges.at(-1);
+    if(previous&&start<previous.end)previous.end=Math.max(previous.end,end);
+    else ranges.push({ start, end });
     cursor = matchIndex + Math.max(1, query.length);
   }
   return ranges;
@@ -327,9 +327,11 @@ export function replaceSmartSearchMatches(
   value,
   searchText,
   replacementText = "",
+  {firstOnly=false}={},
 ) {
   const original = String(value ?? "");
   const ranges = findSmartSearchMatchRanges(original, searchText);
+  if(firstOnly)ranges.splice(1);
   if (!ranges.length) return { value: original, replacements: 0 };
   let cursor = 0;
   let nextValue = "";

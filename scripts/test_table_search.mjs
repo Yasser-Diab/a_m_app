@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import {findSmartSearchMatchRanges,findSmartTableMatches,replaceSmartSearchMatches} from '../src/smart-table-clipboard.mjs';
+import {tableReplacementCandidates} from '../src/table-tools.mjs';
+
+const value='🚪 شُبَّاك أَلُومنيوم + شباك ألومنيوم';
+const ranges=findSmartSearchMatchRanges(value,'شباك الومنيوم');
+assert.equal(ranges.length,2);
+assert.equal(value.slice(ranges[0].start,ranges[0].end),'شُبَّاك أَلُومنيوم');
+assert.equal(value.slice(ranges[1].start,ranges[1].end),'شباك ألومنيوم');
+assert.equal(replaceSmartSearchMatches(value,'شباك الومنيوم','باب',{firstOnly:true}).value,'🚪 باب + شباك ألومنيوم');
+assert.equal(replaceSmartSearchMatches('Glass glass GLASS','glass','Pane').value,'Pane Pane Pane');
+assert.equal(replaceSmartSearchMatches('Glass glass GLASS','glass','Pane',{firstOnly:true}).value,'Pane glass GLASS');
+assert.equal(replaceSmartSearchMatches('A < & $1','<','<literal>').value,'A <literal> & $1');
+assert.equal(replaceSmartSearchMatches('ﻻ','لا','نعم').value,'نعم');
+assert.deepEqual(findSmartSearchMatchRanges('ﬀ','f'),[{start:0,end:1}]);
+assert.equal(replaceSmartSearchMatches('ﬀ','f','x').value,'x');
+assert.equal(replaceSmartSearchMatches('🚪🚪 glass','glass','panel').value,'🚪🚪 panel');
+assert.deepEqual(findSmartSearchMatchRanges('test','  '),[]);
+
+const rows=[{_gridId:'a',description:'Window Window',rate:100},{_gridId:'hidden',description:'Window hidden',rate:100},{_gridId:'c',description:'Window third',rate:200}];
+const visible=[rows[0],rows[2]];
+const matches=findSmartTableMatches({rows:visible,columnOrder:['description','rate'],searchText:'window'});
+const single=tableReplacementCandidates({rows:visible,columns:['description','rate'],query:'window',replacement:'Door',current:matches[0]});
+assert.equal(single.length,1);assert.equal(single[0].row,rows[0]);assert.equal(single[0].value,'Door Window');
+const all=tableReplacementCandidates({rows:visible,columns:['description','rate'],query:'window',replacement:'Door'});
+assert.deepEqual(all.map(change=>change.row._gridId),['a','c']);
+assert.deepEqual(all.map(change=>change.value),['Door Door','Door third']);
+assert.equal(rows[1].description,'Window hidden');
+assert.equal(tableReplacementCandidates({rows:[rows[2]],columns:['description'],query:'window',replacement:'Door',current:matches[0]}).length,0);
+assert.equal(tableReplacementCandidates({rows:[rows[2],rows[0]],columns:['description'],query:'window',replacement:'Door',current:matches[0]})[0].row,rows[0]);
+assert.equal(tableReplacementCandidates({rows:visible,columns:['rate'],query:'100',replacement:'250'})[0].value,'250');
+console.log('Table search passed: Arabic and Unicode highlights, single/all replacements, filtered rows, stable identities and literal values.');

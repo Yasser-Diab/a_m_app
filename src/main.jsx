@@ -11299,6 +11299,11 @@ function SmartEntryEditor({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [currentSearchResultIndex, setCurrentSearchResultIndex] = useState(0);
+  const searchCellKeys=useMemo(()=>new Set(searchResults.map(result=>result.rowId+':'+result.columnKey)),[searchResults]);
+  const currentSearchMatch=searchResults[Math.min(currentSearchResultIndex,searchResults.length-1)];
+  const searchCellClass=(index,key)=>!searchOpen?'':
+    (searchCellKeys.has(rows[index]?._gridId+':'+key)?' table-search-hit':'')+
+    (currentSearchMatch?.rowId===rows[index]?._gridId&&currentSearchMatch?.columnKey===key?' table-search-current':'');
   const [, setSuggestionDraftVersion] = useState(0);
   const [fillPreview, setFillPreview] = useState(null);
   const [certificateInfo, setCertificateInfo] = useState(null);
@@ -12238,8 +12243,9 @@ function SmartEntryEditor({
     return undefined;
   }
 
-  async function replaceAllSmartSearch(query, replacement) {
-    const searchableRows = rowsRef.current.map((row) => {
+  async function replaceAllSmartSearch(query, replacement, currentMatch=null) {
+    const visibleRows=currentSmartViewRowList();
+    const searchableRows = visibleRows.map((row) => {
       const searchable = { _gridId: row._gridId };
       for (const columnKey of smartCellOrder) {
         searchable[columnKey] = visibleSmartCellValue(row, columnKey);
@@ -12250,7 +12256,7 @@ function SmartEntryEditor({
       rows: searchableRows,
       columnOrder: smartCellOrder,
       searchText: query,
-    });
+    }).filter(match=>!currentMatch||match.rowId===currentMatch.rowId&&match.columnKey===currentMatch.columnKey);
     if (!latestMatches.length) {
       setMessage(t("لا توجد نتائج قابلة للاستبدال.", "No replaceable results found."));
       return;
@@ -12261,7 +12267,7 @@ function SmartEntryEditor({
     const patches = new Map();
     let changedCells = 0;
     let replacedOccurrences = 0;
-    for (const row of rowsRef.current) {
+    for (const row of visibleRows) {
       const patch = {};
       for (const columnKey of smartCellOrder) {
         if (!matchKeys.has(`${row._gridId}:${columnKey}`)) continue;
@@ -12270,6 +12276,7 @@ function SmartEntryEditor({
           visibleValue,
           query,
           replacement,
+          {firstOnly:Boolean(currentMatch)},
         );
         if (!replaced.replacements) continue;
         let nextValue = replaced.value;
@@ -12299,7 +12306,7 @@ function SmartEntryEditor({
       return;
     }
     if (
-      changedCells > 1 &&
+      !currentMatch && changedCells > 1 &&
       !(await askForConfirmation({
         title: t("استبدال الكل", "Replace All"),
         message: uiLanguage === "en"
@@ -14946,7 +14953,7 @@ function SmartEntryEditor({
     };
     return (
       <div
-        className={`cell-combo${isCellSelected(index, key) ? " selected-cell" : ""}${fieldCopyDownKeys.has(key) ? " copyable-cell" : ""}`}
+        className={`cell-combo${isCellSelected(index, key) ? " selected-cell" : ""}${fieldCopyDownKeys.has(key) ? " copyable-cell" : ""}${searchCellClass(index,key)}`}
         data-smart-cell-container={cellKey}
         data-suggestion-options-count={options.length}
         data-suggestions-open={showSuggestions ? "true" : "false"}
@@ -15088,7 +15095,7 @@ function SmartEntryEditor({
 
   const rowSelect = (index, key, children) => (
     <div
-      className={`cell-combo copyable-cell${isCellSelected(index, key) ? " selected-cell" : ""}`}
+      className={`cell-combo copyable-cell${isCellSelected(index, key) ? " selected-cell" : ""}${searchCellClass(index,key)}`}
       data-smart-cell-container={`${index}:${key}`}
       tabIndex={0}
       onContextMenu={(event) => openSmartCellMenu(event, index, key)}
@@ -15751,6 +15758,8 @@ function SmartEntryEditor({
               onNext={() => navigateSmartSearchResults(1)}
               onJump={jumpToSmartSearchResult}
               onReplaceAll={replaceAllSmartSearch}
+              onReplace={(query,replacement,match)=>replaceAllSmartSearch(query,replacement,match)}
+              ownerRef={smartTableScrollRef}
               uiLanguage={uiLanguage}
             />
           )}

@@ -1,4 +1,13 @@
-import {normalizeSmartNumericClipboardValue} from './smart-table-clipboard.mjs';
+import {findSmartTableMatches,normalizeSmartNumericClipboardValue,replaceSmartSearchMatches} from './smart-table-clipboard.mjs';
+
+export function tableReplacementCandidates({rows,columns,query,replacement,current=null,valueFor=(row,key)=>row[key],idFor=row=>row._gridId}){
+  const indexed=rows.map((row,index)=>({...Object.fromEntries(columns.map(key=>[key,valueFor(row,key)])),_gridId:String(idFor(row)),index}));
+  const matches=findSmartTableMatches({rows:indexed,columnOrder:columns,searchText:query});
+  return matches.filter(match=>!current||String(match.rowId)===String(current.rowId)&&match.columnKey===current.columnKey).map(match=>{
+    const row=rows[match.rowIndex],result=replaceSmartSearchMatches(valueFor(row,match.columnKey),query,replacement,{firstOnly:Boolean(current)});
+    return {row,rowIndex:match.rowIndex,key:match.columnKey,value:result.value,replacements:result.replacements};
+  });
+}
 
 export function selectionStatistics(values=[]){
   let sum=0,compensation=0,numericCount=0;

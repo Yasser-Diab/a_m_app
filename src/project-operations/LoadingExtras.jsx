@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {Text,Table,ErrorMessage,useAction} from './shared.jsx';
+import {Text,SearchableTable,ErrorMessage,useAction} from './shared.jsx';
 
 export default function LoadingExtras({order,endpoint,request,t,can,reload}){
   const [settings,setSettings]=useState(order.loading_settings||{enabled:false,rows:[]});
@@ -14,7 +14,10 @@ export default function LoadingExtras({order,endpoint,request,t,can,reload}){
       <fieldset disabled={!can('edit')||action.busy}>
         <label className="pc-check"><input type="checkbox" checked={settings.enabled} onChange={event=>change({...settings,enabled:event.target.checked})}/>
           {t('إظهار البنود الإضافية في أمر التحميل','Include additional items in the loading order')}</label>
-        <Table headers={[t('البيان','Description'),t('الوحدة','Unit'),t('الكمية','Quantity'),'']} rows={settings.rows.map((row,index)=>[index,[
+        <SearchableTable t={t} records={settings.rows.map((row,index)=>({...row,_gridId:String(index)}))}
+          columns={[{key:'label',label:t('البيان','Description'),editable:true},{key:'unit',label:t('الوحدة','Unit'),editable:true},{key:'quantity',label:t('الكمية','Quantity'),editable:true,type:'number',min:0.0001}]}
+          onChanges={can('edit')&&!action.busy?changes=>change({...settings,rows:settings.rows.map((row,index)=>({...row,...Object.fromEntries(changes.filter(cell=>cell.rowId===String(index)).map(cell=>[cell.key,cell.value]))}))}):undefined}
+          headers={[t('البيان','Description'),t('الوحدة','Unit'),t('الكمية','Quantity'),'']} rows={settings.rows.map((row,index)=>[index,[
           <Text label={t('بيان البند','Item description')} value={row.label} required onChange={value=>set(index,'label',value)}/>,
           <Text label={t('وحدة البند','Item unit')} value={row.unit} required onChange={value=>set(index,'unit',value)}/>,
           <Text label={t('كمية البند','Item quantity')} value={row.quantity} type="number" min={0.0001} step="any" required onChange={value=>set(index,'quantity',value)}/>,

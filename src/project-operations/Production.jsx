@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from "react";
 import {Dialog,localDate,newKey,useDebounce,useResource} from "../certificates/shared.jsx";
-import {ErrorMessage,Page,Pick,Suggest,Table,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
+import {ErrorMessage,Page,Pick,Suggest,Table,SearchableTable,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
 import ProjectSignatures from "./ProjectSignatures.jsx";
 import ReportEditor from './ReportEditor.jsx';
 import SourceRefresh from './SourceRefresh.jsx';
@@ -299,7 +299,12 @@ function Loading({order,endpoint,request,t,people,reload,close}) {
       {defaults.loading?<details><summary>{t("المسؤولون عن التحميل","Loading team")} · {people.find(({id})=>id===Number(data.responsible.loading))?.name}</summary>
         <Assignments people={people} values={data.responsible} set={(value)=>set("responsible",value)} t={t} required/></details>:
         <Assignments people={people} values={data.responsible} set={(value)=>set("responsible",value)} t={t} required/>}
-      <Table headers={[t("الفتحة","Opening"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المتبقي","Remaining"),t("التحميل الفعلي","Actual loading")]}
+      <SearchableTable t={t} records={order.balances.filter(row=>row.remaining>0).map(row=>({...row,_gridId:row.order_item_id+':'+row.kind,
+        size:`${row.width_mm??'—'} × ${row.height_mm??'—'}`,component:display(panelNames,row.kind,t),actual:amounts[row.order_item_id+':'+row.kind]??''}))}
+        columns={[{key:'description',label:t('الفتحة','Opening')},{key:'size',label:t('المقاس مم','Size mm')},{key:'component',label:t('المكون','Component')},
+          {key:'remaining',label:t('المتبقي','Remaining')},{key:'actual',label:t('التحميل الفعلي','Actual loading'),editable:true,type:'number',min:0,integer:true,max:row=>row.remaining}]}
+        onChanges={!action.busy?changes=>setAmounts(previous=>({...previous,...Object.fromEntries(changes.map(cell=>[cell.rowId,cell.value]))})):undefined}
+        headers={[t("الفتحة","Opening"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المتبقي","Remaining"),t("التحميل الفعلي","Actual loading")]}
         empty={t("لا توجد كميات متبقية.","No remaining quantities.")}
         rows={order.balances.filter((row)=>row.remaining>0).map((row)=>{
           const key=row.order_item_id+":"+row.kind;
