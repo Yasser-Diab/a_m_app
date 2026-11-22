@@ -34,9 +34,11 @@
 .ops-stage-buttons button[aria-pressed=true] { border-color:var(--accent);background:color-mix(in srgb,var(--accent) 15%,var(--surface)) }
 .ops-spec-grid { min-inline-size:0 }
 .ops-grid-tools { justify-content:flex-start }
-.ops-grid-full { position:fixed;inset:0;z-index:260000;background:var(--surface, var(--panel, Canvas));padding:16px;align-content:start;overflow:auto }
+.ops-grid-full { position:fixed;inset:0;z-index:260000;background:var(--surface, var(--panel, Canvas));padding:16px;display:flex;flex-direction:column;gap:8px;overflow:hidden }
 .ops-spec-scroll { max-block-size:60vh;overflow:auto }
-.ops-grid-full .ops-spec-scroll { max-block-size:calc(100dvh - 105px) }
+.ops-grid-full .ops-spec-scroll { flex:1;min-block-size:0;max-block-size:none }
+.ops-grid-full .ops-grid-tools { flex:none }
+.ops-grid-table tr.ops-grid-spacer>td { padding:0;border:0 }
 .ops-grid-table { min-inline-size:100%;inline-size:max-content;user-select:none }
 .ops-grid-table thead th { position:sticky;inset-block-start:0;z-index:2 }
 .ops-grid-table td[data-ops-cell] { min-inline-size:88px;max-inline-size:235px;position:relative;cursor:cell;outline-offset:-2px }

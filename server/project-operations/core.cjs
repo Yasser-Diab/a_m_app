@@ -232,14 +232,16 @@ function getItem(db,projectId,id) {
 
 function itemPage(db,projectId,query) {
   const {page,limit,offset}=pageOptions(query);
+  const all=query.all==='1';
   const typed="%"+str(query.q,120)+"%";
   const category=str(query.category);
   const source=idOf(query.boq_id);
   const args=[projectId,source,source,category,category,typed,typed,typed,typed];
   const where=`WHERE project_id=? AND (? IS NULL OR source_document_id=?) AND (?='' OR category=?) AND
     (code LIKE ? OR json_extract(commercial,'$.description') LIKE ? OR json_extract(technical,'$.tag') LIKE ? OR opening_description LIKE ?)`;
-  const items=db.all(`SELECT * FROM ops_items ${where} ORDER BY id LIMIT ? OFFSET ?`,[...args,limit,offset]).map(hydrateItem);
-  return {items,total:db.get(`SELECT COUNT(*) AS n FROM ops_items ${where}`,args).n,page,limit};
+  const total=db.get(`SELECT COUNT(*) AS n FROM ops_items ${where}`,args).n;
+  const items=db.all(`SELECT * FROM ops_items ${where} ORDER BY id${all?'':' LIMIT ? OFFSET ?'}`,all?args:[...args,limit,offset]).map(hydrateItem);
+  return {items,total,page:all?1:page,limit:all?Math.max(1,total):limit};
 }
 
 function specificationGroups(db,projectId,query) {

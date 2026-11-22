@@ -8,7 +8,7 @@ import {
 import {SpecificationError,applySpecificationEdits,editSpecification,resolveSpecificationEdits} from "./specification-edits.jsx";
 import {technicalText,fieldOptions,configurationTags,perimeterText,hasTrim,partMeasurementAvailable} from "./terminology.js";
 import {ColumnFilter,SelectionStatus,TableSearchPanel,SearchMatchText} from '../table-tools.jsx';
-import {tableReplacementCandidates} from '../table-tools.mjs';
+import {tableReplacementCandidates,offsetIndex} from '../table-tools.mjs';
 
 const mainKeys=["opening_description","tag","category","system","quantity","width_mm","height_mm","profile","color","infill"];
 const special={
@@ -45,7 +45,7 @@ function optionPairs(row,key,field,catalogue,locale,t) {
     .map((value)=>[value,technicalText(value,locale)]);
 }
 
-export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,can,request,path,reload,openItem,pageKey,pagination}) {
+export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,can,request,path,reload,openItem,pageKey,pagination,fullscreen=false,onFullscreenChange,loading=false,loadError}) {
   const [patches,setPatches]=useState({});
   const [selected,setSelected]=useState(null);
   const [editing,setEditing]=useState(null);
@@ -57,7 +57,8 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
   const [sort,setSort]=useState(null),[contextMenu,setContextMenu]=useState(null);
   const [widths,setWidths]=useState(()=>{try{return JSON.parse(localStorage.getItem('operationsGridWidthsV1'))||{};}catch{return {};}});
   const fieldList=useId(),cut=useRef(null),previousLayout=useRef(null),contextRoot=useRef(null);
-  const [fullscreen,setFullscreen]=useState(false);
+  const [viewport,setViewport]=useState({top:0,height:600}),[heightTick,setHeightTick]=useState(0);
+  const scroll=useRef(null),heights=useRef(new Map()),pendingFocus=useRef(null),fullAnchor=useRef(null);
   const [remember,setRemember]=useState(true);
   const [message,setMessage]=useState("");
   const [problem,setProblem]=useState(null);
@@ -72,6 +73,10 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
   const filterValue=(row,key)=>String(value(row,key)??'');
   const records=allRecords.filter(row=>Object.entries(filters).every(([key,values])=>values.includes(filterValue(row,key))));
   if(sort)records.sort((a,b)=>filterValue(a,sort.key).localeCompare(filterValue(b,sort.key),locale,{numeric:true})*sort.direction);
+  const virtual=fullscreen&&records.length>200;
+  const offsets=useMemo(()=>{const result=[0];for(const row of records)result.push(result.at(-1)+(heights.current.get(row.id)||64));return result;},[items,filters,sort,patches,heightTick]);
+  const virtualStart=virtual?Math.max(0,offsetIndex(offsets,viewport.top)-8):0;
+  const virtualEnd=virtual?Math.min(records.length,offsetIndex(offsets,viewport.top+viewport.height)+10):records.length;
   const definitions=useMemo(()=>new Map([
     ...catalogue.common.map((field)=>[field.key,field]),
     ...catalogue.categories.flatMap((category)=>[...category.fields,...category.systems.flatMap((system)=>system.fields)]
@@ -137,11 +142,42 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
     colStart:Math.min(selected.start.col,selected.focus.col),colEnd:Math.max(selected.start.col,selected.focus.col),
   };
   const active=activePoint&&records[activePoint.row];
-  const focus=(p)=>{
+  const setFullscreen=next=>{if(next&&active)fullAnchor.current={id:active.id,key:columns[activePoint.col]};onFullscreenChange?.(next);};
+  const focus=(p,reveal=true)=>{
     const row=records[p.row];
-    if (row) {const cell=grid.current?.querySelector(`[data-row="${row.id}"][data-column="${columns[p.col]}"]`);cell?.focus();cell?.scrollIntoView({block:'nearest',inline:'nearest'});}
+    if (!row)return;
+    const cell=grid.current?.querySelector(`[data-row="${row.id}"][data-column="${columns[p.col]}"]`);
+    if(cell){cell.focus({preventScroll:true});if(reveal)cell.scrollIntoView({block:'nearest',inline:'nearest'});pendingFocus.current=null;}
+    else if(virtual&&scroll.current){pendingFocus.current={id:row.id,key:columns[p.col]};scroll.current.scrollTop=Math.max(0,offsets[p.row]-48);setViewport({top:scroll.current.scrollTop,height:scroll.current.clientHeight});}
   };
-  const select=(p,extend=false)=>{setSelected((old)=>({start:extend&&old?old.start:p,focus:p}));focus(p);};
+  useLayoutEffect(()=>{
+    const target=pendingFocus.current;if(!target)return;
+    const cell=grid.current?.querySelector(`[data-row="${target.id}"][data-column="${target.key}"]`);
+    if(cell){cell.focus();cell.scrollIntoView({block:'nearest',inline:'nearest'});pendingFocus.current=null;}
+  },[virtualStart,virtualEnd,rowKey,layoutKey]);
+  useLayoutEffect(()=>{
+    if(!fullscreen||loading||!fullAnchor.current)return;
+    const anchor=fullAnchor.current,p={row:records.findIndex(row=>row.id===anchor.id),col:columns.indexOf(anchor.key)};
+    fullAnchor.current=null;if(p.row>=0&&p.col>=0)focus(p);
+  },[fullscreen,loading,rowKey]);
+  useLayoutEffect(()=>{
+    const target=scroll.current;if(!fullscreen||!target)return;
+    const measure=()=>setViewport({top:target.scrollTop,height:target.clientHeight}),observer=new ResizeObserver(measure);
+    observer.observe(target);measure();const previous=document.body.style.overflow;document.body.style.overflow='hidden';
+    return()=>{observer.disconnect();document.body.style.overflow=previous;};
+  },[fullscreen]);
+  useLayoutEffect(()=>{
+    const target=scroll.current;
+    if(fullscreen&&target)setViewport({top:target.scrollTop,height:target.clientHeight});
+  },[fullscreen,virtual,rowKey]);
+  useEffect(()=>{
+    if(!virtual)return;let frame;
+    const observer=new ResizeObserver(entries=>{let changed=false;for(const entry of entries){const id=Number(entry.target.dataset.opsRow),height=entry.target.getBoundingClientRect().height;
+      if(height>0&&Math.abs((heights.current.get(id)||64)-height)>1){heights.current.set(id,height);changed=true;}}
+      if(changed){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>setHeightTick(value=>value+1));}});
+    grid.current?.querySelectorAll('tr[data-ops-row]').forEach(row=>observer.observe(row));return()=>{observer.disconnect();cancelAnimationFrame(frame);};
+  },[virtual,virtualStart,virtualEnd,rowKey,layoutKey]);
+  const select=(p,extend=false,reveal=true)=>{setSelected((old)=>({start:extend&&old?old.start:p,focus:p}));focus(p,reveal);};
   function normalize(row,key,raw) {
     if (missing(raw)) return "";
     const type=definitionFor(row,key).type;
@@ -333,7 +369,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
           const text=event.target.value,match=picker.find(([key,field])=>field[locale]===text||key===text);if(match){setAdditional(old=>[...new Set([...old,match[0]])]);setColumnQuery('');}else setColumnQuery(text);
         }}/><datalist id={fieldList}>{picker.map(([key,field])=><option key={key} value={field[locale]}/>)}</datalist></label>}
       {Object.keys(filters).length>0&&<button type="button" onClick={()=>{setFilters({});setSelected(null);}}>{t('إزالة جميع الفلاتر','Clear all filters')} ({Object.keys(filters).length})</button>}
-      {active&&<button type="button" onClick={()=>openItem(active.id)}>{t('تفاصيل الفتحة','Opening details')}</button>}
+      <button type="button" disabled={!active} onClick={()=>active&&openItem(active.id)}>{t('تفاصيل الفتحة','Opening details')}</button>
       <button type="button" aria-label={fullscreen?t("إنهاء ملء الشاشة","Exit full screen"):t("ملء الشاشة","Full screen")}
         title={fullscreen?t("إنهاء ملء الشاشة","Exit full screen"):t("ملء الشاشة","Full screen")} onClick={()=>setFullscreen(!fullscreen)}>
         {fullscreen?<Minimize2 size={16}/>:<Maximize2 size={16}/>}</button>
@@ -342,14 +378,16 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
       const next=resolveSpecificationEdits(patches,problem.payload.specification_conflicts,keep);
       setPatches(next);save(false,next);
     }}/>{message&&<p role="status" className="pc-caption">{message}</p>}
-    <div className="pc-table-scroll ops-spec-scroll">
-      <table className="pc-table ops-grid-table" style={{width:52+columns.reduce((sum,key)=>sum+width(key),0)}} ref={grid} role="grid" onKeyDown={keyboard}
+    {loading&&<p role="status">{t('جار تحميل جميع الصفوف…','Loading all rows…')}</p>}
+    {loadError&&<p className="pc-problem" role="alert">{loadError.message}<button type="button" onClick={reload}>{t('إعادة المحاولة','Retry')}</button></p>}
+    <div ref={scroll} className="pc-table-scroll ops-spec-scroll" onScroll={event=>{if(virtual)setViewport({top:event.currentTarget.scrollTop,height:event.currentTarget.clientHeight});}}>
+      <table className="pc-table ops-grid-table" style={{width:52+columns.reduce((sum,key)=>sum+width(key),0)}} ref={grid} role="grid" aria-rowcount={records.length+1} aria-busy={Boolean(loading)} onKeyDown={keyboard}
         onContextMenu={event=>{if(editing||!range)return;event.preventDefault();setContextMenu({left:Math.min(event.clientX,window.innerWidth-255),top:Math.min(event.clientY,window.innerHeight-260)});}}
         onCopy={(event)=>clipboard(event,false)} onCut={event=>clipboard(event,false)} onPaste={(event)=>clipboard(event,true)}
         onPointerDown={(event)=>{
           if (event.button!==0||event.target.closest("button,input")) return;
           const next=point(event.target);
-          if (next) {dragging.current=true;select(next,event.shiftKey);}
+          if (next) {dragging.current=true;select(next,event.shiftKey,false);}
         }} onPointerOver={(event)=>{
           if (!dragging.current||!(event.buttons&1)) return;
           const next=point(event.target);
@@ -361,8 +399,9 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
             {definitions.get(key)[locale]}{sort?.key===key?(sort.direction===1?' ↑':' ↓'):''}</button>
             <button type="button" aria-label={t('تصفية ','Filter ')+definitions.get(key)[locale]} aria-pressed={Boolean(filters[key])} onClick={event=>{const rect=event.currentTarget.getBoundingClientRect();setColumnMenu({key,position:{left:Math.max(8,Math.min(rect.left,window.innerWidth-295)),top:Math.min(rect.bottom,window.innerHeight-350)}});}}><Filter size={12}/></button></div>
             <span role="separator" aria-label={t('عرض عمود ','Width of ')+definitions.get(key)[locale]} className="ops-column-resize" onPointerDown={event=>resize(event,key)}/></th>)}</tr></thead>
-        <tbody>{records.map((row,r)=><tr key={row.id} className={activePoint?.row===r?'table-active-row':''}>
-          <th scope="row"><button type="button" className="pc-name" title={row.description} onClick={event=>{setSelected({start:event.shiftKey&&selected?selected.start:{row:r,col:0},focus:{row:r,col:columns.length-1}});}} onDoubleClick={()=>openItem(row.id)}>{records.indexOf(row)+1}</button></th>
+        <tbody>{virtual&&virtualStart>0&&<tr className="ops-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:offsets[virtualStart]}}/></tr>}
+        {records.slice(virtualStart,virtualEnd).map((row,index)=>{const r=virtualStart+index;return <tr key={row.id} data-ops-row={row.id} aria-rowindex={r+2} className={activePoint?.row===r?'table-active-row':''}>
+          <th scope="row"><button type="button" className="pc-name" title={row.description} onClick={event=>{setSelected({start:event.shiftKey&&selected?selected.start:{row:r,col:0},focus:{row:r,col:columns.length-1}});}} onDoubleClick={()=>openItem(row.id)}>{r+1}</button></th>
           {columns.map((key,c)=>{
             const p={row:r,col:c};
             const marked=range&&r>=range.rowStart&&r<=range.rowEnd&&c>=range.colStart&&c<=range.colEnd;
@@ -379,7 +418,8 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
                   {key==='opening_description'&&Boolean(row.defaults_applied)&&<small>{t('مواصفات العميل المحفوظة · قابلة للتعديل','Saved customer defaults · editable')}</small>}</>}
             </td>;
           })}
-        </tr>)}</tbody>
+        </tr>;})}
+        {virtual&&virtualEnd<records.length&&<tr className="ops-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:offsets.at(-1)-offsets[virtualEnd]}}/></tr>}</tbody>
       </table>
     </div>
     {!records.length&&<p>{t('لا توجد صفوف تطابق الفلاتر.','No rows match the filters.')}</p>}
@@ -396,7 +436,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
       <button type="button" role="menuitem" onClick={()=>menuAction('details')}>{t('تفاصيل الفتحة','Opening details')}</button><button type="button" onClick={()=>setContextMenu(null)}>{t('إلغاء','Cancel')}</button>
     </div>,document.body)}
     <SelectionStatus uiLanguage={locale} values={range?records.slice(range.rowStart,range.rowEnd+1).flatMap(row=>columns.slice(range.colStart,range.colEnd+1).map(key=>value(row,key))):[]}/>
-    {pagination}
+    {fullscreen?<small><bdi>{records.length}</bdi> {t('صفوف','rows')}</small>:pagination}
   </section>;
 }
 

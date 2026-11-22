@@ -85,6 +85,12 @@ async function main() {
     assert.equal(db.get("SELECT COUNT(*) AS count FROM cert_projects").count,oldProjects);
     const list=await api(scope+"/items");
     assert.equal(list.total,1);
+    assert.equal(list.limit,50);
+    const continuous=await api(scope+'/items?all=1&page=2&boq_id='+boq);
+    assert.equal(continuous.page,1);
+    assert.equal(continuous.items.length,continuous.total);
+    assert.equal((await api(scope+'/items?all=1&boq_id=999999')).total,0);
+    assert.equal((await api(scope+'/items?all=1&category=doors')).total,0);
     const initial=list.items[0];
     assert.equal(initial.source_line_id,sourceId);
     assert.equal(initial.original.width_mm,1200);

@@ -1,5 +1,5 @@
 import {useEffect,useId,useState} from "react";
-import {Dialog,Field,localDate,newKey,useDebounce,useResource} from "../certificates/shared.jsx";
+import {Dialog,Field,localDate,newKey,queryString,useDebounce,useResource} from "../certificates/shared.jsx";
 import {DimensionPair,ErrorMessage,Page,Pick,SystemPick,Table,Text,display,options,panelNames,quantity,states,useAction,usePaged} from "./shared.jsx";
 import SpecificationGrid from "./SpecificationGrid.jsx";
 import GroupedSpecifications from "./GroupedSpecifications.jsx";
@@ -292,6 +292,7 @@ export function WorkItems(props) {
   const [category,setCategory]=useState("");
   const [spreadsheet,setSpreadsheet]=useState(true);
   const [visitedSheet,setVisitedSheet]=useState(true);
+  const [fullscreen,setFullscreen]=useState(false);
   const [boqId,setBoqId]=useState(()=>{
     const chosen=preferred&&[...ctx.boqs,...ctx.linked_boqs].find(({id})=>id===preferred.id);
     return String(chosen?.id||ctx.operations.boq_id);
@@ -303,6 +304,7 @@ export function WorkItems(props) {
   const sources=new Map([...ctx.boqs,...ctx.linked_boqs].map((source)=>[source.id,source]));
   const source=sources.get(Number(boqId));
   const linked=ctx.linked_boqs.some(({id})=>id===Number(boqId));
+  const fullList=useResource(request,fullscreen&&spreadsheet&&linked?path+'/items'+queryString({q,category,boq_id:boqId,all:1}):null,revision);
   const documentName=(doc)=>(doc.document_type==="invoice"?t("فاتورة","Invoice"):t("عرض سعر","Quotation"))+
     " "+(doc.operation_no||doc.document_no);
   return <>
@@ -329,7 +331,8 @@ export function WorkItems(props) {
         <Pick label={t("الفئة","Category")} value={category} placeholder={t("كل الفئات","All categories")}
           onChange={(next)=>{setCategory(next);list.setPage(1);}} items={catalogue.categories.map((cat)=>[cat.id,cat[uiLanguage]])}/>
       </div>
-      <SpecificationGrid key={boqId+':'+(source?.import_fingerprint||'')} {...props} items={linked?list.data?.items||[]:[]} openItem={setId}
+      <SpecificationGrid key={boqId+':'+(source?.import_fingerprint||'')} {...props} items={linked?(fullscreen?fullList.data?.items||list.data?.items:list.data?.items)||[]:[]} openItem={setId}
+        fullscreen={fullscreen} onFullscreenChange={setFullscreen} loading={fullscreen&&fullList.pending} loadError={fullscreen&&fullList.error}
         pageKey={JSON.stringify([boqId,q,category,list.data?.page])} pagination={<Page data={list.data} onPage={list.setPage} t={t}/>}/>
     </div>}
     {(id==="new"||item.data)&&<ItemDialog {...props} key={id+":"+(item.data?.version||0)} mode={id==="new"?"new":"edit"}
