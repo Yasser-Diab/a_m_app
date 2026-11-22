@@ -4,6 +4,8 @@ import {ErrorMessage,Page,Pick,Suggest,Table,Text,assignmentRoles,display,option
 import ProjectSignatures from "./ProjectSignatures.jsx";
 import ReportEditor from './ReportEditor.jsx';
 import SourceRefresh from './SourceRefresh.jsx';
+import LoadingExtras from './LoadingExtras.jsx';
+import {openingDescription} from './terminology.js';
 
 const checkLabels={measurements:["المقاسات","Measurement conformity"],profile:["القطاعات","Profile conformity"],
   finish:["التشطيب","Finish"],glass:["الزجاج","Glass"],opening:["اتجاه الفتح والمقابض","Opening and handles"],
@@ -64,7 +66,7 @@ function CreateOrder({request,path,t,reload,close,onCreated,maintenance}) {
   const action=useAction(request,(result)=>{onCreated(result);reload();});
   const pick=(item,amount)=>{
     const next={...selected};
-    if (amount==null) delete next[item.id]; else next[item.id]={code:item.code,quantity:amount};
+    if (amount==null) delete next[item.id]; else next[item.id]={code:openingDescription(item),quantity:amount};
     setSelected(next);
   };
   const visible=(list.data?.items||[]).filter((item)=>item.active&&(maintenance||item.system));
@@ -85,12 +87,12 @@ function CreateOrder({request,path,t,reload,close,onCreated,maintenance}) {
         <Text label={t("بحث في البنود","Find work items")} value={search} onChange={(value)=>{setSearch(value);list.setPage(1);}}/>
       </div>
       {visible.length>0&&<button type="button" onClick={()=>setSelected({...selected,...Object.fromEntries(visible
-        .filter((item)=>defaultAmount(item)).map((item)=>[item.id,selected[item.id]||{code:item.code,quantity:defaultAmount(item)}]))})}>
+        .filter((item)=>defaultAmount(item)).map((item)=>[item.id,selected[item.id]||{code:openingDescription(item),quantity:defaultAmount(item)}]))})}>
         {t("تحديد بنود الصفحة","Select items on this page")}</button>}
       {visible.map((item)=><div key={item.id} className="pc-toolbar ops-line-choice">
         <label className="pc-check"><input type="checkbox" checked={Boolean(selected[item.id])}
           onChange={(event)=>pick(item,event.target.checked?defaultAmount(item):null)}/>
-          <bdi>{item.code}</bdi> {item.commercial.description}</label>
+          <bdi>{openingDescription(item)}</bdi></label>
         {selected[item.id]&&<Text label={maintenance?t("العدد المطلوب","Service count"):t("عدد الفتحات","Opening count")} type="number" min={1} step={1} required
           value={selected[item.id].quantity} onChange={(amount)=>pick(item,amount)}/>}
       </div>)}
@@ -127,7 +129,7 @@ function MaintenanceDetails({order,path,request,t,can,reload,...props}) {
         .map(([label,value])=><div key={label}><dt>{label}</dt><dd><bdi>{value}</bdi></dd></div>)}
     </dl>
     <Table headers={[t("البند","Item"),t("البيان","Description"),t("العدد","Count")]}
-      rows={order.items.map(({id,quantity:count,specification})=>[id,[specification.code,specification.commercial.description,quantity(count)]])}/>
+      rows={order.items.map(({id,quantity:count,specification})=>[id,[specification.technical.tag,openingDescription(specification),quantity(count)]])}/>
     {dialog==="report"&&<Report {...props} endpoint={endpoint} t={t} maintenance reference={order.reference} close={()=>setDialog("")}/>}
     {["complete","cancel"].includes(dialog)&&<Dialog t={t} title={dialog==="complete"?t("إنهاء الصيانة","Complete maintenance"):t("إلغاء الأمر","Cancel order")}
       onClose={()=>setDialog("")}>
@@ -171,15 +173,16 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
     </div>
     <ErrorMessage error={action.error||people.error}/>
     <StageApprovals {...{order,endpoint,request,t,can,reload}}/>
+    <LoadingExtras key={order.id+':'+order.loading_settings_version} {...{order,endpoint,request,t,can,reload}}/>
     <Table headers={[t("الفتحة","Opening"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),t("المحمل","Loaded"),t("المتبقي","Remaining"),t("التقدم","Progress")]}
       empty={t("لا توجد كميات.","No quantities.")}
-      rows={order.balances.map((row)=>[row.order_item_id+":"+row.kind,[row.tag||row.code,
+      rows={order.balances.map((row)=>[row.order_item_id+":"+row.kind,[row.description,
         <bdi dir="ltr">{row.width_mm??"—"} × {row.height_mm??"—"}</bdi>,display(panelNames,row.kind,t),
         quantity(row.required),quantity(row.loaded),quantity(row.remaining),loadState(row)]])}/>
     <h3>{t("فحص الجودة","Quality inspections")}</h3>
     <Table headers={[t("رقم الفحص","Inspection no."),t("البند","Item"),t("المرحلة","Stage"),t("التاريخ","Date"),t("الفاحص","Inspector"),t("النتيجة","Result"),t("الإفراج","Release")]}
       empty={t("لا توجد فحوصات.","No inspections.")}
-      rows={order.inspections.map((row)=>[row.id,[<bdi>{row.reference||"—"}</bdi>,order.items.find(({id})=>id===row.order_item_id)?.specification.code,
+      rows={order.inspections.map((row)=>[row.id,[<bdi>{row.reference||"—"}</bdi>,openingDescription(order.items.find(({id})=>id===row.order_item_id)?.specification),
         display(stages,row.stage,t),<bdi>{row.inspection_date}</bdi>,row.inspector_name,
         <details><summary>{display(results,row.record.result,t)}</summary>
           <dl>{Object.entries(row.record.checklist).map(([key,val])=><div key={key}><dt>{t(...checkLabels[key])}</dt>
@@ -190,7 +193,7 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
     <Table headers={[t("المرجع","Reference"),t("التاريخ","Date"),t("المسؤول","Responsible"),t("الكميات","Quantities"),t("الملاحظات","Notes")]}
       empty={t("لا يوجد تحميل مؤكد.","No confirmed loading.")}
       rows={order.loads.map((batch)=>[batch.id,[batch.reference,<bdi>{batch.loading_date}</bdi>,batch.responsible.loading?.name,
-        <bdi>{batch.lines.map((row)=>[row.code,display(panelNames,row.kind,t),row.quantity].join(" · ")).join(", ")}</bdi>,batch.notes]])}/>
+        <bdi>{batch.lines.map((row)=>[openingDescription(order.items.find(item=>item.id===row.order_item_id)?.specification),display(panelNames,row.kind,t),row.quantity].join(" · ")).join(", ")}</bdi>,batch.notes]])}/>
     {dialog==="qc"&&<Inspection {...{order,endpoint,request,can,t,reload}} close={()=>setDialog(null)}/>}
     {dialog==="load"&&<Loading {...{order,endpoint,request,t,reload}} people={people.data||[]} close={()=>setDialog(null)}/>}
     {["manufacturing","loadingReport","approvalReport"].includes(dialog)&&<Report {...{endpoint,t,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}}
@@ -223,10 +226,10 @@ function StageApprovals({order,endpoint,request,t,can,reload}) {
     </button>)}</div>
     <button type="button" className="pc-name" onClick={()=>setExceptions(!exceptions)}>{t("تعديل اعتماد فتحة واحدة","Review an individual opening")}</button>
     {exceptions&&<Table headers={[t("الفتحة","Opening"),...Object.values(approvalStages).map((text)=>t(...text))]}
-      rows={order.items.map((item)=>[item.id,[item.specification.technical.tag||item.specification.code,
+      rows={order.items.map((item)=>[item.id,[openingDescription(item.specification),
         ...Object.entries(approvalStages).map(([stage,text])=>{
           const current=order.stage_approvals.find((row)=>row.stage===stage)?.items.find(({id})=>id===item.id);
-          return <button type="button" aria-label={(item.specification.technical.tag||item.specification.code)+" · "+t(...text)}
+          return <button type="button" aria-label={openingDescription(item.specification)+" · "+t(...text)}
             aria-pressed={Boolean(current?.approved)} disabled={!can("release")||action.busy||order.status==="closed"}
             onClick={()=>decide(stage,!current?.approved,item.id)}>{current?.approved?t("معتمد","Approved"):t("اعتماد","Approve")}</button>;
         }),
@@ -246,7 +249,7 @@ function Inspection({order,endpoint,request,can,t,reload,close}) {
     <form className="pc-stack" onSubmit={(event)=>{event.preventDefault();action.run(endpoint+"/inspections","POST",data);}}>
       <div className="pc-form">
         <Pick label={t("بند الإنتاج","Order item")} required value={data.order_item_id} onChange={(value)=>set("order_item_id",value)}
-          items={order.items.map(({id,specification})=>[id,specification.code])}/>
+          items={order.items.map(({id,specification})=>[id,openingDescription(specification)])}/>
         <Pick label={t("المرحلة","Inspection stage")} value={data.stage} required onChange={(value)=>set("stage",value)} items={options(stages,t)}/>
         <Text type="date" label={t("تاريخ الفحص","Inspection date")} value={data.inspection_date} required onChange={(value)=>set("inspection_date",value)}/>
       </div>
@@ -300,8 +303,8 @@ function Loading({order,endpoint,request,t,people,reload,close}) {
         empty={t("لا توجد كميات متبقية.","No remaining quantities.")}
         rows={order.balances.filter((row)=>row.remaining>0).map((row)=>{
           const key=row.order_item_id+":"+row.kind;
-          return [key,[row.tag||row.code,<bdi dir="ltr">{row.width_mm??"—"} × {row.height_mm??"—"}</bdi>,display(panelNames,row.kind,t),quantity(row.remaining),
-            <Text label={row.code+" · "+display(panelNames,row.kind,t)} type="number" min={0} max={row.remaining} step={1} value={amounts[key]}
+          return [key,[row.description,<bdi dir="ltr">{row.width_mm??"—"} × {row.height_mm??"—"}</bdi>,display(panelNames,row.kind,t),quantity(row.remaining),
+            <Text label={row.description+" · "+display(panelNames,row.kind,t)} type="number" min={0} max={row.remaining} step={1} value={amounts[key]}
               onChange={(value)=>setAmounts({...amounts,[key]:value})}/>]];
         })}/>
       <ErrorMessage error={action.error}/>

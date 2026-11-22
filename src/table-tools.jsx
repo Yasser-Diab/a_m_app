@@ -14,7 +14,7 @@ export function SelectionStatus({values,uiLanguage='ar'}){
   </div>;
 }
 
-export function TableSearchPanel({initialQuery,results,currentIndex,columnLabel,onSearchChange,onClose,onPrevious,onNext,onJump,onReplaceAll,uiLanguage='ar'}){
+export function TableSearchPanel({initialQuery,results,currentIndex,columnLabel,onSearchChange,onClose,onPrevious,onNext,onJump,onReplaceAll,uiLanguage='ar',zIndex}){
   const [query,setQuery]=useState(initialQuery||''),[replacement,setReplacement]=useState(''),[listPage,setListPage]=useState(0);
   const panel=useRef(null),input=useRef(null),t=(ar,en)=>uiLanguage==='ar'?ar:en;
   const [size]=useState(()=>{try{return JSON.parse(localStorage.getItem('tableFindPanelSizeV1'))||{};}catch{return {};}});
@@ -28,7 +28,7 @@ export function TableSearchPanel({initialQuery,results,currentIndex,columnLabel,
   },[]);
   const page=Math.min(listPage,Math.max(0,Math.ceil(results.length/100)-1)),start=page*100;
   return createPortal(<section ref={panel} className="smart-table-search-panel table-find-panel" dir={uiLanguage==='ar'?'rtl':'ltr'}
-    style={{width:size.width?Math.min(size.width,window.innerWidth-24):undefined,height:size.height?Math.min(size.height,window.innerHeight-24):undefined}}
+    style={{zIndex,width:size.width?Math.min(size.width,window.innerWidth-24):undefined,height:size.height?Math.min(size.height,window.innerHeight-24):undefined}}
     role="dialog" aria-label={t('بحث في الجدول','Search Table')} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();onClose();}}}>
     <div className="smart-search-head"><strong>{t('بحث في الجدول','Search Table')}</strong><button type="button" aria-label={t('إغلاق البحث','Close search')} onClick={onClose}><X size={16}/></button></div>
     <input ref={input} data-smart-search-input="true" aria-label={t('النص أو الرقم المطلوب','Text or number to find')} value={query} onChange={event=>{setQuery(event.target.value);setListPage(0);}}
@@ -46,11 +46,11 @@ export function TableSearchPanel({initialQuery,results,currentIndex,columnLabel,
   </section>,document.body);
 }
 
-export function ColumnFilter({column,values,selected,onApply,onClose,t,position}){
+export function ColumnFilter({column,values,selected,onApply,onClose,t,position,zIndex}){
   const [query,setQuery]=useState(''),[checked,setChecked]=useState(()=>new Set(selected||values.map(value=>value.value)));
   const root=useRef(null),visible=values.filter(value=>String(value.label).toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   useEffect(()=>{const close=event=>{if(!root.current?.contains(event.target))onClose();};document.addEventListener('pointerdown',close);return()=>document.removeEventListener('pointerdown',close);},[onClose]);
-  return createPortal(<section ref={root} className="table-column-filter" role="dialog" aria-label={column} style={position}
+  return createPortal(<section ref={root} className="table-column-filter" role="dialog" aria-label={column} style={{...position,zIndex}}
     onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();onClose();}}}>
     <strong>{column}</strong><input autoFocus aria-label={t('بحث في القيم','Search values')} value={query} onChange={event=>setQuery(event.target.value)}/>
     <label><input type="checkbox" checked={visible.every(value=>checked.has(value.value))} onChange={event=>setChecked(previous=>{

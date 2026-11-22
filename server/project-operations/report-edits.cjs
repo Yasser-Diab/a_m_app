@@ -30,7 +30,14 @@ function saved(db,current,options){const key=identity(current,options);return {k
   WHERE order_id=? AND document_ref=? AND report_kind=? AND locale=?`,Object.values(key))};}
 function editedReport(db,current,options,html){
   const {key,row}=saved(db,current,options);
-  return {html:row?.body_html!=null?html.replace(/<body[^>]*>[\s\S]*<\/body>/i,()=>'<body>'+row.body_html+'</body>'):html,
+  let body=row?.body_html;
+  if(body!=null&&options.kind==='loading'){
+    const extras=html.match(/<section class="loading-extras">[\s\S]*?<\/section>/)?.[0]||'';
+    const section=/<section class="loading-extras">[\s\S]*?<\/section>/;
+    body=section.test(body)?body.replace(section,()=>extras):body.includes('<div class="signoffs">')?
+      body.replace('<div class="signoffs">',()=>extras+'<div class="signoffs">'):body+extras;
+  }
+  return {html:body!=null?html.replace(/<body[^>]*>[\s\S]*<\/body>/i,()=>'<body>'+body+'</body>'):html,
     edit_version:row?.version||0,document_ref:key.document_ref,report_key:key.report_kind+':'+key.locale,customized:row?.body_html!=null};
 }
 function saveReportEdit(db,current,options,user){

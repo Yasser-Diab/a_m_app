@@ -2,6 +2,7 @@ const {encode,parse,str,date,fail,idOf,today} = require("../certificate-access.c
 const {getItem,record,people,pageOptions,responsibilityKeys} = require("./core.cjs");
 const {nextReference}=require("./references.cjs");
 const {configuration,approvalParts,loadingQuantities,frameQuantity,screenQuantity,number} = require("./specifications.cjs");
+const {openingDescription}=require('./customer-defaults.cjs');
 
 const qcStages = ["survey","receipt","cutting","assembly","glazing","pre_shipment","installation","handover"];
 const qcChecks = ["measurements","profile","finish","glass","opening","accessories","fixing","packaging"];
@@ -51,6 +52,7 @@ function orderItems(db,id) {
   return db.all("SELECT * FROM ops_order_items WHERE order_id=? ORDER BY id",[id])
     .map((item)=>{
       const specification=parse(item.specification,{});
+      specification.technical=require('./customer-defaults.cjs').normalizeLocks(specification.technical);
       const quantities=parse(item.quantities,{});
       if (!Object.hasOwn(quantities,"frames")&&Object.keys(quantities).length) {
         const frames=frameQuantity(specification.category,configuration(db,specification.category,specification.system),
@@ -290,7 +292,7 @@ function loadingBalances(db,orderId) {
   return orderItems(db,orderId).flatMap((row)=>Object.entries(row.quantities).map(([kind,required])=>{
     const quantity=loaded.get(row.id+":"+kind)||0;
     const spec=row.specification.technical;
-    return {order_item_id:row.id,item_id:row.item_id,code:row.specification.code,tag:spec.tag,
+    return {order_item_id:row.id,item_id:row.item_id,code:row.specification.code,description:openingDescription(row.specification),tag:spec.tag,
       width_mm:spec.width_mm,height_mm:spec.height_mm,kind,required,loaded:quantity,remaining:required-quantity};
   }));
 }
@@ -363,8 +365,23 @@ function orderDetails(db,current) {
     byBatch.get(row.load_id).lines.push(row);
   const loadingReference=db.get("SELECT reference FROM ops_loading_orders WHERE order_id=? AND after_load_id=?",
     [current.id,loads[0]?.id||0])?.reference;
-  return {...current,loading_reference:loadingReference||null,service:parse(current.service_data,{}),items:orderItems(db,current.id),inspections:inspections(db,current.id),
+  return {...current,loading_settings:parse(current.loading_settings,{enabled:false,rows:[]}),loading_reference:loadingReference||null,service:parse(current.service_data,{}),items:orderItems(db,current.id),inspections:inspections(db,current.id),
     balances:loadingBalances(db,current.id),loads:[...byBatch.values()],stage_approvals:current.kind==="maintenance"?[]:stageApprovals(db,current)};
+}
+
+function saveLoadingSettings(db,current,body,user){
+  if(Number(body.version)!==current.loading_settings_version)fail(409,'The loading settings changed. Reopen this work order before saving');
+  if(current.kind==='maintenance')fail(400,'Loading applies to manufacturing orders');
+  if(typeof body.enabled!=='boolean'||!Array.isArray(body.rows)||body.rows.length>1000)fail(400,'Enter loading rows with a label, unit and quantity');
+  const rows=body.rows.map(row=>{
+    const label=str(row.label,500),unit=str(row.unit,60),quantity=number(row.quantity,'custom loading quantity',{positive:true});
+    if(!label||!unit||!quantity)fail(400,'Each loading row needs a label, unit and positive quantity');
+    return {label,unit,quantity};
+  });
+  const settings={enabled:body.enabled,rows},version=current.loading_settings_version+1;
+  db.run('UPDATE ops_orders SET loading_settings=?,loading_settings_version=? WHERE id=?',[encode(settings),version,current.id]);
+  record(db,user,current.project_id,'loading_settings_updated',current.id,{reference:current.reference,before:parse(current.loading_settings),after:settings,version});
+  return {loading_settings:settings,loading_settings_version:version};
 }
 
 function loadingOrder(db,current,user) {
@@ -409,4 +426,4 @@ function confirmQuantity(db,item,body,access) {
 }
 
 module.exports = {qcStages,qcChecks,qcResults,checks,order,orderPage,orderDetails,addOrder,updateOrderStatus,refreshDraftOrder,prepareOutput,loadingOrder,
-  inspect,loadBatch,loadingBalances,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages};
+  inspect,loadBatch,loadingBalances,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages,saveLoadingSettings};

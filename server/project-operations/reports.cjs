@@ -3,6 +3,7 @@ const {getProject,getCustomer} = require("../certificate-projects.cjs");
 const {people} = require("./core.cjs");
 const {configuration,fieldsFor,directions,categories,perimeterDescription} = require("./specifications.cjs");
 const {orderDetails} = require("./production.cjs");
+const {openingDescription}=require('./customer-defaults.cjs');
 const { PDFDocument, PDFName } = require("pdf-lib");
 const translations=require("./translations.json");
 const technicalText=(value,locale)=>translations[value]?.[locale==="ar"?0:1]??value;
@@ -59,7 +60,9 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   thead{display:table-header-group;background:#e5eef1}tr{break-inside:avoid}
   .loading-sheet{table-layout:fixed;font-size:8.5pt}.loading-sheet td{height:12mm}
   .loading-sheet tbody.opening-band-0{background:#f1f6f8}.loading-sheet tbody.opening-band-1{background:#fff}
-  .loading-sheet td:nth-child(-n+8){white-space:nowrap}.loading-sheet th{font-size:8pt;overflow-wrap:normal;hyphens:none}
+  .loading-sheet td:nth-child(2),.loading-sheet td:nth-child(n+4):nth-child(-n+8){white-space:nowrap}
+  .loading-sheet td:first-child,.loading-sheet td:nth-child(3){white-space:normal;overflow-wrap:anywhere}
+  .loading-sheet th{font-size:8pt;overflow-wrap:normal;hyphens:none}.measurements td:first-child{overflow-wrap:anywhere}
   .drawings{display:flex;flex-wrap:wrap;gap:8px}
   figure{max-width:47%;margin:6px 0 0;break-inside:avoid}figure img{max-width:100%;max-height:66mm;object-fit:contain}
   .signoffs{display:grid;grid-template-columns:minmax(0,1fr);gap:28px;margin-block:28px 12px}
@@ -100,7 +103,8 @@ function projectBlock(db,project,customer,state,order,locale,branding) {
 }
 
 const internalFields=new Set(["measurement_status","material_status","manufacturing_status","safety_approval"]);
-const dimensionFields=new Set(["quantity","width_mm","height_mm","depth_mm","tag","building","floor","room","drawing_ref"]);
+const partFields=['panel_measurement_basis','fixed_width_mm','fixed_height_mm','leaf_width_mm','leaf_height_mm'];
+const dimensionFields=new Set(["quantity","width_mm","height_mm","depth_mm","tag","building","floor","room","drawing_ref",...partFields]);
 const locks=new Set(["lock_left","lock_right","central_lock_handle","interlock_left","interlock_right"]);
 
 function stable(value) {
@@ -119,7 +123,7 @@ function groupedWork(db,items,locale,drawingSets) {
     const spec={...source,technical};
     const shared=Object.fromEntries(Object.entries(spec.technical).filter(([key,value])=>
       !dimensionFields.has(key)&&!internalFields.has(key)&&populated(value,key)));
-    const key=JSON.stringify([spec.category,spec.system,spec.commercial.description.normalize("NFC").replace(/\s+/g," ").trim()]);
+    const key=JSON.stringify([spec.category,spec.system]);
     prepared.push({item,index,spec,shared,key});
   }
   // Resolve fuller specifications first so missing fields can stay within a matching item.
@@ -183,7 +187,7 @@ function groupedWork(db,items,locale,drawingSets) {
           const specified=items.filter((item)=>populated(item.reportTechnical[field.key],field.key));
           return [field[locale],field.key==="perimeter"?perimeterDescription(tech[field.key],locale):field.key==="coating_direction"?text(({Inside:"للداخل",Outside:"للخارج"})[tech[field.key]]||tech[field.key]):text(tech[field.key]),
             specified.length&&specified.length<items.length?t("محدد للفتحات ","Specified for openings ")+
-              specified.map(({specification})=>specification.technical.tag||specification.code).join(", "):null];
+              specified.map(({specification})=>openingDescription(specification)).join(", "):null];
         }),
     ];
     pairs.push(...supplemental(tech,system));
@@ -193,10 +197,12 @@ function groupedWork(db,items,locale,drawingSets) {
         .map((field)=>[field[locale],field.key==="perimeter"?perimeterDescription(tech.integrated.spec[field.key],locale):text(tech.integrated.spec[field.key])]),...supplemental(tech.integrated.spec,integrated));
     const size=(value)=>value==null?"":value;
     const hasLocation=items.some(({specification})=>["building","floor","room"].some((key)=>specification.technical[key]));
+    const hasTag=items.some(({specification})=>specification.technical.tag);
     const hasWidth=items.some(({specification})=>specification.technical.width_mm!=null);
     const hasHeight=items.some(({specification})=>specification.technical.height_mm!=null);
     const hasDepth=items.some(({specification})=>specification.technical.depth_mm!=null);
     const hasDrawing=items.some(({specification})=>specification.technical.drawing_ref);
+    const measuredParts=partFields.filter(key=>items.some(({specification})=>populated(specification.technical[key],key)));
     const changedDimensions=(item)=>{
       const data=item.specification.technical;
       const net=item.specification.manufacturing_dimensions;
@@ -206,18 +212,18 @@ function groupedWork(db,items,locale,drawingSets) {
     const measures=items.map((item)=>{
       const data=item.specification.technical;
       const net=item.specification.manufacturing_dimensions;
-      return row([data.tag||item.specification.code,...(hasLocation?[[data.building,data.floor,data.room].filter(Boolean).join(" / ")]:[]),
+      return row([openingDescription(item.specification),...(hasTag?[data.tag]:[]),...(hasLocation?[[data.building,data.floor,data.room].filter(Boolean).join(" / ")]:[]),
         item.quantity,...(hasWidth?[size(data.width_mm)]:[]),...(hasHeight?[size(data.height_mm)]:[]),...(hasDepth?[size(data.depth_mm)]:[]),
-        ...(hasDrawing?[data.drawing_ref]:[]),...(hasDeductions?[changedDimensions(item)?net.width+" × "+net.height:""]:[])]);
+        ...measuredParts.map(key=>text(data[key])),...(hasDrawing?[data.drawing_ref]:[]),...(hasDeductions?[changedDimensions(item)?net.width+" × "+net.height:""]:[])]);
     }).join("");
     const imageHtml=drawings.length?'<div class="drawings">'+drawings.map(({name,mime,content})=>mime==="application/pdf"
       ?"<p>"+escape(t("رسم مرفق بنهاية الملف","Drawing appended to the PDF"))+" · "+escape(name)+"</p>"
       :'<figure><img alt="'+escape(name)+'" src="data:'+mime+';base64,'+Buffer.from(content).toString("base64")+
         '"><figcaption>'+escape(name)+"</figcaption></figure>").join("")+"</div>":"";
     return '<section class="work-group"><p class="item-number">'+escape(t(`البند ${groupIndex+1} من ${groups.length}`,`Item ${groupIndex+1} of ${groups.length}`))+
-      '</p><h3>'+escape(spec.commercial.description)+'</h3><table class="measurements"><thead>'+
-      row([t("الفتحة","Opening"),...(hasLocation?[t("الموقع","Location")]:[]),t("العدد","Count"),...(hasWidth?[t("العرض مم","Width mm")]:[]),...(hasHeight?[t("الارتفاع مم","Height mm")]:[]),
-        ...(hasDepth?[t("العمق مم","Depth mm")]:[]),...(hasDrawing?[t("مرجع الرسم","Drawing reference")]:[]),
+      '</p><h3>'+escape(items.every(item=>item.specification.commercial.description===spec.commercial.description)?spec.commercial.description:system?.[locale]||categories.get(spec.category)?.[locale])+'</h3><table class="measurements"><thead>'+
+      row([t("وصف الفتحة","Opening description"),...(hasTag?[t('رقم الفتحة','Opening tag')]:[]),...(hasLocation?[t("الموقع","Location")]:[]),t("العدد","Count"),...(hasWidth?[t("العرض مم","Width mm")]:[]),...(hasHeight?[t("الارتفاع مم","Height mm")]:[]),
+        ...(hasDepth?[t("العمق مم","Depth mm")]:[]),...measuredParts.map(key=>fieldsFor(spec.category,system,{...tech,panel_measurement_basis:key.startsWith('leaf_')?'Operable leaf':'Fixed panel'},true).find(field=>field.key===key)?.[locale]||key),...(hasDrawing?[t("مرجع الرسم","Drawing reference")]:[]),
         ...(hasDeductions?[t("مقاس التصنيع بعد التخصيم مم","Manufacturing after deduction mm")]:[])],"th")+
       "</thead><tbody>"+measures+'</tbody></table><div class="shared-specifications">'+grid(pairs)+"</div>"+imageHtml+"</section>";
   }).join("");
@@ -265,8 +271,8 @@ function maintenanceBlock(order,locale) {
     [t("تاريخ الإنهاء","Completed on"),service.completed_on],
     [t("مسجل الإنهاء","Completed by"),service.completed_by],
     [t("ملاحظات الإنهاء","Completion notes"),service.completion_notes],
-  ])}<table><thead>${row([t("البند","Item"),t("البيان","Description"),t("العدد","Count")],"th")}</thead><tbody>
-    ${order.items.map((item)=>row([item.specification.code,item.specification.commercial.description,item.quantity])).join("")}
+  ])}<table><thead>${row([t("وصف الفتحة","Opening description"),t("العدد","Count")],"th")}</thead><tbody>
+    ${order.items.map((item)=>row([openingDescription(item.specification),item.quantity])).join("")}
     </tbody></table></section>`;
 }
 
@@ -280,7 +286,7 @@ function loadingBlock(order,locale) {
     const begin=last!==entry.order_item_id;if(begin){last=entry.order_item_id;band++;}
     const spec=details.get(entry.order_item_id);
     const tech=spec.technical;
-    const values=[tech.tag||spec.code,(tech.width_mm??"—")+" × "+(tech.height_mm??"—"),t(...panelLabels[entry.kind]),
+    const values=[openingDescription(spec)+(tech.tag?' · '+tech.tag:''),(tech.width_mm??"—")+" × "+(tech.height_mm??"—"),t(...panelLabels[entry.kind]),
       entry.required,entry.loaded,"","",entry.remaining,""];
     return (begin?(band?'</tbody>':'')+`<tbody class="opening-band-${band%2}" data-opening="${entry.order_item_id}">`:'')+
       "<tr>"+values.map((value,index)=>'<td'+(index>2&&index<8?' class="number"':"")+'><bdi dir="'+direction(value)+'">'+escape(value)+"</bdi></td>").join("")+"</tr>";
@@ -291,9 +297,20 @@ function loadingBlock(order,locale) {
   return '<section class="loading">'+
     '<p>'+escape(t("إجمالي الحلوق","Total frames"))+' '+frames+' · '+escape(t("إجمالي الضلف","Total leaves"))+' '+leaves+
     (screens?' · '+escape(t("إجمالي ضلف السلك","Total flyscreen leaves"))+' '+screens:'')+'</p>'+
-    '<table class="loading-sheet"><colgroup>'+[14,15,15,8,10,8,10,10,10].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row([t("الفتحة","Opening"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),
-      t("المحمل سابقًا","Previously loaded"),t("الحالي","Current"),t("التراكمي","Cumulative"),t("المتبقي","Remaining"),t("ملاحظات / تاريخ","Notes / date")],"th")+
-    "</thead>"+rows+(ordered.length?'</tbody>':'')+"</table></section>";
+    '<table class="loading-sheet"><colgroup>'+[22,14,15,8,9,8,8,9,7].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row([t("وصف الفتحة","Opening description"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),
+      t("المحمل سابقًا","Previous"),t("الحالي","This load"),t("التراكمي","To date"),t("المتبقي","Remaining"),t("ملاحظات / تاريخ","Notes / date")],"th")+
+    "</thead>"+rows+(ordered.length?'</tbody>':'')+"</table></section>"+loadingExtras(order,locale);
+}
+
+function loadingExtras(order,locale){
+  const settings=order.loading_settings;
+  if(!settings?.enabled||!settings.rows?.length)return '';
+  const t=(ar,en)=>label(ar,en,locale);
+  const units={'pcs':['عدد','Pcs'],'عدد':['عدد','Pcs'],'m²':['م²','m²'],'م²':['م²','m²'],'kg':['كجم','kg'],'كجم':['كجم','kg'],
+    'l.m':['م.ط','l.m'],'م.ط':['م.ط','l.m']};
+  return '<section class="loading-extras"><h3>'+escape(t('بنود تحميل إضافية','Additional loading items'))+'</h3><table><thead>'+row([
+    t('البيان','Description'),t('الوحدة','Unit'),t('الكمية','Quantity')],'th')+'</thead><tbody>'+settings.rows.map(entry=>row([
+      entry.label,units[entry.unit.toLowerCase()]?.[locale==='ar'?0:1]||entry.unit,entry.quantity])).join('')+'</tbody></table></section>';
 }
 
 function approvalReport(db,order,locale) {
@@ -301,16 +318,16 @@ function approvalReport(db,order,locale) {
   const stages={measurement:["المقاسات","Measurements"],profile:["القطاعات","Profiles"],glass:["الزجاج","Glass"],
     accessories:["الإكسسوارات","Accessories"],finish:["التشطيب","Finish"],details:["التفاصيل","Technical details"],drawing:["الرسومات","Drawings"],
     manufacturing:["التصنيع","Manufacturing"],pre_shipment:["الشحن","Shipment"]};
-  const list=order.stage_approvals.flatMap(({stage,items})=>items.map((item)=>row([item.code,t(...stages[stage]),
+  const list=order.stage_approvals.flatMap(({stage,items})=>items.map((item)=>row([openingDescription(order.items.find(row=>row.id===item.id)?.specification),t(...stages[stage]),
     item.stale?t("المواصفات معدلة","Specifications changed"):item.approved?t("معتمد","Approved"):t("غير معتمد","Unapproved")])));
   const history=order.inspections.map((item)=>row([item.reference,item.inspection_date,
-    order.items.find(({id})=>id===item.order_item_id)?.specification.code,t(...inspectionLabels[item.stage]),
+    openingDescription(order.items.find(({id})=>id===item.order_item_id)?.specification),t(...inspectionLabels[item.stage]),
     item.inspector_name,t(...inspectionLabels[item.record.result]),t(...inspectionLabels[item.record.release])]));
   const itemStatus=order.items.flatMap(({specification})=>[
     ["measurement_status","حالة اعتماد المقاس","Measurement approval"],["material_status","حالة اعتماد الخامات","Material approval"],
     ["manufacturing_status","حالة التصنيع","Manufacturing status"],["safety_approval","اعتماد السلامة","Safety approval"],
   ].filter(([key])=>specification.technical[key]!=null&&specification.technical[key]!=="").map(([key,ar,en])=>
-    row([specification.technical.tag||specification.code,t(ar,en),technicalText(specification.technical[key],locale)])));
+    row([openingDescription(specification),t(ar,en),technicalText(specification.technical[key],locale)])));
   return '<section class="loading"><table><thead>'+row([t("الفتحة","Opening"),t("المرحلة","Stage"),t("حالة الاعتماد","Approval status")],"th")+
     "</thead><tbody>"+list.join("")+itemStatus.join("")+"</tbody></table></section>"+
     (history.length?'<section class="loading"><h2>'+escape(t("سجل الفحص","Inspection history"))+'</h2><table><thead>'+

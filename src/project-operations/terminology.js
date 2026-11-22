@@ -1,11 +1,15 @@
 import values from "../../server/project-operations/translations.json";
+export const openingDescription=item=>item?.opening_description||item?.commercial?.description||item?.description||item?.technical?.tag||item?.code||'';
+export const partMeasurementAvailable=(field,tags,technical)=>!(field.requiresFixed||field.panelBasis)||
+  (tags.has('fixed_panel')||tags.has('fixed'))&&(!field.panelBasis||technical.panel_measurement_basis===field.panelBasis);
 export const openingDefaults=(category,technical={})=>["windows","doors"].includes(category)?{viewing:"Inside",perimeter:["right","left","top","bottom"],...technical}:technical;
 export const hasTrim=(key,technical)=>!["trim_type","trim_size_cm"].includes(key)||Array.isArray(technical.perimeter)&&technical.perimeter.length>0;
 export const technicalText=(value,locale)=>values[value]?.[locale==="ar"?0:1]??value;
 export const coatingValue=(value)=>({"Inside":"للداخل","Outside":"للخارج","Inward":"للداخل","Outward":"للخارج",
   "Inside cavity":"داخل الكتلة","من الداخل":"للداخل","من الخارج":"للخارج"})[value]||value;
 export const fieldOptions=(field,spec={})=>field.key==="coating_direction"?
-  ["للخارج","للداخل",...(/double|triple|دبل|مزدوج|ثلاثي/i.test(spec.glazing||"")?["داخل الكتلة"]:[])]:field.options||[];
+  ["للخارج","للداخل",...(/double|triple|دبل|مزدوج|ثلاثي/i.test(spec.glazing||"")?["داخل الكتلة"]:[])]:
+  field.key==='hinge_side'&&Number(spec.leaves)===1?['Right','Left']:field.options||[];
 export function perimeterText(value,locale) {
   if (!Array.isArray(value)) return "";
   const directions=["right","left","top","bottom"];

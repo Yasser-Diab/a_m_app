@@ -12,6 +12,14 @@ CREATE TABLE IF NOT EXISTS ops_source_approvals (
   approved_on TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ops_customer_type_specs (
+  customer_id INTEGER NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,
+  system TEXT NOT NULL REFERENCES ops_systems(id),
+  technical TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(technical)),
+  PRIMARY KEY(customer_id,category,system)
+);
+
 CREATE TABLE IF NOT EXISTS ops_customer_specs (
   customer_id INTEGER NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
   description TEXT NOT NULL,

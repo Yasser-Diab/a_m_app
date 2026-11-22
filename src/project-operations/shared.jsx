@@ -1,4 +1,4 @@
-import {useCallback,useId,useMemo,useState} from "react";
+import {useCallback,useEffect,useId,useMemo,useState} from "react";
 import {Field,queryString,useResource} from "../certificates/shared.jsx";
 
 export function useOperationsApi(api,session) {
@@ -31,10 +31,19 @@ export function Text({label,value,onChange,type="text",required=false,placeholde
     dir={type==="text"?"auto":"ltr"} min={min} max={max} step={step} onChange={(event)=>onChange(event.target.value)} /></Field>;
 }
 
-export function Pick({label,value,onChange,items,required=false,placeholder="—"}) {
-  return <Field label={label}><select value={value??""} required={required} onChange={(event)=>onChange(event.target.value)} dir="auto">
+export function Pick({label,value,onChange,items,required=false,placeholder="—",disabled=false}) {
+  return <Field label={label}><select value={value??""} required={required} disabled={disabled} onChange={(event)=>onChange(event.target.value)} dir="auto">
     <option value="">{placeholder}</option>{items.map(([key,title])=><option key={key} value={key}>{title}</option>)}
   </select></Field>;
+}
+
+export function SystemPick({t,items,...props}){
+  const [search,setSearch]=useState('');
+  useEffect(()=>setSearch(''),[items[0]?.[0]]);
+  const normalized=text=>String(text).normalize('NFKD').replace(/[\u064b-\u065f]/g,'').replace(/[أإآ]/g,'ا').toLocaleLowerCase();
+  const filtered=items.filter(([id,title])=>String(id)===String(props.value)||normalized(title).includes(normalized(search)));
+  return <div className="ops-system-pick"><Text label={t('بحث في طرق الفتح','Search operating types')} value={search} onChange={setSearch}/>
+    <Pick {...props} items={filtered}/><small>{t(`${filtered.length} طريقة متاحة`,`${filtered.length} operating types available`)}</small></div>;
 }
 
 export function Suggest({label,value,onChange,items=[],required=false}) {

@@ -1,10 +1,11 @@
 import {ErrorMessage} from "./shared.jsx";
 import {openingDefaults} from './terminology.js';
 
-export function editSpecification(item,previous,key,next) {
-  const patch=previous||{id:item.id,version:item.version,base:{technical:{}},technical:{}};
-  if (key==="category"||key==="system") {
-    const fields=key==="category"?{category:next,system:""}:{system:next};
+export function editSpecification(item,previous,key,next,shared=false) {
+  const patch={...(previous||{id:item.id,version:item.version,base:{technical:{}},technical:{}})};
+  patch.shared_keys=[...new Set([...(patch.shared_keys||[]).filter(name=>name!==key),...(shared?[key]:[])])];
+  if (["category","system","opening_description"].includes(key)) {
+    const fields=key==="category"?{category:next,system:""}:{[key]:next};
     const base={...patch.base};
     for (const name of Object.keys(fields))
       if (!Object.hasOwn(base,name)) base[name]=item[name]??null;
@@ -17,6 +18,8 @@ export function editSpecification(item,previous,key,next) {
 
 export function applySpecificationEdits(item,patch) {
   return {...item,category:patch?.category??item.category,system:patch?.system??item.system,
+    opening_description:patch?.opening_description??item.opening_description,
+    description:patch?.opening_description??item.description,
     technical:openingDefaults(patch?.category??item.category,{...item.technical,...patch?.technical})};
 }
 
@@ -34,7 +37,8 @@ export function resolveSpecificationEdits(patches,conflicts,keepMine) {
       delete patch.category;
       delete patch.system;
     }
-    if ("category" in patch||"system" in patch||Object.keys(patch.technical).length) result[id]=patch;
+    patch.shared_keys=(patch.shared_keys||[]).filter(key=>Object.hasOwn(patch.technical,key)||Object.hasOwn(patch,key));
+    if ("category" in patch||"system" in patch||"opening_description" in patch||Object.keys(patch.technical).length) result[id]=patch;
     else delete result[id];
   }
   return result;

@@ -89,7 +89,7 @@
         },
         {
           "id": "windows-10",
-          "ar": "رفع وجرار Lift & Slide",
+          "ar": "رفع وجرار",
           "en": "Lift & Slide",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
@@ -98,7 +98,7 @@
         },
         {
           "id": "windows-11",
-          "ar": "ميل وجرار Tilt & Slide",
+          "ar": "قلاب وجرار",
           "en": "Tilt & Slide",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
@@ -107,7 +107,7 @@
         },
         {
           "id": "windows-12",
-          "ar": "جرار متوازي PSK",
+          "ar": "جرار متوازي",
           "en": "Parallel Sliding (PSK)",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
@@ -116,7 +116,7 @@
         },
         {
           "id": "windows-13",
-          "ar": "أكورديون Folding",
+          "ar": "أكورديون",
           "en": "Folding",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
@@ -125,7 +125,7 @@
         },
         {
           "id": "windows-14",
-          "ar": "محوري رأسي Pivot",
+          "ar": "محوري رأسي",
           "en": "Vertical pivot",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
@@ -134,7 +134,7 @@
         },
         {
           "id": "windows-15",
-          "ar": "محوري أفقي Pivot",
+          "ar": "محوري أفقي",
           "en": "Horizontal pivot",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
@@ -170,7 +170,7 @@
         },
         {
           "id": "windows-19",
-          "ar": "شباك ركنة Corner",
+          "ar": "شباك ركنة",
           "en": "Corner window",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
@@ -179,7 +179,7 @@
         },
         {
           "id": "windows-20",
-          "ar": "قوس Arch",
+          "ar": "شباك مقوس",
           "en": "Arched window",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
@@ -188,7 +188,7 @@
         },
         {
           "id": "windows-21",
-          "ar": "شباك سقفي / Roof Window",
+          "ar": "شباك سقفي",
           "en": "Roof window",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
@@ -197,12 +197,75 @@
         },
         {
           "id": "windows-22",
-          "ar": "ثابت + متحرك مركب",
+          "ar": "ثابت مع ضلفة متحركة",
           "en": "Combined fixed and opening",
           "source": "https://www.iteh.us/catalog/standards/cen/66789fd1-dcdb-480b-b116-e26890a58a75/en-13126-1-2022",
           "definition": "خيار هندسي / تشغيلي ضمن فئة النوافذ",
           "decision": "عدد الضلف / اتجاه الحركة / تقسيم الثوابت / السلك / نوع القطاع والعتاد",
           "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "windows-23",
+          "ar": "مفصلي ضلفة واحدة",
+          "en": "Single-leaf casement",
+          "tags": [
+            "hinged"
+          ],
+          "source": "https://www.alumil.com/egypt/ar/aluminium-systems/",
+          "definition": "تكوين مفصلي للأبواب والنوافذ",
+          "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
+          "note": "تحدد الصلاحية وفق التصميم المعتمد"
+        },
+        {
+          "id": "windows-24",
+          "ar": "مفصلي ضلفتين",
+          "en": "Double-leaf casement",
+          "tags": [
+            "hinged"
+          ],
+          "source": "https://www.alumil.com/egypt/ar/aluminium-systems/",
+          "definition": "تكوين مفصلي للأبواب والنوافذ",
+          "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
+          "note": "تحدد الصلاحية وفق التصميم المعتمد"
+        },
+        {
+          "id": "windows-25",
+          "ar": "مفصلي مع ثابت علوي",
+          "en": "Casement with upper fixed panel",
+          "tags": [
+            "hinged",
+            "fixed_panel"
+          ],
+          "source": "https://www.alumil.com/egypt/ar/aluminium-systems/",
+          "definition": "تكوين مفصلي للأبواب والنوافذ",
+          "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
+          "note": "تحدد الصلاحية وفق التصميم المعتمد"
+        },
+        {
+          "id": "windows-26",
+          "ar": "مفصلي مع ثابت سفلي",
+          "en": "Casement with lower fixed panel",
+          "tags": [
+            "hinged",
+            "fixed_panel"
+          ],
+          "source": "https://www.alumil.com/egypt/ar/aluminium-systems/",
+          "definition": "تكوين مفصلي للأبواب والنوافذ",
+          "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
+          "note": "تحدد الصلاحية وفق التصميم المعتمد"
+        },
+        {
+          "id": "windows-27",
+          "ar": "مفصلي مع ثابت جانبي",
+          "en": "Casement with fixed sidelight",
+          "tags": [
+            "hinged",
+            "fixed_panel"
+          ],
+          "source": "https://www.alumil.com/egypt/ar/aluminium-systems/",
+          "definition": "تكوين مفصلي للأبواب والنوافذ",
+          "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
+          "note": "تحدد الصلاحية وفق التصميم المعتمد"
         }
       ],
       "fields": [
@@ -555,7 +618,7 @@
         },
         {
           "id": "doors-8",
-          "ar": "جرار جيب Pocket",
+          "ar": "جرار داخل الحائط",
           "en": "Pocket sliding",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -582,7 +645,7 @@
         },
         {
           "id": "doors-11",
-          "ar": "أكورديون Folding / Bi-fold",
+          "ar": "أكورديون",
           "en": "Folding / Bi-fold",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -591,7 +654,7 @@
         },
         {
           "id": "doors-12",
-          "ar": "Pivot محوري",
+          "ar": "باب محوري",
           "en": "Pivot",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -618,7 +681,7 @@
         },
         {
           "id": "doors-15",
-          "ar": "باب دوار Revolving",
+          "ar": "باب دوار",
           "en": "Revolving",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -627,7 +690,7 @@
         },
         {
           "id": "doors-16",
-          "ar": "باب طوارئ Panic",
+          "ar": "باب طوارئ بذراع هلع",
           "en": "Panic exit",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -663,7 +726,7 @@
         },
         {
           "id": "doors-20",
-          "ar": "باب فلش / لوفر",
+          "ar": "باب مصمت / لوفر",
           "en": "Flush / louver",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -672,12 +735,60 @@
         },
         {
           "id": "doors-21",
-          "ar": "باب كراج قطاعي",
+          "ar": "باب جراج قطاعي",
           "en": "Sectional garage",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
           "decision": "جهة المفصلات / المرور / العتبة / القفل / الطوارئ / العتاد",
           "note": "تحدد صلاحية المنتج من بيانات النظام والتصميم المعتمد"
+        },
+        {
+          "id": "doors-22",
+          "ar": "مفصلي ضلفة واحدة للداخل",
+          "en": "Single-leaf inward hinged",
+          "tags": [
+            "hinged"
+          ],
+          "source": "https://www.alumil.com/egypt/ar/aluminium-systems/",
+          "definition": "تكوين مفصلي للأبواب والنوافذ",
+          "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
+          "note": "تحدد الصلاحية وفق التصميم المعتمد"
+        },
+        {
+          "id": "doors-23",
+          "ar": "مفصلي ضلفة واحدة للخارج",
+          "en": "Single-leaf outward hinged",
+          "tags": [
+            "hinged"
+          ],
+          "source": "https://www.alumil.com/egypt/ar/aluminium-systems/",
+          "definition": "تكوين مفصلي للأبواب والنوافذ",
+          "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
+          "note": "تحدد الصلاحية وفق التصميم المعتمد"
+        },
+        {
+          "id": "doors-24",
+          "ar": "مفصلي ضلفتين للداخل",
+          "en": "Double-leaf inward hinged",
+          "tags": [
+            "hinged"
+          ],
+          "source": "https://www.alumil.com/egypt/ar/aluminium-systems/",
+          "definition": "تكوين مفصلي للأبواب والنوافذ",
+          "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
+          "note": "تحدد الصلاحية وفق التصميم المعتمد"
+        },
+        {
+          "id": "doors-25",
+          "ar": "مفصلي ضلفتين للخارج",
+          "en": "Double-leaf outward hinged",
+          "tags": [
+            "hinged"
+          ],
+          "source": "https://www.alumil.com/egypt/ar/aluminium-systems/",
+          "definition": "تكوين مفصلي للأبواب والنوافذ",
+          "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
+          "note": "تحدد الصلاحية وفق التصميم المعتمد"
         }
       ],
       "fields": [

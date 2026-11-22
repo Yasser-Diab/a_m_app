@@ -25,6 +25,10 @@ function initializeOperations(db) {
     addColumn("ops_projects","award_reference","TEXT");
     addColumn("ops_items","source_document_id","INTEGER REFERENCES documents(id)");
     addColumn("ops_items","defaults_applied","INTEGER NOT NULL DEFAULT 0");
+    addColumn("ops_items","opening_description","TEXT NOT NULL DEFAULT ''");
+    addColumn("ops_items","description_version","INTEGER NOT NULL DEFAULT 1");
+    const migrateOverrides=!db.all('PRAGMA table_info(ops_items)').some(({name})=>name==='specification_overrides');
+    addColumn("ops_items","specification_overrides","TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(specification_overrides))");
     addColumn("ops_people","signature_usage","TEXT NOT NULL DEFAULT ''");
     addColumn("ops_people","responsibility","TEXT NOT NULL DEFAULT ''");
     addColumn("ops_people","side","TEXT NOT NULL DEFAULT ''");
@@ -33,6 +37,8 @@ function initializeOperations(db) {
     addColumn("ops_orders","command_key","TEXT");
     addColumn("ops_orders","kind","TEXT NOT NULL DEFAULT 'manufacturing' CHECK(kind IN ('manufacturing','maintenance'))");
     addColumn("ops_orders","service_data","TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(service_data))");
+    addColumn("ops_orders","loading_settings","TEXT NOT NULL DEFAULT '{\"enabled\":false,\"rows\":[]}' CHECK(json_valid(loading_settings))");
+    addColumn("ops_orders","loading_settings_version","INTEGER NOT NULL DEFAULT 0");
     addColumn("ops_loads","command_key","TEXT");
     addColumn("ops_inspections","reference","TEXT");
     addColumn("ops_confirmations","command_key","TEXT");
@@ -47,7 +53,8 @@ function initializeOperations(db) {
       db.run(`UPDATE ops_items SET source_document_id=(SELECT boq_id FROM ops_projects p WHERE p.project_id=ops_items.project_id)
         WHERE source_document_id IS NULL`);
     db.exec("CREATE INDEX IF NOT EXISTS ops_item_source ON ops_items(project_id,source_document_id,id)");
-    if (!db.get("SELECT 1 FROM ops_systems")) specs.initializeSystems(db);
+    specs.initializeSystems(db);
+    require('./customer-defaults.cjs').initializeDefaults(db,migrateOverrides);
   });
 }
 
@@ -172,7 +179,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   });
   patch(base+"/items/:itemId","ops_edit",(req,access,id)=>{
     const updated=core.updateItem(db,item(req,id),req.body,access.user);
-    if (req.body.remember!==false) core.rememberSpecification(db,getProject(db,id).customer_id,updated);
+    if (req.body.remember===true) core.rememberSpecification(db,getProject(db,id).customer_id,updated);
     return updated;
   });
   post(base+"/specifications","ops_edit",(req,access,id,res)=>{
@@ -233,6 +240,8 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
     return production.addOrder(db,id,req.body,access.user);
   });
   get(base+"/orders/:orderId",(req,_,id)=>production.orderDetails(db,order(req,id)));
+  patch(base+"/orders/:orderId/loading-settings","ops_edit",(req,access,id)=>
+    production.saveLoadingSettings(db,order(req,id),req.body,access.user));
   patch(base+"/orders/:orderId","ops_release",(req,access,id)=>production.updateOrderStatus(db,order(req,id),req.body,access.user));
   post(base+"/orders/:orderId/complete","ops_edit",(req,access,id)=>
     production.completeService(db,order(req,id),req.body,access.user));

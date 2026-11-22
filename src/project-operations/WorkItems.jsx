@@ -1,10 +1,10 @@
 import {useEffect,useId,useState} from "react";
 import {Dialog,Field,localDate,newKey,useDebounce,useResource} from "../certificates/shared.jsx";
-import {ErrorMessage,Page,Pick,Table,Text,display,options,panelNames,quantity,states,useAction,usePaged} from "./shared.jsx";
+import {ErrorMessage,Page,Pick,SystemPick,Table,Text,display,options,panelNames,quantity,states,useAction,usePaged} from "./shared.jsx";
 import SpecificationGrid from "./SpecificationGrid.jsx";
 import GroupedSpecifications from "./GroupedSpecifications.jsx";
 import SourceRefresh from './SourceRefresh.jsx';
-import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText,openingDefaults,hasTrim} from "./terminology.js";
+import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText,openingDefaults,hasTrim,partMeasurementAvailable} from "./terminology.js";
 
 const commonParts={
   measurement:["المقاسات","Measurements"],profile:["نظام القطاعات","Profile system"],glass:["الزجاج","Glass"],
@@ -90,7 +90,7 @@ function SpecEditor({draft,change,catalogue,t,locale,nested=false}) {
   const specific=[...(category?.fields||[]),...(system?.fields||[])].filter((field)=>{
     const required=catalogue.conditional[draft.category]?.[field.key];
     const dependency=catalogue.dependencies[draft.category]?.[field.key];
-    return hasTrim(field.key,spec)&&(!field.populatedOnly||spec[field.key]!=null&&spec[field.key]!=="")&&(!required||required.split(" ").some((tag)=>tags.has(tag))) && (!dependency||valid(spec[dependency]))
+    return partMeasurementAvailable(field,tags,spec)&&hasTrim(field.key,spec)&&(!field.populatedOnly||spec[field.key]!=null&&spec[field.key]!=="")&&(!required||required.split(" ").some((tag)=>tags.has(tag))) && (!dependency||valid(spec[dependency]))
       && (!field.minLeaves||Number(spec.leaves)>=field.minLeaves);
   });
   const opening=["windows","doors"].includes(draft.category);
@@ -101,7 +101,7 @@ function SpecEditor({draft,change,catalogue,t,locale,nested=false}) {
     <div className="pc-form">
       <Pick label={t("الفئة","Work category")} value={draft.category} onChange={selectCategory} required
         items={catalogue.categories.filter(({id})=>!nested||["windows","doors"].includes(id)).map((cat)=>[cat.id,cat[locale]])}/>
-      <Pick label={t("النظام / التكوين","System / configuration")} value={draft.system} required onChange={(next)=>change({...draft,system:next})}
+      <SystemPick label={t("طريقة الفتح / النظام","Opening / system")} t={t} value={draft.system} required onChange={(next)=>change({...draft,system:next})}
         items={(category?.systems||[]).map((item)=>[item.id,item[locale]])}/>
     </div>
     {system&&<>
@@ -145,7 +145,7 @@ function Commercial({values,setValues,t}) {
 }
 
 function ItemDialog({mode,item,close,request,path,catalogue,uiLanguage,t,can,reload,apiBase,session,boqId}) {
-  const [draft,setDraft]=useState(()=>({...item,technical:item?.technical||{},values:item?.commercial||{},reason:"",remember:true}));
+  const [draft,setDraft]=useState(()=>({...item,technical:item?.technical||{},values:item?.commercial||{},reason:"",remember:false}));
   const [view,setView]=useState("technical");
   const action=useAction(request,()=>{close();reload();});
   const change=(key,value)=>setDraft((current)=>({...current,[key]:value}));
@@ -156,12 +156,15 @@ function ItemDialog({mode,item,close,request,path,catalogue,uiLanguage,t,can,rel
   }
   const flags=[["technical","المواصفات","Specifications"],["commercial","تعديل العقد","BOQ revision"],
     ["approvals","اعتمادات التصنيع","Manufacturing approvals"],["drawings","الرسومات","Drawings"],["confirmation","تأكيد الكمية","Confirm quantity"]];
-  return <Dialog t={t} wide title={mode==="new"?t("اقتراح بند جديد","Propose new item"):item.code} onClose={close}>
+  return <Dialog t={t} wide title={mode==="new"?t("اقتراح بند جديد","Propose new item"):item.description} onClose={close}>
     {mode!=="new"&&<nav className="pc-tabs">{flags.map(([id,ar,en])=><button type="button" key={id}
       aria-pressed={view===id} onClick={()=>setView(id)}>{t(ar,en)}</button>)}</nav>}
     {(view==="technical")&&<form className="pc-stack" onSubmit={submit}>
       <fieldset disabled={!can("edit")||action.busy||mode!=="new"&&!item.active}>
-        <Text label={t("كود البند","Item code")} value={draft.code} required onChange={(value)=>change("code",value)}/>
+        {mode==='new'?<Text label={t("كود البند","Item code")} value={draft.code} required onChange={value=>change('code',value)}/>:
+          <><Text label={t("وصف الفتحة","Opening description")} value={draft.opening_description||draft.commercial.description} onChange={value=>change('opening_description',value)}/>
+          {item.specification_overrides?.length>0&&<label className="pc-check"><input type="checkbox" checked={Boolean(draft.reset_overrides)} onChange={event=>change('reset_overrides',event.target.checked)}/>
+            {t("استخدام المواصفات المشتركة وإلغاء استثناءات هذه الفتحة","Use shared specifications and clear this opening’s exceptions")}</label>}</>}
         <SpecEditor draft={draft} change={setDraft} catalogue={catalogue} locale={uiLanguage} t={t}/>
         {mode!=="new"&&<label className="pc-check"><input type="checkbox" checked={draft.remember}
           onChange={(event)=>change("remember",event.target.checked)}/>{t("تذكّر مواصفات هذا العميل","Remember customer defaults")}</label>}
@@ -287,8 +290,8 @@ export function WorkItems(props) {
   const [id,setId]=useState(null);
   const [search,setSearch]=useState("");
   const [category,setCategory]=useState("");
-  const [spreadsheet,setSpreadsheet]=useState(false);
-  const [visitedSheet,setVisitedSheet]=useState(false);
+  const [spreadsheet,setSpreadsheet]=useState(true);
+  const [visitedSheet,setVisitedSheet]=useState(true);
   const [boqId,setBoqId]=useState(()=>{
     const chosen=preferred&&[...ctx.boqs,...ctx.linked_boqs].find(({id})=>id===preferred.id);
     return String(chosen?.id||ctx.operations.boq_id);
@@ -310,7 +313,7 @@ export function WorkItems(props) {
         source&&<strong><bdi>{documentName(source)}</bdi></strong>}
       {source&&<button type="button" className="pc-name" onClick={()=>onOpenDocument(source,ctx.customer)}>{t("فتح الأصل","Open source")}</button>}
       {linked&&<button type="button" onClick={()=>{setSpreadsheet(!spreadsheet);setVisitedSheet(true);}}>
-        {spreadsheet?t("استمارة المواصفات","Specifications form"):t("عرض الجدول","Spreadsheet")}</button>}
+        {spreadsheet?t("المواصفات المشتركة","Shared specifications"):t("جدول الفتحات","Opening worksheet")}</button>}
       {linked&&spreadsheet&&can("edit")&&<button type="button" onClick={()=>setId("new")}>{t("بند إضافي","Propose an extra item")}</button>}
     </div>
     {linked&&<SourceRefresh {...props} documentId={Number(boqId)}/>}
@@ -359,7 +362,7 @@ export function Changes({request,path,t,can,revision,reload,onOpenDocument,ctx})
     <Table headers={[t("البند","Item"),t("الحالة","Status"),t("المرسل","Submitted by"),t("تاريخ الإرسال","Submitted"),t("المعتمد","Reviewer")]}
       empty={t("لا توجد تعديلات.","No revisions.")}
       rows={(list.data?.items||[]).map((row)=>[row.id,[
-        <button type="button" className="pc-name" onClick={()=>{setSelected(row.id);setResubmit(false);}}>{row.code} · #{row.id}</button>,
+        <button type="button" className="pc-name" onClick={()=>{setSelected(row.id);setResubmit(false);}}>{row.description}</button>,
         display(states,row.status,t),row.submitter,<bdi>{row.submitted_at}</bdi>,row.reviewer||"—",
       ]])}/>
     <Page data={list.data} onPage={list.setPage} t={t}/>

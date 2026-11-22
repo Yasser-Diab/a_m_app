@@ -6,9 +6,11 @@ const approvalParts = ["measurement","profile","glass","accessories","finish","d
 const panels = ["sliding","hinged","fixed","other","items","screens"];
 const labels={screen:"السلك",screen_type:"نوع السلك",screen_material:"خامة السلك",screen_configuration:"تفصيلة السلك",
   coating_direction:"اتجاه العاكس",viewing:"تحديد اليمين والشمال من",glass_thickness:"سمك الزجاج (مم)",profile:"نوع القطاع",
-  infill:"تكوين الزجاج / الحشو",interlock_right:"التسكيك يمين",interlock_left:"التسكيك شمال",
+  infill:"تكوين الزجاج / الحشو",lock_right:"التسكيك يمين",lock_left:"التسكيك شمال",
+  hinge_side:"جهة المفصلات / اتجاه الفتح",opening_direction:"الفتح للداخل / للخارج",
   layers:"عدد طبقات الزجاج",spacer_thickness:"سمك فاصل الزجاج (مم)",cavity:"نوع الغاز / التجويف",perimeter:"البرور"};
 const named=(field)=>({...field,...(labels[field.key]?{ar:labels[field.key]}:{}),
+  ...(field.key==='opening_direction'?{options:['Inward','Outward']}:{}),
   ...({vent_opening:{ar:"شفاط",en:"Vent"},vent_position:{ar:"مكان الشفاط",en:"Vent position",options:["Right","Left","Centre","In leaf"]},
     vent_width:{populatedOnly:true},vent_height:{populatedOnly:true},vent_direction:{populatedOnly:true}}[field.key]||{})});
 const common = catalogue.common.filter(({key}) => !["item_code","project_code","customer_code","system","area","production_ref"].includes(key)).map(named);
@@ -56,9 +58,16 @@ const doorExtras = [{key:"fixed_panels",en:"Fixed panels",ar:"عدد الأجز�
   {key:"perimeter",ar:"البرور",en:"Perimeter trims",type:"sides"}];
 const trimFields=[{key:"trim_type",ar:"نوع البرور",en:"Architrave type",options:["عدل","بومبيه"]},
   {key:"trim_size_cm",ar:"مقاس البرور (سم)",en:"Architrave size (cm)",type:"number"}];
+const panelMeasurements=[
+  {key:'panel_measurement_basis',ar:'المقاس المحدد',en:'Measured part',type:'text',options:['Fixed panel','Operable leaf'],requiresFixed:true},
+  {key:'fixed_width_mm',ar:'عرض الجزء الثابت (مم)',en:'Fixed panel width (mm)',type:'number',panelBasis:'Fixed panel'},
+  {key:'fixed_height_mm',ar:'ارتفاع الجزء الثابت (مم)',en:'Fixed panel height (mm)',type:'number',panelBasis:'Fixed panel'},
+  {key:'leaf_width_mm',ar:'عرض الضلفة المتحركة (مم)',en:'Operable leaf width (mm)',type:'number',panelBasis:'Operable leaf'},
+  {key:'leaf_height_mm',ar:'ارتفاع الضلفة المتحركة (مم)',en:'Operable leaf height (mm)',type:'number',panelBasis:'Operable leaf'},
+];
 const slidingLocks=[
-  {key:"lock_right",en:"Right-hand lock type",ar:"نوع قفل الضلفة اليمنى",minLeaves:2,type:"text"},
-  {key:"lock_left",en:"Left-hand lock type",ar:"نوع قفل الضلفة اليسرى",minLeaves:2,type:"text"},
+  {key:"lock_right",en:"Right lock",ar:"التسكيك يمين",minLeaves:2,type:"text"},
+  {key:"lock_left",en:"Left lock",ar:"التسكيك شمال",minLeaves:2,type:"text"},
   {key:"central_lock_handle",en:"Central locking handle type",ar:"نوع يد القفل الوسطى",minLeaves:3,type:"text"},
 ];
 const coating={key:"coating_direction",en:"Reflective coating direction",ar:"اتجاه العاكس",type:"text",options:["للخارج","للداخل","داخل الكتلة"]};
@@ -67,30 +76,33 @@ const glassType={key:"glass_type",en:"Glass type",ar:"نوع الزجاج",type:
   options:["Float","Tempered","Heat-strengthened","Laminated","Low-E","Reflective","Tinted","Low-iron","Fire-rated","Acoustic","Switchable"]};
 const glassCompositionKeys=new Set(["layers","outside_glass","outside_thickness","spacer_thickness","cavity","inside_glass","inside_thickness","interlayer"]);
 const glassCompositionFields=categories.get("glass").fields.filter(({key})=>glassCompositionKeys.has(key));
-const categoryFields=(kind)=>[...(categories.get(kind)?.fields||[]).filter(({key})=>!["coating_direction","glass_type"].includes(key)).map(named),
+const categoryFields=(kind)=>[...(categories.get(kind)?.fields||[]).filter(({key})=>!["coating_direction","glass_type","interlock_right","interlock_left"].includes(key)).map(named),
   ...(kind==="doors"?doorExtras:[]),...(openings.has(kind)?trimFields:[]),...(kind==="windows"?[{key:"vent_size",ar:"مقاس الشفاط (مم)",en:"Vent size (mm)",type:"text"}]:[]),...(openings.has(kind)?[...slidingLocks,
     {key:"frames_per_opening",ar:"عدد الحلوق لكل فتحة",en:"Frames per opening",type:"number"}]:[]),
   ...(glassCategories.has(kind)?[glassType]:[]),
   ...(glassCategories.has(kind)&&kind!=="windows"?[{key:"glazing",en:"Glazing",ar:"نوع التزجيج",type:"text",options:["Single","Double","Triple"]}]:[]),
   ...(glassCategories.has(kind)&&kind!=="glass"?glassCompositionFields.map(named):[]),
   ...(["windows","doors","glass","curtain_walls"].includes(kind)?[coating]:[]),
-  ...(openings.has(kind)?[{key:"screen_leaves",ar:"عدد ضلف السلك لكل فتحة",en:"Flyscreen leaves per opening",type:"number"}]:[])];
+  ...(openings.has(kind)?[{key:"screen_leaves",ar:"عدد ضلف السلك لكل فتحة",en:"Flyscreen leaves per opening",type:"number"}]:[]),
+  ...(openings.has(kind)?panelMeasurements:[])];
 const counts = new Set(["quantity","leaves","fixed_panels","tracks","sections","posts","layers","slopes","blades","modules","fixing_points"]);
 const choices = (value) => Boolean(value && !["لا","بدون","لا ينطبق","none","no","n/a"].includes(String(value).toLowerCase()));
 
 function systemSeeds() {
   return catalogue.categories.flatMap((category) => category.systems.map((system,index) => ({
-    ...system,category:category.id,tags:Object.entries(tagsByCategory[category.id])
+    ...system,category:category.id,tags:system.tags||Object.entries(tagsByCategory[category.id])
       .filter(([,indices])=>indices.includes(index+1)).map(([tag])=>tag),fields:[],
   })));
 }
+const seedsById=new Map(systemSeeds().map(system=>[system.id,system]));
 
 function configuration(db, category, id) {
   if (!id) return null;
   const stored = db.get("SELECT * FROM ops_systems WHERE id=? AND category=?",[id,category]);
   if (!stored) fail(400,"Select a configuration from the selected category");
   const seed=categories.get(category)?.systems.find(system=>system.id===id);
-  return {...stored,ar:seed&&stored.ar===stored.en?seed.ar:stored.ar,tags:parse(stored.tags,[]),fields:parse(stored.fields,[])};
+  const defaults=seedsById.get(id);
+  return {...stored,ar:seed?.ar||stored.ar,tags:[...new Set([...parse(stored.tags,[]),...(defaults?.tags||[])])],fields:parse(stored.fields,[])};
 }
 
 function openingDefaults(category,input={}){
@@ -105,6 +117,8 @@ function fieldsFor(category, system, data = {}, includePopulated = false) {
   if (/laminat|مصفح|رقائقي/i.test(data.glass_type||"")) tags.add("laminated");
   const specific = [...categoryFields(category),...(system?.fields||[])];
   return [...common,...specific].filter((field)=>{
+    if((field.requiresFixed||field.panelBasis)&&!(tags.has('fixed_panel')||tags.has('fixed')))return false;
+    if(field.panelBasis&&data.panel_measurement_basis!==field.panelBasis)return false;
     if(trimFields.some(item=>item.key===field.key)&&(!Array.isArray(data.perimeter)||!data.perimeter.length))return false;
     if(field.populatedOnly&&(data[field.key]==null||data[field.key]===""))return false;
     if (includePopulated && data[field.key]!=null && data[field.key]!=="" &&
@@ -122,8 +136,8 @@ function catalogueForClient(db) {
     categories:catalogue.categories.map((category)=>({
       ...category,fields:categoryFields(category.id),
       systems:systems.filter((s)=>s.category===category.id).map((s)=>({
-        ...category.systems.find((entry)=>entry.id===s.id), ...s, ar:s.ar===s.en?(category.systems.find(entry=>entry.id===s.id)?.ar||s.ar):s.ar,
-        tags:parse(s.tags,[]),fields:parse(s.fields,[]),
+        ...category.systems.find((entry)=>entry.id===s.id), ...s, ar:category.systems.find(entry=>entry.id===s.id)?.ar||s.ar,
+        tags:configuration(db,category.id,s.id).tags,fields:parse(s.fields,[]),
       })),
     })),
   };
@@ -155,7 +169,7 @@ function cleanFrame(frame) {
 }
 
 function cleanTechnical(db, category, system, input = {}, nested = false) {
-  input=openingDefaults(category,input);
+  input=openingDefaults(category,require('./customer-defaults.cjs').normalizeLocks(input));
   const result = {};
   for (const {key,type,en} of fieldsFor(category,system,input)) {
     if (input[key] == null || input[key] === "") continue;

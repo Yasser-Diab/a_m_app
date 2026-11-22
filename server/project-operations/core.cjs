@@ -151,15 +151,8 @@ function itemValues(row) {
   };
 }
 
-const openingFields=new Set(["building","floor","room","tag","drawing_ref","quantity","width_mm","height_mm","depth_mm",
-  "site_notes","workshop_notes","measurement_status","material_status","manufacturing_status","priority","required_date","responsible","subframe"]);
+const {openingFields,reusableTechnical,typeDefault,sourceDefaults,openingDescription}=require('./customer-defaults.cjs');
 const descriptionKey=(description)=>String(description||"");
-
-function reusableTechnical(technical) {
-  const result=Object.fromEntries(Object.entries(technical).filter(([key])=>!openingFields.has(key)));
-  if (result.integrated?.spec) result.integrated={...result.integrated,spec:reusableTechnical(result.integrated.spec)};
-  return result;
-}
 
 function rememberSpecification(db,customerId,item) {
   const description=descriptionKey(item.commercial.description);
@@ -167,6 +160,9 @@ function rememberSpecification(db,customerId,item) {
   db.run(`INSERT INTO ops_customer_specs(customer_id,description,category,system,technical) VALUES (?,?,?,?,?)
     ON CONFLICT(customer_id,description) DO UPDATE SET category=excluded.category,system=excluded.system,technical=excluded.technical`,
   [customerId,description,item.category,item.system,encode(reusableTechnical(item.technical))]);
+  db.run(`INSERT INTO ops_customer_type_specs(customer_id,category,system,technical) VALUES(?,?,?,?)
+    ON CONFLICT(customer_id,category,system) DO UPDATE SET technical=excluded.technical`,
+    [customerId,item.category,item.system,encode(reusableTechnical(item.technical))]);
   return true;
 }
 
@@ -189,15 +185,14 @@ function setup(db,project,boqId,user,reviewDate) {
     db.run("INSERT INTO ops_projects(project_id,boq_id,boq_snapshot,created_by,award_reference) VALUES (?,?,?,?,?)",
       [project.id,boq.id,encode(boq),user.id,awardReference(db,project)]);
   db.run("INSERT INTO ops_project_boqs(project_id,document_id,snapshot) VALUES (?,?,?)",[project.id,boq.id,encode(boq)]);
-  const defaults=new Map(db.all("SELECT * FROM ops_customer_specs WHERE customer_id=?",[project.customer_id])
-    .map((entry)=>[entry.description,entry]));
+  const savedFor=sourceDefaults(db,project.customer_id);
   const insert=db.db.prepare(`INSERT INTO ops_items(project_id,source_line_id,code,original,commercial,technical,category,system,source_document_id,defaults_applied)
     VALUES (?,?,?,?,?,?,?,?,?,?)`);
   let filled=0;
   try {
     for (const row of rows) {
       const values=itemValues(row);
-      const saved=defaults.get(descriptionKey(values.description));
+      const saved=savedFor(descriptionKey(values.description));
       const standard=parse(saved?.technical,{});
       const technical={...standard,building:row.building_unit || "",room:row.floor_apartment || "",
         profile:row.profile_spec || standard.profile || "",infill:row.glass_spec || standard.infill || "",
@@ -223,8 +218,9 @@ function changeProjectDetails(db,state,body,user) {
 
 function hydrateItem(row) {
   const commercial=parse(row.commercial,{});
-  const technical=parse(row.technical,{});
-  return {...row,commercial,technical,original:parse(row.original)?.values || null,
+  const technical=require('./customer-defaults.cjs').normalizeLocks(parse(row.technical,{}));
+  return {...row,commercial,technical,opening_description:row.opening_description||'',
+    description:openingDescription({...row,commercial,technical}),specification_overrides:parse(row.specification_overrides,[]),original:parse(row.original)?.values || null,
     estimated_area:estimatedArea(technical),manufacturing_dimensions:dimensions(technical)};
 }
 
@@ -239,9 +235,9 @@ function itemPage(db,projectId,query) {
   const typed="%"+str(query.q,120)+"%";
   const category=str(query.category);
   const source=idOf(query.boq_id);
-  const args=[projectId,source,source,category,category,typed,typed,typed];
+  const args=[projectId,source,source,category,category,typed,typed,typed,typed];
   const where=`WHERE project_id=? AND (? IS NULL OR source_document_id=?) AND (?='' OR category=?) AND
-    (code LIKE ? OR json_extract(commercial,'$.description') LIKE ? OR json_extract(technical,'$.tag') LIKE ?)`;
+    (code LIKE ? OR json_extract(commercial,'$.description') LIKE ? OR json_extract(technical,'$.tag') LIKE ? OR opening_description LIKE ?)`;
   const items=db.all(`SELECT * FROM ops_items ${where} ORDER BY id LIMIT ? OFFSET ?`,[...args,limit,offset]).map(hydrateItem);
   return {items,total:db.get(`SELECT COUNT(*) AS n FROM ops_items ${where}`,args).n,page,limit};
 }
@@ -253,17 +249,19 @@ function specificationGroups(db,projectId,query) {
   const description="COALESCE(json_extract(commercial,'$.description'),'')";
   const itemId=idOf(query.item_id);
   if (!itemId) {
-    return db.all(`SELECT MIN(id) AS id,${description} AS description,COUNT(*) AS count
+    return db.all(`SELECT MIN(id) AS id,${description} AS description,category,system,COUNT(*) AS count
       FROM ops_items WHERE project_id=? AND source_document_id=? AND active=1
-      GROUP BY ${description},CASE WHEN TRIM(${description})='' THEN id END ORDER BY MIN(id)`,[projectId,source]);
+      GROUP BY CASE WHEN system<>'' THEN category||':'||system ELSE ${description} END,
+        CASE WHEN system='' AND TRIM(${description})='' THEN id END ORDER BY MIN(id)`,[projectId,source]);
   }
   const item=getItem(db,projectId,itemId);
   if (!item.active||item.source_document_id!==source) fail(404,"The item is not in this BOQ");
   const match=descriptionKey(item.commercial.description);
-  const rows=match.trim()?db.all(`SELECT id,code,category,system,version,technical,defaults_applied
+  const rows=item.system?db.all(`SELECT * FROM ops_items WHERE project_id=? AND source_document_id=? AND active=1 AND category=? AND system=? ORDER BY id`,
+    [projectId,source,item.category,item.system]).map(hydrateItem):match.trim()?db.all(`SELECT *
     FROM ops_items WHERE project_id=? AND source_document_id=? AND active=1 AND ${description}=? ORDER BY id`,
-  [projectId,source,match]).map((row)=>({...row,technical:parse(row.technical,{})})): [item];
-  return {description:match,rows};
+    [projectId,source,match]).map(hydrateItem):[item];
+  return {description:match,category:item.category,system:item.system,rows};
 }
 
 function valuesEqual(left,right) {
@@ -275,9 +273,12 @@ function valuesEqual(left,right) {
 }
 
 function specificationConflicts(item,patch) {
-  if (Number(patch.version)===item.version) return [];
-  if (!patch.base||typeof patch.base!=="object") fail(409,"Reload the item before saving");
   const fields=[];
+  if(Object.hasOwn(patch,'opening_description')&&patch.base&&
+    !valuesEqual(item.opening_description,patch.base.opening_description)&&!valuesEqual(item.opening_description,patch.opening_description))
+    fields.push({key:'opening_description',current:item.opening_description});
+  if (Number(patch.version)===item.version) return fields;
+  if (!patch.base||typeof patch.base!=="object") fail(409,"Reload the item before saving");
   for (const key of ["category","system"])
     if (Object.hasOwn(patch,key)&&!valuesEqual(item[key],patch.base[key])&&!valuesEqual(item[key],patch[key]))
       fields.push({key,current:item[key]??null});
@@ -308,13 +309,39 @@ function updateItem(db,item,body,user,allowIncomplete=false) {
   if (!code) fail(400,"Enter an item code");
   if (db.get("SELECT 1 FROM ops_items WHERE project_id=? AND code=? COLLATE NOCASE AND id<>?",[item.project_id,code,item.id]))
     fail(409,"This item code is already used");
-  const technical=cleanTechnical(db,kind,system,body.technical);
+  const description=Object.hasOwn(body,'opening_description')?str(body.opening_description,3000):item.opening_description;
+  const renamed=description!==item.opening_description;
+  if(renamed&&Number(body.description_version)!==item.description_version)fail(409,'The opening description changed. Reload the item before saving');
+  const saveOrderDescriptions=()=>db.run(`UPDATE ops_order_items SET specification=json_set(specification,'$.opening_description',?,'$.description',?,'$.description_version',?)
+    WHERE item_id=? AND order_id IN(SELECT id FROM ops_orders WHERE status IN('draft','released'))`,[description,description||item.commercial.description,item.description_version+1,item.id]);
+  if(renamed&&code===item.code&&kind===item.category&&(system?.id||'')===item.system&&!body.reset_overrides&&valuesEqual(body.technical,item.technical)){
+    db.run('UPDATE ops_items SET opening_description=?,description_version=description_version+1 WHERE id=?',[description,item.id]);
+    saveOrderDescriptions();
+    record(db,user,item.project_id,'opening_description_updated',item.id,{before:item.opening_description,after:description});
+    return getItem(db,item.project_id,item.id);
+  }
+  const changedType=kind!==item.category||(system?.id||'')!==item.system;
+  const overrides=new Set(body.reset_overrides||changedType?[]:item.specification_overrides);
+  let incoming={...body.technical};
+  const standard=system&&typeDefault(db,getProject(db,item.project_id).customer_id,kind,system.id);
+  if(standard&&(changedType||body.reset_overrides)){
+    const location=Object.fromEntries(Object.entries(item.technical).filter(([key])=>openingFields.has(key)));
+    const explicit=Object.fromEntries(Object.entries(incoming).filter(([key,value])=>!valuesEqual(value,item.technical[key])));
+    incoming={...parse(standard.technical,{}),...location,...explicit};
+  }
+  const shared=new Set(body.shared_keys||[]);
+  for(const key of shared)if(overrides.has(key))incoming[key]=item.technical[key];
+  const technical=cleanTechnical(db,kind,system,incoming);
+  for(const key of new Set([...Object.keys(item.technical),...Object.keys(technical)]))
+    if(!openingFields.has(key)&&!shared.has(key)&&!body.reset_overrides&&!changedType&&!valuesEqual(item.technical[key],technical[key]))overrides.add(key);
   const category=kind, systemId=system?.id||"";
-  if (code===item.code&&category===item.category&&systemId===item.system&&encode(item.technical)===encode(technical)) return item;
-  db.run("UPDATE ops_items SET code=?,category=?,system=?,technical=?,defaults_applied=0,version=version+1 WHERE id=?",
-    [code,category,systemId,encode(technical),item.id]);
+  if (code===item.code&&category===item.category&&systemId===item.system&&description===item.opening_description&&
+      encode(item.technical)===encode(technical)&&encode([...overrides])===encode(item.specification_overrides)) return item;
+  db.run("UPDATE ops_items SET code=?,category=?,system=?,technical=?,opening_description=?,description_version=description_version+?,specification_overrides=?,defaults_applied=0,version=version+1 WHERE id=?",
+    [code,category,systemId,encode(technical),description,renamed?1:0,encode([...overrides]),item.id]);
+  if(renamed)saveOrderDescriptions();
   record(db,user,item.project_id,"specification_updated",item.id,{before:{...item,original:undefined},
-    after:{code,category,system:systemId,technical}});
+    after:{code,category,system:systemId,technical,opening_description:description,specification_overrides:[...overrides]}});
   return getItem(db,item.project_id,item.id);
 }
 
@@ -323,41 +350,67 @@ function saveSpecifications(db,projectId,body,user) {
   const rows=body.rows||[];
   if (!Array.isArray(rows)||rows.length>2500||new Set(rows.map((row)=>idOf(row?.id))).size!==rows.length)
     fail(400,"Provide distinct BOQ rows");
+  for(const row of rows)if(row.shared_keys!=null&&(!Array.isArray(row.shared_keys)||row.shared_keys.length>500||
+    row.shared_keys.some(key=>typeof key!=='string'||!/^[a-z][a-z0-9_]*$/.test(key)||['constructor','prototype'].includes(key)||
+      !['category','system'].includes(key)&&!Object.hasOwn(row.technical||{},key))))fail(400,'Select valid shared specification fields');
   const inputs=rows.map((row)=>({row,current:getItem(db,projectId,idOf(row.id))}));
   const conflicts=inputs.flatMap(({row,current})=>{
     const fields=specificationConflicts(current,row);
-    return fields.length?[{id:current.id,code:current.code,version:current.version,fields}]:[];
+    return fields.length?[{id:current.id,code:openingDescription(current),version:current.version,fields}]:[];
   });
   if (conflicts.length) fail(409,"Some of the specifications you edited changed before saving",{specification_conflicts:conflicts});
   const updated=inputs.map(({row,current})=>{
     return updateItem(db,current,{version:current.version,code:current.code,
       category:row.category??current.category,system:row.system??current.system,
+      opening_description:row.opening_description??current.opening_description,description_version:current.description_version,shared_keys:row.shared_keys,
       technical:{...current.technical,...row.technical}},user,true);
   });
+  const patchById=new Map(inputs.map(({row,current})=>[current.id,row])),updatedById=new Map(updated.map(item=>[item.id,item]));
   const variants=new Map();
   for (const item of updated.filter((entry)=>entry.system)) {
-    const key=descriptionKey(item.commercial.description);
+    const patch=patchById.get(item.id);
+    if(!Object.hasOwn(patch,'category')&&!Object.hasOwn(patch,'system')&&!Object.keys(reusableTechnical(patch.technical)).length)continue;
+    const key=item.category+':'+item.system;
     const selected=variants.get(key)||{item,keys:new Set()};
     selected.keys.add(encode([item.category,item.system,reusableTechnical(item.technical)]));
     variants.set(key,selected);
   }
   let remembered=0;
+  // Shared edits update the type template even when some openings have exceptions.
+  for(const {row,current} of inputs){
+    const item=updatedById.get(current.id);
+    const keys=(row.shared_keys||[]).filter(key=>!openingFields.has(key));
+    if(!item.system||!keys.length||body.remember===false)continue;
+    const saved=typeDefault(db,project.customer_id,item.category,item.system);
+    const standard=parse(saved?.technical,reusableTechnical(item.technical));
+    for(const key of keys)if(!item.specification_overrides.includes(key))standard[key]=item.technical[key]??null;
+    rememberSpecification(db,project.customer_id,{...item,technical:standard});remembered++;
+    variants.delete(item.category+':'+item.system);
+  }
   if (body.remember!==false)
     for (const {item,keys} of variants.values())
       if (keys.size===1 && rememberSpecification(db,project.customer_id,item)) remembered++;
+  if(body.remember!==false)for(const item of updated.filter(entry=>entry.system)){
+    const patch=patchById.get(item.id);
+    if(!Object.hasOwn(patch,'category')&&!Object.hasOwn(patch,'system')&&!Object.keys(reusableTechnical(patch.technical)).length)continue;
+    const standard=typeDefault(db,project.customer_id,item.category,item.system);
+    if(standard)db.run(`INSERT INTO ops_customer_specs(customer_id,description,category,system,technical) VALUES(?,?,?,?,?)
+      ON CONFLICT(customer_id,description) DO UPDATE SET category=excluded.category,system=excluded.system,technical=excluded.technical`,
+      [project.customer_id,item.commercial.description,item.category,item.system,standard.technical]);
+  }
   let applied=0;
   const sourceId=idOf(body.source_id);
   if (sourceId) {
     const source=getItem(db,projectId,sourceId);
     if (!source.active||!source.system||!descriptionKey(source.commercial.description).trim()) fail(400,"Choose a configured BOQ row");
     if (body.apply_matches) {
-      const match=descriptionKey(source.commercial.description);
       const candidates=db.all(`SELECT * FROM ops_items WHERE project_id=? AND id<>? AND active=1 AND source_document_id IS ?
-        AND json_extract(commercial,'$.description')=?`,[projectId,sourceId,source.source_document_id,match]);
+        AND ((category=? AND system=?) OR (system='' AND json_extract(commercial,'$.description')=?))`,
+        [projectId,sourceId,source.source_document_id,source.category,source.system,source.commercial.description]);
       for (const raw of candidates) {
         const target=hydrateItem(raw);
         const locationFields=Object.fromEntries(Object.entries(target.technical).filter(([key])=>openingFields.has(key)));
-        const saved=updateItem(db,target,{...target,category:source.category,system:source.system,
+        const saved=updateItem(db,target,{...target,category:source.category,system:source.system,shared_keys:Object.keys(reusableTechnical(source.technical)),
           technical:{...reusableTechnical(source.technical),...locationFields}},user);
         if (saved.version!==target.version) applied++;
       }
@@ -413,7 +466,7 @@ function proposeItem(db,projectId,body,user) {
 }
 
 function getChange(db,projectId,id) {
-  const row=db.get(`SELECT c.*,i.code,i.project_id,i.source_line_id,i.source_document_id,u.display_name AS submitter,v.display_name AS reviewer
+  const row=db.get(`SELECT c.*,i.code,COALESCE(NULLIF(i.opening_description,''),json_extract(i.commercial,'$.description')) AS description,i.project_id,i.source_line_id,i.source_document_id,u.display_name AS submitter,v.display_name AS reviewer
     FROM ops_changes c JOIN ops_items i ON i.id=c.item_id LEFT JOIN users u ON u.id=c.submitted_by
     LEFT JOIN users v ON v.id=c.reviewed_by WHERE c.id=? AND i.project_id=?`,[id,projectId]);
   if (!row) fail(404,"Revision not found");

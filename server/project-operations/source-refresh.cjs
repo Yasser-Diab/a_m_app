@@ -43,7 +43,7 @@ function refreshSource(db,projectId,body,user){
   if(body.confirm!==true)fail(400,'Confirm replacement of the imported source data');
   const plan=sourcePlan(db,projectId,body.document_id),{state,project,source,old,matches,removed,refreshable}=plan;
   if(Number(body.version)!==state.version||body.fingerprint!==plan.summary.fingerprint)fail(409,'The source or project changed. Review the import again');
-  const defaults=new Map(db.all('SELECT * FROM ops_customer_specs WHERE customer_id=?',[project.customer_id]).map(item=>[item.description,item]));
+  const savedFor=require('./customer-defaults.cjs').sourceDefaults(db,project.customer_id);
   const beforeOrders=refreshable.map(order=>({...order,items:db.all('SELECT * FROM ops_order_items WHERE order_id=?',[order.id])}));
   const previous=new Map(old.map(item=>[item.id,parse(item.technical,{})]));
   const owners=beforeOrders.filter(order=>order.kind!=='maintenance'&&old.filter(item=>item.active).every(item=>
@@ -51,10 +51,11 @@ function refreshSource(db,projectId,body,user){
   const owner=owners.length===1?owners[0]:null;
   const changed=[];
   for(const {row,item}of matches){
-    const values=itemValues(row),saved=defaults.get(values.description),standard=parse(saved?.technical,{}),base=item?parse(item.technical,{}):standard;
+    const values=itemValues(row),saved=savedFor(values.description),standard=parse(saved?.technical,{}),base=item?parse(item.technical,{}):standard;
     const technical=openingDefaults(item?.category||saved?.category,{...base,building:row.building_unit||'',room:row.floor_apartment||'',
       profile:row.profile_spec||base.profile||'',infill:row.glass_spec||base.infill||'',color:row.color||base.color||'',width_mm:values.width_mm,height_mm:values.height_mm,
       quantity:Number.isInteger(row.item_count)&&row.item_count>0?row.item_count:null});
+    if(item)for(const key of parse(item.specification_overrides,[]))if(Object.hasOwn(base,key))technical[key]=base[key];
     let id=item?.id;
     if(item){
       db.run(`UPDATE ops_items SET source_line_id=?,commercial=?,technical=?,active=1,version=version+1,financial_version=financial_version+1 WHERE id=?`,

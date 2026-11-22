@@ -85,7 +85,7 @@ async function main() {
     assert.equal(initial.commercial.quantity,100);
     const originalRecord=db.get("SELECT * FROM work_items WHERE id=?",[sourceId]);
     const cat=await api(ops+"/catalogue");
-    assert.equal(cat.categories.reduce((sum,row)=>sum+row.systems.length,0),163);
+    assert.equal(cat.categories.reduce((sum,row)=>sum+row.systems.length,0),172);
     const feature=(category,system,key)=>fieldsFor(category,configuration(db,category,system),{}).some((field)=>field.key===key);
     assert.ok(feature("windows","windows-8","tracks"));
     assert.equal(feature("windows","windows-8","hinge"),false);
@@ -624,7 +624,116 @@ async function main() {
     assert.equal((await api(refreshPath)).operations,null);assert.ok(db.get('SELECT id FROM cert_projects WHERE id=?',[refreshProject.id]));
     assert.ok(db.get("SELECT id FROM ops_audit WHERE action='source_document_deleted' AND entity_id=?",[refreshDoc]));
     assert.equal(db.all("PRAGMA foreign_key_check").length,0);
-    console.log("Project Operations integration, discovery, bulk specifications, customer defaults, locks, generated references, sign-offs, finance and loading passed");
+    // Opening descriptions do not alter BOQ values. Defaults follow category + operating type.
+    const typeDoc=seedBoq(customer.id,'Type defaults project',5600,'005600','invoice',['Lobby slider','Bedroom slider','One-leaf hinged']);
+    await api('/documents/'+typeDoc,'PUT',{status:'approved'});
+    const typeProject=await api(ops+'/resolve-project','POST',{document_id:typeDoc,project:'Type defaults project'});
+    const typePath=ops+'/projects/'+typeProject.id;
+    await api(typePath,'POST',{boq_id:typeDoc});
+    let typeItems=(await api(typePath+'/items')).items;
+    await api(typePath+'/specifications','POST',{remember:false,rows:typeItems.map((item,index)=>({id:item.id,version:item.version,
+      category:index===2?'doors':'windows',system:index===2?'doors-22':'windows-8',technical:{...item.technical,leaves:index===2?1:2,
+        lock_right:'Right latch',lock_left:'Left latch',profile:'Shared section',hinge_side:index===2?'Right':'',opening_direction:index===2?'Inward':''}}))});
+    typeItems=(await api(typePath+'/items')).items;
+    const [a,b,hinged]=typeItems;
+    assert.deepEqual((await api(typePath+'/specification-groups?boq_id='+typeDoc)).map(group=>group.count),[2,1]);
+    const groupRows=(await api(typePath+'/specification-groups?boq_id='+typeDoc+'&item_id='+a.id)).rows;
+    assert.deepEqual(groupRows.map(item=>item.id),[a.id,b.id]);
+    await api(typePath+'/specifications','POST',{rows:groupRows.map(item=>({id:item.id,version:item.version,
+      technical:{profile:'Type default'},shared_keys:['profile']}))});
+    let customized=await api(typePath+'/items/'+b.id);
+    customized=await api(typePath+'/items/'+b.id,'PATCH',{...customized,opening_description:'Custom bedroom opening',
+      technical:{...customized.technical,profile:'Individual section'},remember:false});
+    assert.ok(customized.specification_overrides.includes('profile'));
+    const groupAgain=(await api(typePath+'/specification-groups?boq_id='+typeDoc+'&item_id='+a.id)).rows;
+    await api(typePath+'/specifications','POST',{rows:groupAgain.map(item=>({id:item.id,version:item.version,
+      technical:{profile:'Revised type default'},shared_keys:['profile']}))});
+    const typeCurrent=(await api(typePath+'/items')).items;
+    assert.equal(typeCurrent[0].technical.profile,'Revised type default');
+    assert.equal(typeCurrent[1].technical.profile,'Individual section');
+    assert.equal(typeCurrent[1].description,'Custom bedroom opening');
+    assert.equal(typeCurrent[1].commercial.description,'Bedroom slider');
+    assert.equal(db.get('SELECT description FROM work_items WHERE id=?',[b.source_line_id]).description,'Bedroom slider');
+    assert.equal(JSON.parse(db.get('SELECT technical FROM ops_customer_type_specs WHERE customer_id=? AND category=? AND system=?',
+      [customer.id,'windows','windows-8']).technical).profile,'Revised type default');
+    const typeOrder=await api(typePath+'/orders','POST',{items:typeCurrent.slice(0,2).map(item=>({item_id:item.id,quantity:1}))});
+    const typeOrderPath=typePath+'/orders/'+typeOrder.id;
+    const beforeRename=await api(typePath+'/items/'+a.id);
+    const renamed=await api(typePath+'/items/'+a.id,'PATCH',{...beforeRename,opening_description:'Updated lobby description',remember:false});
+    assert.equal(renamed.version,beforeRename.version);
+    assert.equal(renamed.description_version,beforeRename.description_version+1);
+    await api(typePath+'/items/'+a.id,'PATCH',{...beforeRename,opening_description:'Stale label',remember:false},409);
+    assert.equal((await api(typeOrderPath)).items[0].specification.opening_description,'Updated lobby description');
+    const settings=await api(typeOrderPath+'/loading-settings','PATCH',{version:0,enabled:true,rows:[{label:'Spare handles',unit:'Pcs',quantity:2},{label:'Sealant',unit:'kg',quantity:1.25}]});
+    assert.equal(settings.loading_settings_version,1);
+    await api(typeOrderPath+'/loading-settings','PATCH',{version:0,enabled:true,rows:[]},409);
+    await api(typeOrderPath+'/loading-settings','PATCH',{version:1,enabled:true,rows:[{label:'',unit:'Pcs',quantity:2}]},400);
+    await api(typeOrderPath+'/loading-settings','PATCH',{version:1,enabled:true,rows:[{label:'Bad quantity',unit:'Pcs',quantity:-2}]},400);
+    await api(typeOrderPath+'/loading-settings','PATCH',{version:1,enabled:true,rows:[]},403,viewer.certificate_session);
+    const loadingEn=await api(typeOrderPath+'/report','POST',{kind:'loading',locale:'en'});
+    assert.ok(loadingEn.html.includes('Spare handles')&&loadingEn.html.includes('Custom bedroom opening'));
+    assert.ok(!loadingEn.html.includes(a.code)&&!loadingEn.html.includes(b.code));
+    const loadingAr=await api(typeOrderPath+'/report','POST',{kind:'loading',locale:'ar'});
+    assert.ok(loadingAr.html.includes('عدد')&&loadingAr.html.includes('كجم'));
+    const anotherOrder=await api(typePath+'/orders','POST',{items:[{item_id:hinged.id,quantity:1}]});
+    assert.deepEqual((await api(typePath+'/orders/'+anotherOrder.id)).loading_settings,{enabled:false,rows:[]});
+    assert.deepEqual((await api(typeOrderPath)).loading_settings.rows,settings.loading_settings.rows);
+    const editedBody=loadingEn.html.match(/<body[^>]*>([\s\S]*)<\/body>/)[1];
+    await api(typeOrderPath+'/report-edits','POST',{kind:'loading',locale:'en',document_ref:loadingEn.document_ref,version:0,html:editedBody+'<p>Manual note</p>'});
+    await api(typeOrderPath+'/loading-settings','PATCH',{version:1,enabled:true,rows:[{label:'Updated extra',unit:'Pcs',quantity:7}]});
+    const reprinted=await api(typeOrderPath+'/report','POST',{kind:'loading',locale:'en'});
+    assert.ok(reprinted.html.includes('Manual note')&&reprinted.html.includes('Updated extra'));
+    assert.ok(!reprinted.html.includes('Spare handles'));
+    await api(typeOrderPath+'/loading-settings','PATCH',{version:2,enabled:false,rows:[{label:'Updated extra',unit:'Pcs',quantity:7}]});
+    assert.ok(!(await api(typeOrderPath+'/report','POST',{kind:'loading',locale:'en'})).html.includes('Updated extra'));
+    const inheritedDoc=seedBoq(customer.id,'Inherited type defaults',5601,'005601','invoice',['Lobby slider','Bedroom slider']);
+    await api('/documents/'+inheritedDoc,'PUT',{status:'approved'});
+    const inheritedProject=await api(ops+'/resolve-project','POST',{document_id:inheritedDoc,project:'Inherited type defaults'});
+    const inheritedPath=ops+'/projects/'+inheritedProject.id;
+    await api(inheritedPath,'POST',{boq_id:inheritedDoc});
+    const inheritedItems=(await api(inheritedPath+'/items')).items;
+    assert.ok(inheritedItems.every(item=>item.technical.profile==='Revised type default'));
+    assert.deepEqual(inheritedItems.map(item=>item.technical.width_mm),[1100,1200]);
+    const personalized=await api(typePath+'/items/'+b.id);
+    await api(typePath+'/items/'+b.id,'PATCH',{...personalized,reset_overrides:true,remember:false});
+    const resetItem=await api(typePath+'/items/'+b.id);
+    assert.equal(resetItem.technical.profile,'Revised type default');
+    assert.equal(resetItem.description,'Custom bedroom opening');
+    assert.deepEqual(resetItem.specification_overrides,[]);
+    await api(typeOrderPath+'/loading-settings','PATCH',{version:3,enabled:true,rows:[{label:'Persistent extra',unit:'Pcs',quantity:7}]});
+    await api(typeOrderPath+'/refresh','POST',{});
+    for(const stage of [...cat.approvalParts,'manufacturing','pre_shipment'])await api(typeOrderPath+'/approvals','POST',{stage,approved:true});
+    const approvedRename=await api(typePath+'/items/'+a.id);
+    await api(typePath+'/items/'+a.id,'PATCH',{...approvedRename,opening_description:'Released opening description',remember:false});
+    assert.equal((await api(typeOrderPath)).stage_approvals.every(stage=>stage.approved),true);
+    const firstBalance=(await api(typeOrderPath)).balances[0];
+    await api(typeOrderPath+'/loading','POST',{command_key:crypto.randomUUID(),responsible:{loading:'Dispatch lead'},lines:[
+      {order_item_id:firstBalance.order_item_id,kind:firstBalance.kind,quantity:firstBalance.required}]});
+    const persistentLoading=await api(typeOrderPath+'/report','POST',{kind:'loading',locale:'en'});
+    assert.notEqual(persistentLoading.document_ref,loadingEn.document_ref);
+    assert.ok(persistentLoading.html.includes('Persistent extra')&&persistentLoading.html.includes('Released opening description'));
+    const legacyLock=cleanTechnical(db,'windows',slider,{leaves:2,interlock_right:'Legacy right',interlock_left:'Legacy left'});
+    assert.equal(legacyLock.lock_right,'Legacy right');assert.equal(legacyLock.interlock_right,undefined);
+    const fixedSystem=configuration(db,'windows','windows-25');
+    const fixedMeasures=cleanTechnical(db,'windows',fixedSystem,{quantity:1,leaves:1,width_mm:1100,height_mm:1500,panel_measurement_basis:'Fixed panel',fixed_width_mm:1100,fixed_height_mm:300,leaf_height_mm:1200});
+    assert.equal(fixedMeasures.fixed_height_mm,300);assert.equal(fixedMeasures.leaf_height_mm,undefined);
+    const leafMeasures=cleanTechnical(db,'windows',fixedSystem,{...fixedMeasures,panel_measurement_basis:'Operable leaf',leaf_width_mm:1000,leaf_height_mm:1200});
+    assert.equal(leafMeasures.leaf_width_mm,1000);assert.equal(leafMeasures.fixed_height_mm,undefined);
+    assert.ok(!fieldsFor('windows',slider,{leaves:2}).some(field=>field.key==='panel_measurement_basis'));
+    assert.ok(fieldsFor('windows',slider,{leaves:2,fixed_panels:1}).some(field=>field.key==='panel_measurement_basis'));
+    for(const kind of ['windows','doors']){
+      const fields=fieldsFor(kind,configuration(db,kind,kind==='windows'?'windows-23':'doors-22'),{leaves:1});
+      assert.ok(fields.some(field=>field.key==='hinge_side'));
+      assert.ok(fields.some(field=>field.key==='opening_direction'));
+      assert.ok(!fields.some(field=>field.key==='interlock_right'));
+    }
+    db.run('DELETE FROM ops_systems WHERE id=?',['doors-25']);
+    require('../server/project-operations/index.cjs').initializeOperations(db);
+    require('../server/project-operations/index.cjs').initializeOperations(db);
+    assert.ok((await api(ops+'/catalogue')).categories.find(row=>row.id==='doors').systems.some(row=>row.id==='doors-25'));
+    assert.equal((await api(typePath+'/items/'+b.id)).description,'Custom bedroom opening');
+    assert.equal(db.all('PRAGMA foreign_key_check').length,0);
+    console.log("Project Operations integration, grouped descriptions, customer type defaults, exceptions, catalogue upgrades, locks, per-order loading extras, finance and loading passed");
   } finally {
     global.fetch=nativeFetch;
     await new Promise((resolve)=>http.close(resolve));

@@ -53,3 +53,18 @@
 .ops-column-picker:not([open]) { inline-size:max-content }
 .ops-column-picker[open] { flex-basis:100% }
 .ops-column-picker .ops-options { max-block-size:175px;overflow:auto;margin-block:6px }
+.ops-opening-description { min-inline-size:210px;max-inline-size:360px;display:grid;gap:4px }
+.ops-opening-description textarea { width:100%;resize:vertical;white-space:pre-wrap;overflow-wrap:anywhere }
+.ops-loading-extras { border:1px solid var(--line);border-radius:10px;padding:12px }
+.ops-loading-extras summary { cursor:pointer;font-weight:600;margin-block-end:8px }
+.ops-grid-table { table-layout:fixed;min-inline-size:0;inline-size:auto }
+.ops-grid-table td[data-ops-cell],.ops-grid-table .ops-description { min-inline-size:0;max-inline-size:none;white-space:normal;overflow-wrap:anywhere }
+.ops-grid-table thead th { position:sticky;padding-inline-end:8px }
+.ops-column-heading { display:flex;align-items:center;justify-content:space-between;gap:3px }
+.ops-column-heading button { padding:3px;white-space:normal;font-size:inherit;line-height:1.3 }
+.ops-column-resize { position:absolute;inset-inline-end:-3px;inset-block:0;inline-size:7px;cursor:col-resize;touch-action:none;z-index:4 }
+.ops-add-field { display:grid;gap:3px;font-size:12px;max-inline-size:230px }
+.ops-grid-menu { position:fixed;z-index:270020;min-inline-size:240px;display:grid;background:var(--panel,Canvas);border:1px solid var(--line);border-radius:10px;padding:8px;box-shadow:0 10px 35px #0004 }
+.ops-grid-menu button { text-align:start }
+.ops-side-editor { display:grid;gap:4px;min-inline-size:95px }
+.ops-side-editor label { display:flex;align-items:center;gap:5px }
