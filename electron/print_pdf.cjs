@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow } = require("electron");
+const {prepareOperationsPrint}=require('../server/project-operations/print-layout.cjs');
 
 const [, , inputHtmlPath, outputPdfPath, footerMetaArg] = process.argv;
 
@@ -45,6 +46,7 @@ async function main() {
     await win.loadFile(path.resolve(inputHtmlPath));
   }
   await new Promise((resolve) => setTimeout(resolve, 900));
+  await win.webContents.executeJavaScript(`(${prepareOperationsPrint.toString()})()`);
 
   const footer = readFooterMeta();
   const companyAbbreviation = safe(footer.companyAbbreviation || "HGAD");

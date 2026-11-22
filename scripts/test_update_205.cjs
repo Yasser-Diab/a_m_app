@@ -74,9 +74,10 @@ async function main(){
     assert.deepEqual(openingBodies.map(match=>match[1]),['0','1']);
     for(const body of openingBodies)assert.ok(body[2].indexOf('Frames')<body[2].indexOf('Sliding leaves')&&body[2].indexOf('Sliding leaves')<body[2].indexOf('Flyscreen leaves'));
     const originalItems=JSON.stringify((await api(endpoint)).items);
-    const draftBody=report.html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)[1].replace('Loading Order','Updated Loading Order')+'<dl><div><dt>Dispatch note</dt><dd>Call site before arrival</dd></div></dl>';
+    const draftBody=report.html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)[1].replace('Loading Order','Updated Loading Order').replace(/<section class="order-summary">[\s\S]*?<\/section>/,'')+'<dl><div><dt>Dispatch note</dt><dd>Call site before arrival</dd></div></dl>';
     await api(endpoint+'/report-edits','POST',{...options,version:0,document_ref:report.document_ref,html:draftBody});
     const edited=await api(endpoint+'/report','POST',options);assert.ok(edited.html.includes('Dispatch note'));assert.equal(edited.edit_version,1);
+    assert.equal((edited.html.match(/class="order-summary"/g)||[]).length,1,'Add computed totals to older customized reports without discarding manual notes');
     await api(endpoint+'/report-edits','POST',{...options,version:0,document_ref:report.document_ref,html:'stale'},409);
     assert.ok(!(await api(endpoint+'/report','POST',{kind:'manufacturing',locale:'en'})).html.includes('Dispatch note'));
     assert.ok(!(await api(endpoint+'/report','POST',{kind:'loading',locale:'ar'})).html.includes('Dispatch note'));

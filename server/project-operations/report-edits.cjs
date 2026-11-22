@@ -37,6 +37,12 @@ function editedReport(db,current,options,html){
     body=section.test(body)?body.replace(section,()=>extras):body.includes('<div class="signoffs">')?
       body.replace('<div class="signoffs">',()=>extras+'<div class="signoffs">'):body+extras;
   }
+  if(body!=null){
+    const section=/<section class="order-summary">[\s\S]*?<\/section>/;
+    const summary=html.match(section)?.[0];
+    if(summary)body=section.test(body)?body.replace(section,()=>summary):body.includes('<div class="signoffs">')?
+      body.replace('<div class="signoffs">',()=>summary+'<div class="signoffs">'):body+summary;
+  }
   return {html:body!=null?html.replace(/<body[^>]*>[\s\S]*<\/body>/i,()=>'<body>'+body+'</body>'):html,
     edit_version:row?.version||0,document_ref:key.document_ref,report_key:key.report_kind+':'+key.locale,customized:row?.body_html!=null};
 }

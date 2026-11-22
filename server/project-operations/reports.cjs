@@ -4,6 +4,7 @@ const {people} = require("./core.cjs");
 const {configuration,fieldsFor,directions,categories,perimeterDescription} = require("./specifications.cjs");
 const {orderDetails} = require("./production.cjs");
 const {openingDescription}=require('./customer-defaults.cjs');
+const {orderQuantities,unitKey,unitName}=require('./order-quantities.cjs');
 const { PDFDocument, PDFName } = require("pdf-lib");
 const translations=require("./translations.json");
 const technicalText=(value,locale)=>translations[value]?.[locale==="ar"?0:1]??value;
@@ -59,6 +60,8 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   section{border:1px solid ${color};border-radius:3px;padding:7px;margin-block:7px;break-inside:avoid}
   section h2{margin-top:0}section.loading{break-inside:auto}
   .dimension-pair{display:inline-flex;align-items:baseline;gap:.28em;unicode-bidi:isolate;white-space:nowrap}
+  .order-summary table{margin:0}.order-summary th,.order-summary td{border:0;background:#e5eef1;padding:7px}
+  .order-unit-total{display:inline-flex;align-items:baseline;gap:.25em;white-space:nowrap;margin-inline-end:.65em;font-variant-numeric:tabular-nums}
   .shared-specifications{break-inside:avoid}.item-number{font-weight:700;font-size:9pt;margin:0 0 5px}
   .field-scope{display:block;color:#546573;font-size:8pt}dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 10px;margin:4px 0}
   dl div{break-inside:avoid}dt{font-size:9pt;font-weight:700;color:#405467}dd{margin:0;overflow-wrap:anywhere}
@@ -313,11 +316,17 @@ function loadingExtras(order,locale){
   const settings=order.loading_settings;
   if(!settings?.enabled||!settings.rows?.length)return '';
   const t=(ar,en)=>label(ar,en,locale);
-  const units={'pcs':['عدد','Pcs'],'عدد':['عدد','Pcs'],'m²':['م²','m²'],'م²':['م²','m²'],'kg':['كجم','kg'],'كجم':['كجم','kg'],
-    'l.m':['م.ط','l.m'],'م.ط':['م.ط','l.m']};
   return '<section class="loading-extras"><h3>'+escape(t('بنود تحميل إضافية','Additional loading items'))+'</h3><table><thead>'+row([
     t('البيان','Description'),t('الوحدة','Unit'),t('الكمية','Quantity')],'th')+'</thead><tbody>'+settings.rows.map(entry=>row([
-      entry.label,units[entry.unit.toLowerCase()]?.[locale==='ar'?0:1]||entry.unit,entry.quantity])).join('')+'</tbody></table></section>';
+      entry.label,unitName(unitKey(entry.unit),locale),entry.quantity])).join('')+'</tbody></table></section>';
+}
+
+function orderSummary(order,locale){
+  const totals=orderQuantities(order),t=(ar,en)=>label(ar,en,locale);
+  const format=value=>new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(value);
+  const quantities=totals.quantities.map(item=>'<span class="order-unit-total"><bdi dir="ltr">'+format(item.quantity)+'</bdi><bdi>'+escape(unitName(item.unit,locale))+'</bdi></span>').join('');
+  return '<section class="order-summary"><table><tbody><tr><th>'+escape(t('إجمالي الأمر','Order total'))+'</th><td>'+escape(t('العدد','Count'))+
+    ' <bdi dir="ltr">'+format(totals.count)+'</bdi></td><td>'+escape(t('كمية الأعمال','Work quantity'))+' '+(quantities||'—')+'</td></tr></tbody></table></section>';
 }
 
 function approvalReport(db,order,locale) {
@@ -371,7 +380,7 @@ function report(db,state,rawOrder,options,branding) {
     approved?t("أمر تصنيع","Manufacturing Order"):t("طلب توريد الخامات","Material Requisition");
   const drawingSets=!loading && !approvals && options.drawings===true ? order.items.map((item)=>eligibleDrawings(db,item)) : [];
   const body=projectBlock(db,project,customer,state,order,locale,branding)+(approvals?approvalReport(db,order,locale):loading?loadingBlock(order,locale):
-    groupedWork(db,order.items,locale,drawingSets))+
+    groupedWork(db,order.items,locale,drawingSets))+(!approvals?orderSummary(order,locale):'')+
     signatures(db,project.id,order,loading?"loading":"manufacturing",locale,options.people);
   const measured=order.stage_approvals.find(({stage})=>stage==="measurement");
   const approvedMeasurements=measured?.items.filter(({approved})=>approved).length||0;
@@ -402,4 +411,4 @@ async function appendDrawings(buffer,drawings) {
   return Buffer.from(await output.save());
 }
 
-module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair};
+module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair,orderSummary};

@@ -8024,6 +8024,8 @@ function writePdf(html, outputPath, data = {}) {
       try {
         await win.loadFile(htmlPath);
         await new Promise((resolve) => setTimeout(resolve, 450));
+        const {prepareOperationsPrint}=require('./project-operations/print-layout.cjs');
+        await win.webContents.executeJavaScript(`(${prepareOperationsPrint.toString()})()`);
         const preparedBy = escapeHtml(footerMeta.preparedBy);
         const pdfFontStack = branding.bodyFontStack.replace(/"/g, "'");
         const pdf = await win.webContents.printToPDF({

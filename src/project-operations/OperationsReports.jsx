@@ -5,7 +5,7 @@ import {DimensionPair,ErrorMessage,Page,Pick,Table,Text,display,panelNames,quant
 const stageNames={specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],materials:["اعتماد الخامات","Materials"],
   manufacturing:["التصنيع","Manufacturing"],qc:["فحص ما قبل الشحن","Pre-shipment QC"],loading:["التحميل","Loading"],maintenance:["الصيانة","Maintenance"],
   completed:["مكتمل","Completed"],review:["مراجعة التعديلات","Changes to review"]};
-const unit=(name,locale)=>locale==="ar"?({"m²":"م²","l.m":"م.ط",Pcs:"عدد",kg:"كجم"}[name]||name):name;
+const unit=(name,locale)=>locale==="ar"?({"m²":"م²","l.m":"م.ط",Pcs:"عدد",kg:"كجم","m³":"م³",ton:"طن","Lump sum":"مقطوعية"}[name]||name):name;
 
 export function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNativeReport,shareNativeReport,disabled,endpoint,reportType='project-operations'}) {
   const [pdf,setPdf]=useState(null),[error,setError]=useState(null),[busy,setBusy]=useState(false);

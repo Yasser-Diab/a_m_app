@@ -2,6 +2,7 @@ const {scopeSql,parse,idOf,date,fail,lookup,today}=require("../certificate-acces
 const {approvalParts,frameQuantity,screenQuantity,configuration}=require("./specifications.cjs");
 const {wrap,escape,row,grid,dimensionPair}=require("./reports.cjs");
 const {pageOptions}=require("./core.cjs");
+const {unitKey,unitName}=require('./order-quantities.cjs');
 const stages={specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],
   materials:["اعتماد الخامات","Materials"],manufacturing:["التصنيع","Manufacturing"],qc:["فحص ما قبل الشحن","Pre-shipment QC"],
   loading:["التحميل","Loading"],maintenance:["الصيانة","Maintenance"],completed:["مكتمل","Completed"],review:["مراجعة التعديلات","Changes to review"]};
@@ -9,15 +10,6 @@ const components={frames:["حلوق","Frames"],screens:["ضلف سلك","Flyscre
   hinged:["ضلف مفصلي","Hinged leaves"],fixed:["ثوابت","Fixed panels"],other:["ضلف أخرى","Other leaves"],items:["وحدات","Items"]};
 const round=value=>Math.round((value+Number.EPSILON)*1e6)/1e6;
 const format=value=>value==null?"—":new Intl.NumberFormat("en-US",{maximumFractionDigits:4}).format(value);
-function unitKey(value){
-  const key=String(value||"").trim().toLowerCase();
-  if(["m²","m2","م²","م2","area"].includes(key))return "m²";
-  if(["m","lm","l.m","م","م.ط","linear"].includes(key))return "l.m";
-  if(["pcs","pc","piece","pieces","عدد","count"].includes(key))return "Pcs";
-  if(["kg","كجم"].includes(key))return "kg";
-  return String(value||"");
-}
-const unitName=(value,locale)=>locale==="ar"?({"m²":"م²","l.m":"م.ط",Pcs:"عدد",kg:"كجم"}[value]||value):value;
 function projectRows(db,access,query={}){
   const scope=scopeSql(access,"p.id"),project=idOf(query.project_id),customer=idOf(query.customer_id),q=lookup(query.q);
   const rows=db.all(`SELECT p.id,p.name,p.code,p.customer_id,p.created_at,c.created_at AS customer_created_at,c.display_name AS customer,o.details
