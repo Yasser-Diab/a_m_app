@@ -82,6 +82,11 @@ const fixture = {
 };
 
 const html = renderReportHtmlV2(fixture);
+for(const locale of ['ar','en']){
+  const dimensionsHtml=renderReportHtmlV2({...fixture,report_language:locale,show_dimensions:true,
+    rows:[{...fixture.rows[0],width_cm:530,height_cm:950}]});
+  assert.ok(dimensionsHtml.includes(`${locale==='ar'?'\u2067':'\u2066'}\u2066530\u2069 × \u2066950\u2069`));
+}
 assert.match(
   html,
   /\.totals\{[^}]*display:grid;/,
@@ -201,7 +206,7 @@ const englishHtml = renderReportHtmlV2({
   terms: [],
 });
 assert.ok(englishHtml.includes("m²"));
-assert.ok(englishHtml.includes("330 × 300 cm"));
+assert.ok(englishHtml.replace(/[\u2066-\u2069]/g,'').includes("330 × 300 cm"));
 assert.ok(!englishHtml.includes("م²"));
 assert.ok(!englishHtml.includes("سم"));
 assert.equal(

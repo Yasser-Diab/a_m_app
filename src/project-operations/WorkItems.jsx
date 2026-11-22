@@ -1,6 +1,6 @@
 import {useEffect,useId,useState} from "react";
 import {Dialog,Field,localDate,newKey,useDebounce,useResource} from "../certificates/shared.jsx";
-import {ErrorMessage,Page,Pick,SystemPick,Table,Text,display,options,panelNames,quantity,states,useAction,usePaged} from "./shared.jsx";
+import {DimensionPair,ErrorMessage,Page,Pick,SystemPick,Table,Text,display,options,panelNames,quantity,states,useAction,usePaged} from "./shared.jsx";
 import SpecificationGrid from "./SpecificationGrid.jsx";
 import GroupedSpecifications from "./GroupedSpecifications.jsx";
 import SourceRefresh from './SourceRefresh.jsx';
@@ -115,7 +115,7 @@ function SpecEditor({draft,change,catalogue,t,locale,nested=false}) {
           <Pick label={t("الربر بار","Rubber bar")} value={spec.rubber_bar==null?"":String(spec.rubber_bar)}
             onChange={(val)=>set("rubber_bar",val===""?null:val==="true")}
             items={[["true",t("مطلوب","Required")],["false",t("غير مطلوب","Not required")]]}/>
-          <div><strong>{t("مقاس التصنيع مم","Manufacturing dimensions (mm)")}</strong><p><bdi>{preview?preview.join(" × "):"—"}</bdi></p></div>
+          <div><strong>{t("مقاس التصنيع مم","Manufacturing dimensions (mm)")}</strong><p>{preview?<DimensionPair values={preview} locale={locale}/>:"—"}</p></div>
         </div>
       </>}
       {!nested&&draft.category==="curtain_walls"&&valid(spec.opening_unit)&&

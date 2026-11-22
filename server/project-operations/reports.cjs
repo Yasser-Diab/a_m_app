@@ -15,9 +15,15 @@ const label = (ar,en,locale) => locale==="ar"?ar:en;
 const localized = (value,locale) => typeof value === "object" ? value?.[locale] : value;
 const head = (text) => `<h2>${escape(text)}</h2>`;
 const direction=(value)=>/^[\d\s.,×%:/-]+$/.test(String(value))?"ltr":"auto";
-const row = (cells,tag="td")=>`<tr>${cells.map((value)=>`<${tag}><bdi dir="${direction(value)}">${escape(value)}</bdi></${tag}>`).join("")}</tr>`;
+const dimensionMarker=Symbol('dimension-pair');
+// Keep width first in the data and isolate each number so RTL cannot reverse the convention.
+const dimensionPair=(values,locale,suffix='')=>({[dimensionMarker]:true,values,locale,suffix});
+const valueHtml=value=>value?.[dimensionMarker]
+  ?`<span class="dimension-pair" dir="${value.locale==='ar'?'rtl':'ltr'}">${value.values.map(part=>`<bdi dir="ltr">${escape(part)}</bdi>`).join('<span>×</span>')}</span>${value.suffix?`<bdi dir="auto">${escape(value.suffix)}</bdi>`:''}`
+  :`<bdi dir="${direction(value)}">${escape(value)}</bdi>`;
+const row = (cells,tag="td")=>`<tr>${cells.map((value)=>`<${tag}>${valueHtml(value)}</${tag}>`).join("")}</tr>`;
 const grid = (pairs) => `<dl>${pairs.filter(([,value])=>value!=="" && value!=null).map(([key,value,scope])=>
-  `<div><dt>${escape(key)}</dt><dd><bdi dir="${direction(value)}">${escape(value)}</bdi>${scope?`<small class="field-scope"><bdi>${escape(scope)}</bdi></small>`:""}</dd></div>`).join("")}</dl>`;
+  `<div><dt>${escape(key)}</dt><dd>${valueHtml(value)}${scope?`<small class="field-scope"><bdi>${escape(scope)}</bdi></small>`:""}</dd></div>`).join("")}</dl>`;
 const panelLabels={frames:["حلوق","Frames"],sliding:["ضلف جرار","Sliding leaves"],hinged:["ضلف مفصلي","Hinged leaves"],
   fixed:["ثوابت","Fixed panels"],other:["ضلف أخرى","Other leaves"],screens:["ضلف سلك","Flyscreen leaves"],items:["وحدات","Items"]};
 const inspectionLabels={survey:["رفع المقاسات","Measurement survey"],receipt:["استلام الخامات","Material receipt"],
@@ -51,7 +57,8 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   font-size:28pt;font-weight:800;transform:rotate(-29deg);opacity:.20;color:${watermarkColor||color};pointer-events:none}
   header,h1,section,.signoffs{position:relative;z-index:1}
   section{border:1px solid ${color};border-radius:3px;padding:7px;margin-block:7px;break-inside:avoid}
-  section h2{margin-top:0}section.loading{break-inside:auto}.work-group+.work-group{break-before:page}
+  section h2{margin-top:0}section.loading{break-inside:auto}
+  .dimension-pair{display:inline-flex;align-items:baseline;gap:.28em;unicode-bidi:isolate;white-space:nowrap}
   .shared-specifications{break-inside:avoid}.item-number{font-weight:700;font-size:9pt;margin:0 0 5px}
   .field-scope{display:block;color:#546573;font-size:8pt}dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 10px;margin:4px 0}
   dl div{break-inside:avoid}dt{font-size:9pt;font-weight:700;color:#405467}dd{margin:0;overflow-wrap:anywhere}
@@ -152,8 +159,8 @@ function groupedWork(db,items,locale,drawingSets) {
   const supplemental=(tech,system)=>{
     const pairs=[];
     if (system?.tags.includes("sliding")&&Number(tech.leaves)>=2) {
-      const positions=[["lock_left","تسكيك شمال","Left lock"],["lock_right","تسكيك يمين","Right lock"],
-        ...(Number(tech.leaves)>2?[["central_lock_handle","تسكيك وسط","Centre lock"]]:[])];
+      const positions=[["lock_right","يمين","Right lock"],["lock_left","شمال","Left lock"],
+        ...(Number(tech.leaves)>2?[["central_lock_handle","وسط","Centre lock"]]:[])];
       const combined=positions.map(([key,ar,en])=>{
         const values=[tech[key],tech[key.replace("lock_","interlock_")]].filter(Boolean);
         const value=[...new Set(values)].map(text).join(" / ");
@@ -169,8 +176,8 @@ function groupedWork(db,items,locale,drawingSets) {
       pairs.push([t("حالة تخصيم العلب","Sub-frame deduction"),tech.subframe.status==="deducted"?t("تم التخصيم","Already deducted"):t("لم يتم التخصيم","Not deducted")]);
       for (const side of directions) {
         const frame=tech.subframe.sides[side];
-        if (frame) pairs.push([t("علب","Sub-frame")+" "+text(side),[frame.width,frame.depth].filter((value)=>value!=null).join(" × ")+
-          (tech.subframe.status==="not_deducted"&&frame.deduction!=null?" / "+t("الخصم","Deduction")+" "+frame.deduction:"")]);
+        if (frame) pairs.push([t("علب","Sub-frame")+" "+text(side),dimensionPair([frame.width,frame.depth].filter((value)=>value!=null),locale,
+          tech.subframe.status==="not_deducted"&&frame.deduction!=null?" / "+t("الخصم","Deduction")+" "+frame.deduction:"")]);
       }
     }
     return pairs;
@@ -214,7 +221,7 @@ function groupedWork(db,items,locale,drawingSets) {
       const net=item.specification.manufacturing_dimensions;
       return row([openingDescription(item.specification),...(hasTag?[data.tag]:[]),...(hasLocation?[[data.building,data.floor,data.room].filter(Boolean).join(" / ")]:[]),
         item.quantity,...(hasWidth?[size(data.width_mm)]:[]),...(hasHeight?[size(data.height_mm)]:[]),...(hasDepth?[size(data.depth_mm)]:[]),
-        ...measuredParts.map(key=>text(data[key])),...(hasDrawing?[data.drawing_ref]:[]),...(hasDeductions?[changedDimensions(item)?net.width+" × "+net.height:""]:[])]);
+        ...measuredParts.map(key=>text(data[key])),...(hasDrawing?[data.drawing_ref]:[]),...(hasDeductions?[changedDimensions(item)?dimensionPair([net.width,net.height],locale):""]:[])]);
     }).join("");
     const imageHtml=drawings.length?'<div class="drawings">'+drawings.map(({name,mime,content})=>mime==="application/pdf"
       ?"<p>"+escape(t("رسم مرفق بنهاية الملف","Drawing appended to the PDF"))+" · "+escape(name)+"</p>"
@@ -286,10 +293,10 @@ function loadingBlock(order,locale) {
     const begin=last!==entry.order_item_id;if(begin){last=entry.order_item_id;band++;}
     const spec=details.get(entry.order_item_id);
     const tech=spec.technical;
-    const values=[openingDescription(spec)+(tech.tag?' · '+tech.tag:''),(tech.width_mm??"—")+" × "+(tech.height_mm??"—"),t(...panelLabels[entry.kind]),
+    const values=[openingDescription(spec)+(tech.tag?' · '+tech.tag:''),dimensionPair([tech.width_mm??"—",tech.height_mm??"—"],locale),t(...panelLabels[entry.kind]),
       entry.required,entry.loaded,"","",entry.remaining,""];
     return (begin?(band?'</tbody>':'')+`<tbody class="opening-band-${band%2}" data-opening="${entry.order_item_id}">`:'')+
-      "<tr>"+values.map((value,index)=>'<td'+(index>2&&index<8?' class="number"':"")+'><bdi dir="'+direction(value)+'">'+escape(value)+"</bdi></td>").join("")+"</tr>";
+      "<tr>"+values.map((value,index)=>'<td'+(index>2&&index<8?' class="number"':"")+'>'+valueHtml(value)+"</td>").join("")+"</tr>";
   }).join("");
   const frames=order.balances.filter(({kind})=>kind==="frames").reduce((sum,entry)=>sum+entry.required,0);
   const leaves=order.balances.filter(({kind})=>["sliding","hinged","other"].includes(kind)).reduce((sum,entry)=>sum+entry.required,0);
@@ -395,4 +402,4 @@ async function appendDrawings(buffer,drawings) {
   return Buffer.from(await output.save());
 }
 
-module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row};
+module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair};

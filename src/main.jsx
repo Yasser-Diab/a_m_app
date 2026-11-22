@@ -1113,7 +1113,8 @@ function rowDimension(row, unit = "cm", locale = "ar") {
     if (!width || !height) return "";
     const w = unit === "m" ? money(width / 100) : money(width);
     const h = unit === "m" ? money(height / 100) : money(height);
-    return `${FSI}${w} \u00d7 ${h} ${unitLabel}${PDI}`;
+    const start=locale==='ar'?'\u2067':'\u2066';
+    return `${start}\u2066${w}${PDI} \u00d7 \u2066${h}${PDI} ${FSI}${unitLabel}${PDI}${PDI}`;
   }
   if (unitCode === "lm") {
     if (!width) return "";

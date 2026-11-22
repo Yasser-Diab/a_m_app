@@ -68,3 +68,4 @@
 .ops-grid-menu button { text-align:start }
 .ops-side-editor { display:grid;gap:4px;min-inline-size:95px }
 .ops-side-editor label { display:flex;align-items:center;gap:5px }
+.ops-dimension-pair,.ops-dimension-part{display:inline-flex;align-items:baseline;gap:.28em;unicode-bidi:isolate;white-space:nowrap}

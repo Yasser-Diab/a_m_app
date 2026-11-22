@@ -1,6 +1,6 @@
 const {scopeSql,parse,idOf,date,fail,lookup,today}=require("../certificate-access.cjs");
 const {approvalParts,frameQuantity,screenQuantity,configuration}=require("./specifications.cjs");
-const {wrap,escape,row,grid}=require("./reports.cjs");
+const {wrap,escape,row,grid,dimensionPair}=require("./reports.cjs");
 const {pageOptions}=require("./core.cjs");
 const stages={specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],
   materials:["اعتماد الخامات","Materials"],manufacturing:["التصنيع","Manufacturing"],qc:["فحص ما قبل الشحن","Pre-shipment QC"],
@@ -163,7 +163,7 @@ function managementReport(kind,data,options,branding){
       '<section class="loading"><table><thead>'+row([t("المشروع","Project"),t("البند / الفتحة","Item / opening"),...(loaded?[t("أمر التشغيل","Work order")]:[]),
         t("كمية الأعمال","Work quantity"),t("الوحدة","Unit"),t("العدد","Count"),t("العرض × الارتفاع مم","Width × height mm"),t("المساحة التقديرية م²","Estimated area m²")],"th")+
       '</thead><tbody>'+data.items.map(item=>row([item.project_code+' · '+item.project,item.tag+' · '+item.description,...(loaded?[[item.order,...item.loading_references].join(' / ')]:[]),format(item.quantity),unitName(item.unit,locale),
-        format(item.count),item.width_mm!=null&&item.height_mm!=null?format(item.width_mm)+' × '+format(item.height_mm):'',format(item.estimated_area)])).join('')+'</tbody></table></section>';
+        format(item.count),item.width_mm!=null&&item.height_mm!=null?dimensionPair([format(item.width_mm),format(item.height_mm)],locale):'',format(item.estimated_area)])).join('')+'</tbody></table></section>';
   }
   return wrap({locale,branding,title,color:"#adc4cf",body}).replace('</style>','bdi[dir="ltr"]{white-space:nowrap;font-variant-numeric:tabular-nums}</style>');
 }

@@ -34,6 +34,12 @@ export function Text({label,value,onChange,type="text",required=false,placeholde
     dir={type==="text"?"auto":"ltr"} min={min} max={max} step={step} onChange={(event)=>onChange(event.target.value)} /></Field>;
 }
 
+export function DimensionPair({values,locale}) {
+  return <span className="ops-dimension-pair" dir={locale==='ar'?'rtl':'ltr'}>{values.map((value,index)=><span key={index} className="ops-dimension-part">
+    {index>0&&<span>×</span>}<bdi dir="ltr">{value??'—'}</bdi>
+  </span>)}</span>;
+}
+
 export function Pick({label,value,onChange,items,required=false,placeholder="—",disabled=false}) {
   return <Field label={label}><select value={value??""} required={required} disabled={disabled} onChange={(event)=>onChange(event.target.value)} dir="auto">
     <option value="">{placeholder}</option>{items.map(([key,title])=><option key={key} value={key}>{title}</option>)}

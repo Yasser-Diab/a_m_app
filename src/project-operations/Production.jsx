@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from "react";
 import {Dialog,localDate,newKey,useDebounce,useResource} from "../certificates/shared.jsx";
-import {ErrorMessage,Page,Pick,Suggest,Table,SearchableTable,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
+import {DimensionPair,ErrorMessage,Page,Pick,Suggest,Table,SearchableTable,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
 import ProjectSignatures from "./ProjectSignatures.jsx";
 import ReportEditor from './ReportEditor.jsx';
 import SourceRefresh from './SourceRefresh.jsx';
@@ -177,7 +177,7 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
     <Table headers={[t("الفتحة","Opening"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),t("المحمل","Loaded"),t("المتبقي","Remaining"),t("التقدم","Progress")]}
       empty={t("لا توجد كميات.","No quantities.")}
       rows={order.balances.map((row)=>[row.order_item_id+":"+row.kind,[row.description,
-        <bdi dir="ltr">{row.width_mm??"—"} × {row.height_mm??"—"}</bdi>,display(panelNames,row.kind,t),
+        <DimensionPair values={[row.width_mm,row.height_mm]} locale={uiLanguage}/>,display(panelNames,row.kind,t),
         quantity(row.required),quantity(row.loaded),quantity(row.remaining),loadState(row)]])}/>
     <h3>{t("فحص الجودة","Quality inspections")}</h3>
     <Table headers={[t("رقم الفحص","Inspection no."),t("البند","Item"),t("المرحلة","Stage"),t("التاريخ","Date"),t("الفاحص","Inspector"),t("النتيجة","Result"),t("الإفراج","Release")]}
@@ -308,7 +308,7 @@ function Loading({order,endpoint,request,t,people,reload,close}) {
         empty={t("لا توجد كميات متبقية.","No remaining quantities.")}
         rows={order.balances.filter((row)=>row.remaining>0).map((row)=>{
           const key=row.order_item_id+":"+row.kind;
-          return [key,[row.description,<bdi dir="ltr">{row.width_mm??"—"} × {row.height_mm??"—"}</bdi>,display(panelNames,row.kind,t),quantity(row.remaining),
+          return [key,[row.description,<DimensionPair values={[row.width_mm,row.height_mm]} locale={t('ar','en')}/>,display(panelNames,row.kind,t),quantity(row.remaining),
             <Text label={row.description+" · "+display(panelNames,row.kind,t)} type="number" min={0} max={row.remaining} step={1} value={amounts[key]}
               onChange={(value)=>setAmounts({...amounts,[key]:value})}/>]];
         })}/>

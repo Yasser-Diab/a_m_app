@@ -5,9 +5,16 @@ const path = require("node:path");
 const os = require("node:os");
 const {createServer} = require("../server/index.cjs");
 const {dimensions, estimatedArea, fieldsFor, configuration,loadingQuantities,perimeterDescription,cleanTechnical} = require("../server/project-operations/specifications.cjs");
+const {dimensionPair,row:reportRow}=require('../server/project-operations/reports.cjs');
 const {PDFDocument} = require("pdf-lib");
 
 async function main() {
+  for(const locale of ['ar','en']){
+    const pair=reportRow([dimensionPair([530,950],locale)]);
+    assert.ok(pair.includes(`class="dimension-pair" dir="${locale==='ar'?'rtl':'ltr'}"`));
+    assert.ok(pair.indexOf('>530</bdi>')<pair.indexOf('>950</bdi>'));
+    assert.ok(!reportRow([dimensionPair(['<unsafe>',950],locale)]).includes('<unsafe>'));
+  }
   for (let mask=0;mask<16;mask++) {
     const sides=["right","left","top","bottom"].filter((_,index)=>mask&(1<<index));
     const result=perimeterDescription(sides,"ar");
@@ -205,7 +212,7 @@ async function main() {
     await api(orderPath+"/loading","POST",batch("LOAD-1",40),409);
     const report=await api(orderPath+"/report","POST",{kind:"loading",people:{loading:team[0].id}});
     assert.ok(report.html.includes("Total frames")&&report.html.includes("Total leaves"));
-    assert.ok(report.html.includes("1200 × 1400")&&report.html.includes("Frames")&&report.html.includes('dir="ltr">60'));
+    assert.ok(report.html.includes('dir="ltr"><bdi dir="ltr">1200</bdi><span>×</span><bdi dir="ltr">1400</bdi>')&&report.html.includes("Frames")&&report.html.includes('dir="ltr">60'));
     assert.ok(!report.html.includes("Quality inspections")&&!report.html.includes("Pre-shipment"));
     if (process.env.AM_OPERATIONS_TEST_PDF) {
       const materials=await api(orderPath+"/pdf","POST",{kind:"manufacturing",locale:"ar",classification:"materials",drawings:true,watermark:true});
@@ -405,7 +412,7 @@ async function main() {
     assert.equal((await api(compactEndpoint)).items[0].specification.technical.viewing,"Inside");
     assert.equal((compactReport.html.match(/class="work-group"/g)||[]).length,1);
     assert.equal((compactReport.html.match(/TEMPO 84/g)||[]).length,1);
-    assert.ok(compactReport.html.includes("التسكيك")&&compactReport.html.includes("تسكيك شمال DCL - تسكيك يمين KNG"));
+    assert.ok(compactReport.html.includes("التسكيك")&&compactReport.html.includes("يمين KNG - شمال DCL"));
     assert.ok(compactReport.html.includes("داخل الكتلة")&&compactReport.html.includes("السلك"));
     for (const detail of ["نوع الزجاج","سيكوريت","تكوين الزجاج / الحشو","6 mm reflective + 12 mm argon + 6 mm clear",
       "Reflective tempered","Clear tempered","أرجون","DWG-OPENING-01","Confirm site access","Protect finished faces","الربر بار","المكونات لكل فتحة"])
@@ -418,6 +425,7 @@ async function main() {
     sparseOrder[0].specification.technical.screen_material="Fiberglass";
     db.run("UPDATE ops_order_items SET specification=? WHERE id=?",[JSON.stringify(sparseOrder[0].specification),sparseOrder[0].id]);
     const combined=await api(compactEndpoint+"/report","POST",{kind:"manufacturing",classification:"materials",locale:"en",measurement_watermark:true});
+    assert.ok(combined.html.includes('Right lock KNG - Left lock DCL'));
     assert.equal((combined.html.match(/class="work-group"/g)||[]).length,1);
     assert.ok(combined.html.includes("Item 1 of 1")&&combined.html.includes("Specified for openings")&&combined.html.includes("MEASUREMENTS UNAPPROVED"));
     const different=structuredClone(sparseOrder[1].specification);
@@ -425,7 +433,8 @@ async function main() {
     db.run("UPDATE ops_order_items SET specification=? WHERE id=?",[JSON.stringify(different),sparseOrder[1].id]);
     const split=await api(compactEndpoint+"/report","POST",{kind:"manufacturing",classification:"materials",locale:"en"});
     assert.equal((split.html.match(/class="work-group"/g)||[]).length,2);
-    assert.ok(split.html.includes("Item 1 of 2")&&split.html.includes("Item 2 of 2")&&split.html.includes("break-before:page"));
+    assert.ok(split.html.includes("Item 1 of 2")&&split.html.includes("Item 2 of 2")&&split.html.includes('break-inside:avoid'));
+    assert.ok(!split.html.includes('break-before:page'));
     for (const row of sparseOrder) db.run("UPDATE ops_order_items SET specification=? WHERE id=?",[JSON.stringify(row.specification),row.id]);
     for (const stage of cat.approvalParts) await api(compactEndpoint+"/approvals","POST",{stage,approved:true});
     await api(compactEndpoint+"/approvals","POST",{stage:"manufacturing",approved:true});
@@ -446,7 +455,8 @@ async function main() {
     const approvalStatus=await api(compactEndpoint+"/report","POST",{kind:"approvals",locale:"en"});
     assert.ok(approvalStatus.html.includes("Approval Status")&&approvalStatus.html.includes("Approved"));
     const manifest=await api(compactEndpoint+"/report","POST",{kind:"loading",locale:"ar"});
-    assert.ok(manifest.html.includes("1100 × 1500")&&manifest.html.includes("1200 × 1500"));
+    assert.ok(manifest.html.includes('dir="rtl"><bdi dir="ltr">1100</bdi><span>×</span><bdi dir="ltr">1500</bdi>'));
+    assert.ok(manifest.html.includes('dir="rtl"><bdi dir="ltr">1200</bdi><span>×</span><bdi dir="ltr">1500</bdi>'));
     assert.ok(manifest.html.includes("الحلوق")&&manifest.html.includes("الضلف"));
     assert.ok(manifest.html.includes("أمر تحميل")&&manifest.html.includes("ضلف سلك"));
     const numberedLoading=await api(compactEndpoint);

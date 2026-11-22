@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from "react";
 import {queryString,useDebounce,useResource,localDate} from "../certificates/shared.jsx";
-import {ErrorMessage,Page,Pick,Table,Text,display,panelNames,quantity} from "./shared.jsx";
+import {DimensionPair,ErrorMessage,Page,Pick,Table,Text,display,panelNames,quantity} from "./shared.jsx";
 
 const stageNames={specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],materials:["اعتماد الخامات","Materials"],
   manufacturing:["التصنيع","Manufacturing"],qc:["فحص ما قبل الشحن","Pre-shipment QC"],loading:["التحميل","Loading"],maintenance:["الصيانة","Maintenance"],
@@ -100,7 +100,7 @@ export function QuantityTakeoff(props){
       <Table headers={[t("المشروع","Project"),t("البند / الفتحة","Item / opening"),...(mode==="loading"?[t("أمر التشغيل","Work order")]:[]),t("كمية الأعمال","Work quantity"),
         t("الوحدة","Unit"),t("العدد","Count"),t("المقاس مم","Size mm")]}
         rows={data.data.items.map(item=>[item.key,[item.project,<>{item.tag}<br/>{item.description}</>,...(mode==="loading"?[<>{item.order}<small className="pc-caption">{item.loading_references.join(" / ")}</small></>]:[]),<bdi>{quantity(item.quantity)}</bdi>,
-          unit(item.unit,uiLanguage),<bdi>{quantity(item.count)}</bdi>,<bdi>{item.width_mm!=null&&item.height_mm!=null?quantity(item.width_mm)+" × "+quantity(item.height_mm):"—"}</bdi>]])}
+          unit(item.unit,uiLanguage),<bdi>{quantity(item.count)}</bdi>,item.width_mm!=null&&item.height_mm!=null?<DimensionPair values={[quantity(item.width_mm),quantity(item.height_mm)]} locale={uiLanguage}/>:"—"]])}
         empty={t("لا توجد كميات في هذا النطاق.","No quantities in this scope.")}/><Page data={data.data} onPage={setPage} t={t}/></>}
     {ready&&<PdfOutput key={queryString(filters)} {...props} kind="quantities" filters={filters} disabled={data.pending||choices.pending}/>}
   </section>;

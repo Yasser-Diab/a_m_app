@@ -2231,7 +2231,10 @@ function dimensionText(row, unit = "cm", locale = "ar") {
   if (!width && !height) return "";
   const w = width ? (unit === "m" ? money(width / 100) : money(width)) : "";
   const h = height ? (unit === "m" ? money(height / 100) : money(height)) : "";
-  if (w && h) return `${FSI}${w} \u00d7 ${h} ${unitText}${PDI}`;
+  if (w && h) {
+    const start=locale==='ar'?'\u2067':'\u2066';
+    return `${start}\u2066${w}${PDI} \u00d7 \u2066${h}${PDI} ${FSI}${unitText}${PDI}${PDI}`;
+  }
   return `${FSI}${w || h} ${unitText}${PDI}`;
 }
 
