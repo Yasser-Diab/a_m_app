@@ -24,7 +24,8 @@ function deleteDocumentEverywhere(db,document,user){
   const changes=db.all('SELECT id,adjustment_id FROM ops_changes WHERE item_id IN (SELECT value FROM json_each(?))',[ids]);
   const adjustments=[...new Set(changes.map(change=>change.adjustment_id).filter(Boolean))];
   const orderRows=db.all('SELECT id,order_id FROM ops_order_items WHERE item_id IN (SELECT value FROM json_each(?))',[ids]);
-  const rowIds=encode(orderRows.map(row=>row.id)),orderIds=[...new Set(orderRows.map(row=>row.order_id))];
+  const rowIds=encode(orderRows.map(row=>row.id)),orderIds=[...new Set([...orderRows.map(row=>row.order_id),
+    ...db.all('SELECT id FROM ops_orders WHERE source_document_id=?',[document.id]).map(row=>row.id)])];
   db.run('DELETE FROM ops_load_lines WHERE order_item_id IN (SELECT value FROM json_each(?))',[rowIds]);
   db.run('DELETE FROM ops_order_items WHERE id IN (SELECT value FROM json_each(?))',[rowIds]);
   for(const orderId of orderIds){

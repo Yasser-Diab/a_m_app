@@ -71,3 +71,8 @@
 .ops-side-editor { display:grid;gap:4px;min-inline-size:95px }
 .ops-side-editor label { display:flex;align-items:center;gap:5px }
 .ops-dimension-pair,.ops-dimension-part{display:inline-flex;align-items:baseline;gap:.28em;unicode-bidi:isolate;white-space:nowrap}
+.ops-order-picker{max-height:48vh;overflow:auto;border:1px solid var(--border,#665332);border-radius:8px}
+.ops-order-picker thead{position:sticky;top:0;z-index:1;background:var(--panel,#202b33)}
+.ops-order-picker input[type=number]{width:100px;max-width:100%;padding:7px}
+.ops-order-picker input[type=checkbox]{inline-size:18px;block-size:18px;min-height:0;padding:0}
+.ops-coverage{border:1px solid #a58038;border-radius:8px;padding:12px;background:#d8aa3c0b}

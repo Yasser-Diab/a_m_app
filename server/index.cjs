@@ -9972,6 +9972,7 @@ async function createServer(options = {}) {
   });
 
   app.put("/api/documents/:id", (req, res) => {
+    return database.transaction(()=>{
     const documentId = Number(req.params.id);
     if (isOpsAdjustment(database,documentId))
       return res.status(409).json({error:"Review this linked invoice adjustment in Project Operations"});
@@ -10154,7 +10155,9 @@ async function createServer(options = {}) {
     );
     if (updated.status==="approved" && current.status!=="approved" && ["invoice","price_offer"].includes(updated.document_type))
       database.run("INSERT OR REPLACE INTO ops_source_approvals(document_id,approved_on) VALUES(?,DATE('now'))",[documentId]);
+    require('./project-operations/source-refresh.cjs').syncSourceProjectMetadata(database,current,updated,certificateSessionUser(database,req));
     res.json(updated);
+    });
   });
 
   app.delete("/api/documents/:id", (req, res) => {

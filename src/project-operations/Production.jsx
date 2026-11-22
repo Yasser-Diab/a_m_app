@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from "react";
-import {Dialog,localDate,newKey,useDebounce,useResource} from "../certificates/shared.jsx";
+import {Dialog,localDate,newKey,queryString,useResource} from "../certificates/shared.jsx";
 import {DimensionPair,ErrorMessage,Page,Pick,Suggest,Table,SearchableTable,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
 import ProjectSignatures from "./ProjectSignatures.jsx";
 import ReportEditor from './ReportEditor.jsx';
@@ -32,17 +32,16 @@ export default function Production(props) {
         <button type="button" onClick={()=>setCreate("maintenance")}>{t("أمر صيانة جديد","New maintenance order")}</button>
       </>}
     </div>
-    <SourceRefresh {...props}/>
     {totals&&<div className="pc-cards">
       {[[t("المطلوب للتحميل","Required"),totals.required],[t("محمل","Loaded"),totals.loaded],[t("متبقي","Remaining"),totals.remaining],
         [t("اكتمال التحميل","Loading completion"),completion]].map(([label,value])=><div key={label}><span>{label}</span>
           <strong dir="ltr">{typeof value==="number"?quantity(value):value}</strong></div>)}
     </div>}
     <ErrorMessage error={orders.error||loading.error||active.error}/>
-    <Table headers={[t("رقم الأمر","Order no."),t("نوع العمل","Work type"),t("الحالة","Status"),t("موعد التسليم","Required by")]}
+    <Table headers={[t("رقم الأمر","Order no."),t("الفاتورة / عرض السعر","Invoice / quotation"),t("نوع العمل","Work type"),t("الحالة","Status"),t("موعد التسليم","Required by")]}
       empty={t("لا توجد أوامر إنتاج.","No production orders.")}
       rows={(orders.data?.items||[]).map((row)=>[row.id,[<button type="button" className="pc-name" onClick={()=>setOrder(row.id)}>
-        {row.reference}</button>,row.kind==="maintenance"?t("صيانة","Maintenance"):t("تصنيع","Manufacturing"),
+        {row.reference}</button>,<bdi>{row.source_reference?(row.source_type==='invoice'?t('فاتورة','Invoice'):t('عرض سعر','Quotation'))+' '+row.source_reference:'—'}{row.source_title?' · '+row.source_title:''}</bdi>,row.kind==="maintenance"?t("صيانة","Maintenance"):t("تصنيع","Manufacturing"),
         row.completed_on?t("مكتمل","Completed"):row.kind==="maintenance"?
           (row.status==="draft"?t("مفتوح","Open"):t("ملغى","Cancelled")):display(states,row.status,t),
         <bdi>{row.required_date||"—"}</bdi>]])}/>
@@ -53,53 +52,60 @@ export default function Production(props) {
   </>;
 }
 
-function CreateOrder({request,path,t,reload,close,onCreated,maintenance}) {
-  const [search,setSearch]=useState("");
-  const q=useDebounce(search);
-  const list=usePaged(request,path+"/items",{q},0);
-  const [selected,setSelected]=useState({});
-  const [commandKey]=useState(newKey);
-  const [required,setRequired]=useState("");
-  const [instructions,setInstructions]=useState("");
-  const [assignee,setAssignee]=useState("");
-  const team=useResource(request,maintenance?path+"/people":null);
-  const action=useAction(request,(result)=>{onCreated(result);reload();});
-  const pick=(item,amount)=>{
-    const next={...selected};
-    if (amount==null) delete next[item.id]; else next[item.id]={code:openingDescription(item),quantity:amount};
-    setSelected(next);
-  };
-  const visible=(list.data?.items||[]).filter((item)=>item.active&&(maintenance||item.system));
-  const defaultAmount=(item)=>item.technical.quantity||(maintenance?1:"");
-  return <Dialog t={t} wide title={maintenance?t("أمر صيانة جديد","New maintenance order"):t("أمر تشغيل جديد","New work order")} onClose={close}>
-    <form className="pc-stack" onSubmit={(event)=>{
-      event.preventDefault();action.run(path+"/orders","POST",{command_key:commandKey,required_date:required,
-        kind:maintenance?"maintenance":"manufacturing",instructions,assignee_id:assignee,
-        items:Object.entries(selected).map(([item_id,{quantity}])=>({item_id,quantity}))});
+function CreateOrder({request,path,t,reload,close,onCreated,maintenance,ctx,preferred,onPrepareSource}) {
+  const sources=[...new Map([...ctx.boqs,...ctx.linked_boqs].map(source=>[source.id,source])).values()].sort((a,b)=>b.id-a.id);
+  const [sourceId,setSource]=useState(()=>String(sources.find(source=>source.id===preferred?.id)?.id||sources[0]?.id||''));
+  const linked=ctx.linked_boqs.some(source=>String(source.id)===sourceId);
+  const list=useResource(request,linked?path+'/order-items'+queryString({boq_id:sourceId,kind:maintenance?'maintenance':'manufacturing'}):null);
+  const sourceOrders=useResource(request,linked?path+'/orders'+queryString({source_document_id:sourceId}):null);
+  const existing=!maintenance&&sourceOrders.data?.items.find(order=>String(order.source_document_id)===sourceId&&order.kind==='manufacturing');
+  const [search,setSearch]=useState(''),[selected,setSelected]=useState({});
+  const initialized=useRef(null);
+  const eligible=(list.data?.items||[]).filter(item=>item.active&&(maintenance||item.system)&&item.available_quantity>0);
+  useEffect(()=>{
+    if(!list.data||initialized.current===sourceId)return;
+    initialized.current=sourceId;
+    setSelected(maintenance?{}:Object.fromEntries(eligible.map(item=>[item.id,item.available_quantity])));
+  },[list.data,sourceId,maintenance]);
+  const [commandKey,setCommandKey]=useState(newKey),[required,setRequired]=useState(''),[instructions,setInstructions]=useState(''),[assignee,setAssignee]=useState('');
+  const team=useResource(request,maintenance?path+'/people':null);
+  const action=useAction(request,result=>{onCreated(result);reload();});
+  const attach=useAction(request,reload);
+  const normalized=value=>String(value||'').normalize('NFKC').toLocaleLowerCase();
+  const visible=eligible.filter(item=>normalized([openingDescription(item),item.technical.tag,item.code].join(' ')).includes(normalized(search)));
+  const pick=(item,amount)=>setSelected(current=>{const next={...current};if(amount==null)delete next[item.id];else next[item.id]=amount;return next;});
+  const count=Object.keys(selected).length,total=Object.values(selected).reduce((sum,value)=>sum+(Number(value)||0),0);
+  const unconfigured=(list.data?.items||[]).filter(item=>item.active&&!item.system&&item.available_quantity>0).length;
+  return <Dialog t={t} wide title={maintenance?t('أمر صيانة جديد','New maintenance order'):t('أمر تشغيل جديد','New work order')} onClose={close}>
+    <form className="pc-stack" onSubmit={event=>{
+      event.preventDefault();action.run(path+'/orders','POST',{command_key:commandKey,source_document_id:Number(sourceId),include_all:!maintenance&&count===eligible.length&&!unconfigured&&eligible.every(item=>Number(selected[item.id])===Number(item.technical.quantity)),required_date:required,
+        kind:maintenance?'maintenance':'manufacturing',instructions,assignee_id:assignee,items:Object.entries(selected).map(([item_id,quantity])=>({item_id,quantity}))});
     }}>
+      <Pick label={t('الفاتورة / عرض السعر لهذا الأمر','Invoice / quotation for this order')} value={sourceId} required placeholder=""
+        onChange={id=>{if(id===sourceId)return;setSource(id);setCommandKey(newKey());setSelected({});setSearch('');initialized.current=null;}}
+        items={sources.map(source=>[source.id,(source.document_type==='invoice'?t('فاتورة','Invoice'):t('عرض سعر','Quotation'))+' '+source.operation_no+(source.title?' · '+source.title:'')])}/>
+      {existing?<div className="pc-stack"><p>{t('لهذا المستند أمر تشغيل قائم. افتحه لتحديثه أو إضافة الفتحات المتبقية.','This document already has a work order. Open it to update it or include the remaining openings.')}</p>
+        <button type="button" className="primary" onClick={()=>onCreated(existing)}>{t('فتح أمر التشغيل','Open work order')} <bdi>{existing.reference}</bdi></button></div>:!linked?<button type="button" disabled={attach.busy} onClick={()=>attach.run(path+'/boqs','POST',{boq_id:Number(sourceId)})}>
+        {t('استيراد بنود هذا المستند','Import this document’s items')}</button>:<>
       <div className="pc-form">
-        <Text type="date" label={t("موعد التسليم","Required by")} value={required} onChange={setRequired}/>
-        {maintenance&&<>
-          <Pick label={t("مسؤول الصيانة","Assigned to")} value={assignee} onChange={setAssignee}
-            items={(team.data||[]).map((person)=>[person.id,[person.name,person.position].filter(Boolean).join(" · ")])}/>
-          <Text label={t("أعمال الصيانة المطلوبة","Maintenance instructions")} value={instructions} onChange={setInstructions}/>
-        </>}
-        <Text label={t("بحث في البنود","Find work items")} value={search} onChange={(value)=>{setSearch(value);list.setPage(1);}}/>
+        <Text type="date" label={t('موعد التسليم','Required by')} value={required} onChange={setRequired}/>
+        {maintenance&&<><Pick label={t('مسؤول الصيانة','Assigned to')} value={assignee} onChange={setAssignee}
+          items={(team.data||[]).map(person=>[person.id,[person.name,person.position].filter(Boolean).join(' · ')])}/>
+          <Text label={t('أعمال الصيانة المطلوبة','Maintenance instructions')} value={instructions} onChange={setInstructions}/></>}
+        <Text label={t('بحث في البنود','Find work items')} value={search} onChange={setSearch}/>
       </div>
-      {visible.length>0&&<button type="button" onClick={()=>setSelected({...selected,...Object.fromEntries(visible
-        .filter((item)=>defaultAmount(item)).map((item)=>[item.id,selected[item.id]||{code:openingDescription(item),quantity:defaultAmount(item)}]))})}>
-        {t("تحديد بنود الصفحة","Select items on this page")}</button>}
-      {visible.map((item)=><div key={item.id} className="pc-toolbar ops-line-choice">
-        <label className="pc-check"><input type="checkbox" checked={Boolean(selected[item.id])}
-          onChange={(event)=>pick(item,event.target.checked?defaultAmount(item):null)}/>
-          <bdi>{openingDescription(item)}</bdi></label>
-        {selected[item.id]&&<Text label={maintenance?t("العدد المطلوب","Service count"):t("عدد الفتحات","Opening count")} type="number" min={1} step={1} required
-          value={selected[item.id].quantity} onChange={(amount)=>pick(item,amount)}/>}
-      </div>)}
-      <Page data={list.data} onPage={list.setPage} t={t}/>
-      <p className="pc-caption">{t("البنود المختارة","Selected items")} {Object.values(selected).map(({code})=>code).join(", ")||"—"}</p>
-      <ErrorMessage error={action.error||list.error||team.error}/>
-      <button type="submit" className="primary" disabled={action.busy||!Object.keys(selected).length}>{t("إنشاء الأمر","Create order")}</button>
+      {unconfigured>0&&<p>{t(`${unconfigured} بند يحتاج تحديد نوع الفتح قبل إدراجه في أمر التصنيع.`,`${unconfigured} items need an opening type before inclusion in a manufacturing order.`)}{' '}
+        {onPrepareSource&&<button type="button" onClick={()=>onPrepareSource(sources.find(source=>String(source.id)===sourceId))}>{t('تجهيز المواصفات','Prepare specifications')}</button>}</p>}
+      <div className="pc-toolbar"><strong role="status">{t(`المحدد: ${count} بند / ${total} فتحة`,`Selected: ${count} items / ${total} openings`)}</strong>
+        <button type="button" onClick={()=>setSelected(current=>({...current,...Object.fromEntries(visible.map(item=>[item.id,current[item.id]??item.available_quantity]))}))}>{t('تحديد كل نتائج البحث','Select all matching items')}</button>
+        <button type="button" onClick={()=>setSelected({})}>{t('إلغاء التحديد','Clear selection')}</button></div>
+      <div className="ops-order-picker"><Table headers={[t('تحديد','Select'),t('وصف الفتحة','Opening description'),t('المتاح','Available'),t('عدد الأمر','Order count')]}
+        empty={list.pending?t('جارٍ التحميل…','Loading…'):t('لا توجد فتحات متاحة.','No available openings.')}
+        rows={visible.map(item=>[item.id,[<input type="checkbox" aria-label={t('تحديد ','Select ')+openingDescription(item)} checked={Object.hasOwn(selected,item.id)} onChange={event=>pick(item,event.target.checked?item.available_quantity:null)}/>,
+          openingDescription(item),quantity(item.available_quantity),Object.hasOwn(selected,item.id)?<input type="number" aria-label={t('عدد ','Count ')+openingDescription(item)} min={1} max={item.available_quantity} step={1} required value={selected[item.id]} onChange={event=>pick(item,event.target.value)}/>:null]])}/></div>
+      <button type="submit" className="primary" disabled={action.busy||list.pending||sourceOrders.pending||!count}>{t(`إنشاء الأمر (${total} فتحة)`,`Create order (${total} openings)`)}</button>
+      </>}
+      <ErrorMessage error={action.error||attach.error||list.error||sourceOrders.error||team.error}/>
     </form>
   </Dialog>;
 }
@@ -150,6 +156,7 @@ function MaintenanceDetails({order,path,request,t,can,reload,...props}) {
 
 function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport,ctx}) {
   const [dialog,setDialog]=useState(null);
+  const [copyApprovals,setCopyApprovals]=useState(false);
   const [reason,setReason]=useState("");
   const action=useAction(request,reload);
   const people=useResource(request,path+"/people",revision);
@@ -158,6 +165,7 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
   const loadState=({required,loaded})=>loaded===required?t("مكتمل","Complete"):loaded?t("جزئي","Partial"):t("لم يحمّل","Not loaded");
   return <section className="ops-section pc-stack">
     <div className="pc-toolbar"><h3>{order.reference}</h3><span className="pc-chip">{display(states,order.status,t)}</span>
+      {order.source&&<bdi>{(order.source.document_type==='invoice'?t('فاتورة','Invoice'):t('عرض سعر','Quotation'))+' '+order.source.operation_no+(order.source.title?' · '+order.source.title:'')}</bdi>}
       {can("edit")&&["draft","released"].includes(order.status)&&!order.loads.length&&<button type="button" disabled={action.busy}
         onClick={()=>action.run(endpoint+"/refresh","POST",{})}>{t("تحديث المواصفات","Refresh draft specifications")}</button>}
       {can("release")&&order.status==="draft"&&<button type="button" className="primary" disabled={action.busy}
@@ -171,7 +179,27 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
         <button type="button" onClick={()=>setDialog("loadingReport")}>{t("أمر تحميل","Loading order")}</button>
         <button type="button" onClick={()=>setDialog("approvalReport")}>{t("تقرير الاعتمادات","Approval status report")}</button></>}
     </div>
+    {order.source_document_id&&<SourceRefresh {...{ctx,path,request,can,t,reload}} documentId={order.source_document_id}/>}
     <ErrorMessage error={action.error||people.error}/>
+    {order.coverage&&<div className="pc-toolbar ops-coverage">
+      <strong>{t(`يشمل الأمر ${order.coverage.included_quantity} من ${order.coverage.source_quantity} فتحة في المستند`,
+        `Order includes ${order.coverage.included_quantity} of ${order.coverage.source_quantity} source openings`)}</strong>
+      {order.coverage.available_quantity>0&&can('edit')&&['draft','released'].includes(order.status)&&!order.loads.length&&
+        <button type="button" onClick={()=>{setCopyApprovals(false);setDialog('includeRemaining');}}>
+          {t(`إضافة الفتحات المتبقية (${order.coverage.available_quantity})`,`Include remaining openings (${order.coverage.available_quantity})`)}</button>}
+      {order.coverage.unconfigured_quantity>0&&<span>{t(`${order.coverage.unconfigured_quantity} فتحة تحتاج تجهيز المواصفات`,`${order.coverage.unconfigured_quantity} openings need specifications`)}</span>}
+    </div>}
+    {dialog==='includeRemaining'&&<Dialog t={t} wide title={t('إضافة الفتحات المتبقية لنفس المستند','Include remaining openings from this source')} onClose={()=>setDialog(null)}>
+      <p>{t(`ستتم إضافة ${order.coverage.available_quantity} فتحة إلى ${order.reference}.`,`${order.coverage.available_quantity} openings will be added to ${order.reference}.`)}</p>
+      <div className="ops-order-picker"><Table headers={[t('وصف الفتحة','Opening description'),t('المقاس مم','Size mm'),t('العدد','Count')]}
+        rows={order.coverage.remaining_items.map(item=>[item.id,[item.description,<DimensionPair values={[item.width_mm,item.height_mm]} locale={uiLanguage}/>,quantity(item.quantity)]])}/></div>
+      {can('release')&&<label className="pc-check"><input type="checkbox" checked={copyApprovals} onChange={event=>setCopyApprovals(event.target.checked)}/>
+        {t('راجعت الفتحات المضافة وأطبق عليها الاعتمادات الحالية لهذا الأمر','I reviewed the added openings and apply this order’s existing approvals to them')}</label>}
+      {!copyApprovals&&<p>{t('تبقى اعتمادات الفتحات السابقة محفوظة وتحتاج الفتحات المضافة إلى الاعتماد.','Existing opening approvals are preserved; added openings need approval.')}</p>}
+      <ErrorMessage error={action.error}/><div className="pc-toolbar"><button type="button" className="primary" disabled={action.busy}
+        onClick={()=>action.run(endpoint+'/include-remaining','POST',{fingerprint:order.coverage.fingerprint,copy_approvals:copyApprovals}).then(result=>{if(result)setDialog(null);})}>
+        {t('تأكيد الإضافة','Confirm inclusion')}</button><button type="button" disabled={action.busy} onClick={()=>setDialog(null)}>{t('إلغاء','Cancel')}</button></div>
+    </Dialog>}
     <StageApprovals {...{order,endpoint,request,t,can,reload}}/>
     <LoadingExtras key={order.id+':'+order.loading_settings_version} {...{order,endpoint,request,t,can,reload}}/>
     <Table headers={[t("الفتحة","Opening"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),t("المحمل","Loaded"),t("المتبقي","Remaining"),t("التقدم","Progress")]}

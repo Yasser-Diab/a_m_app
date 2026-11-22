@@ -46,12 +46,12 @@ function refreshSource(db,projectId,body,user){
   const savedFor=require('./customer-defaults.cjs').sourceDefaults(db,project.customer_id);
   const beforeOrders=refreshable.map(order=>({...order,items:db.all('SELECT * FROM ops_order_items WHERE order_id=?',[order.id])}));
   const previous=new Map(old.map(item=>[item.id,parse(item.technical,{})]));
-  const owners=beforeOrders.filter(order=>order.kind!=='maintenance'&&old.filter(item=>item.active).every(item=>
-    order.items.some(line=>line.item_id===item.id&&line.quantity===previous.get(item.id).quantity)));
+  const owners=beforeOrders.filter(order=>order.kind!=='maintenance'&&(order.source_scope==='all'&&order.source_document_id===source.id||old.filter(item=>item.active).every(item=>
+    order.items.some(line=>line.item_id===item.id&&line.quantity===previous.get(item.id).quantity))));
   const owner=owners.length===1?owners[0]:null;
   const changed=[];
   for(const {row,item}of matches){
-    const values=itemValues(row),saved=savedFor(values.description),standard=parse(saved?.technical,{}),base=item?parse(item.technical,{}):standard;
+    const values=itemValues(row),saved=require('./customer-defaults.cjs').projectDefault(db,projectId,values.description)||savedFor(values.description),standard=parse(saved?.technical,{}),base=item?parse(item.technical,{}):standard;
     const technical=openingDefaults(item?.category||saved?.category,{...base,building:row.building_unit||'',room:row.floor_apartment||'',
       profile:row.profile_spec||base.profile||'',infill:row.glass_spec||base.infill||'',color:row.color||base.color||'',width_mm:values.width_mm,height_mm:values.height_mm,
       quantity:Number.isInteger(row.item_count)&&row.item_count>0?row.item_count:null});
@@ -99,4 +99,14 @@ function refreshSource(db,projectId,body,user){
   record(db,user,projectId,'source_document_refreshed',source.id,{...plan.summary,before:old,orders:beforeOrders,items:changed.map(item=>item.id)});
   return {...plan.summary,version:state.version+1};
 }
-module.exports={previewSource,refreshSource};
+function syncSourceProjectMetadata(db,before,after,user){
+  if(before.party_id!==after.party_id||!after.project?.trim()||before.project===after.project)return;
+  const projects=db.all('SELECT DISTINCT project_id FROM ops_project_boqs WHERE document_id=?',[after.id]);
+  for(const {project_id} of projects){
+    const project=getProject(db,project_id);
+    if(project.customer_id!==after.party_id||!projectLookupKeys(project).has(lookup(before.project)))continue;
+    const updated=require('../certificate-projects.cjs').updateProject(db,project,{name:after.project});
+    record(db,user||{id:null,username:'Document editor'},project_id,'project_source_metadata_updated',after.id,{before:project,after:updated});
+  }
+}
+module.exports={previewSource,refreshSource,syncSourceProjectMetadata};

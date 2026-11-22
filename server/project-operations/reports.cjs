@@ -92,8 +92,9 @@ function projectBlock(db,project,customer,state,order,locale,branding) {
   const organization=(locale==="ar"?branding.companyNameAr:branding.companyNameEn)||branding.companyName;
   const representatives=people(db,project.id).map((person)=>row([person.name,person.side==="company"?(person.company||organization):person.company,person.position]));
   const sources=new Set(order.items.map(({specification})=>specification.source_document_id||state.boq_id));
-  const projectBoqs=db.all("SELECT document_id,snapshot FROM ops_project_boqs WHERE project_id=?",[project.id])
-    .filter(({document_id})=>sources.has(document_id)).map(({snapshot})=>JSON.parse(snapshot));
+  const projectBoqs=db.all(`SELECT b.document_id,b.snapshot,d.operation_no,d.document_type FROM ops_project_boqs b
+    JOIN documents d ON d.id=b.document_id WHERE b.project_id=?`,[project.id])
+    .filter(({document_id})=>sources.has(document_id)).map(({snapshot,...source})=>({...JSON.parse(snapshot),...source}));
   return `<section>${grid([
     [t("المشروع","Project"),project.name],[t("رمز المشروع","Project code"),project.code],
     [t("كود المشروع لدى العميل","Customer project code"),project.customer_project_code],

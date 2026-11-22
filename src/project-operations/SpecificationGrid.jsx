@@ -45,7 +45,7 @@ function optionPairs(row,key,field,catalogue,locale,t) {
     .map((value)=>[value,technicalText(value,locale)]);
 }
 
-export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,can,request,path,reload,openItem,pageKey,pagination,fullscreen=false,onFullscreenChange,loading=false,loadError}) {
+export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,can,request,path,reload,openItem,pageKey,pagination,fullscreen=false,onFullscreenChange,loading=false,loadError,ctx}) {
   const [patches,setPatches]=useState({});
   const [selected,setSelected]=useState(null);
   const [editing,setEditing]=useState(null);
@@ -202,6 +202,17 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
         const entered=typed?raw:normalize(row,key,raw);
         if (JSON.stringify(entered)===JSON.stringify(value(row,key)??"")) continue;
         const original=items.find(item=>item.id===row.id);
+        if(['opening_description','system'].includes(key)){
+          const description=key==='opening_description'?entered:row.opening_description||row.commercial.description;
+          const system=key==='system'?entered:row.system;
+          const saved=ctx?.specification_defaults?.find(template=>template.description===description&&(!row.category||template.category===row.category)&&(!system||template.system===system));
+          if(saved){
+            if(!row.category)next[row.id]=editSpecification(original,next[row.id],'category',saved.category);
+            if(!system)next[row.id]=editSpecification(original,next[row.id],'system',saved.system);
+            for(const [name,input] of Object.entries(saved.technical))
+              if(!Object.hasOwn(next[row.id]?.technical||{},name))next[row.id]=editSpecification(original,next[row.id],name,input);
+          }
+        }
         next[row.id]=editSpecification(original,next[row.id],key,entered);
         changed.set(p.row,applySpecificationEdits(original,next[row.id]));
       }
@@ -415,7 +426,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
                 cancel={()=>{setEditing(null);focus(p);}}
                 next={r<records.length-1?{row:r+1,col:c}:p} right={c<columns.length-1?{row:r,col:c+1}:p}/>:<><bdi className="table-search-text"><SearchMatchText value={show(row,key)} query={searchOpen?searchText:''}
                   active={currentMatch?.rowId===String(row.id)&&currentMatch?.columnKey===key}/></bdi>
-                  {key==='opening_description'&&Boolean(row.defaults_applied)&&<small>{t('مواصفات العميل المحفوظة · قابلة للتعديل','Saved customer defaults · editable')}</small>}</>}
+                  {key==='opening_description'&&Boolean(row.defaults_applied)&&<small>{row.defaults_applied===2?t('مواصفات المشروع المحفوظة · قابلة للتعديل','Saved project defaults · editable'):t('مواصفات العميل المحفوظة · قابلة للتعديل','Saved customer defaults · editable')}</small>}</>}
             </td>;
           })}
         </tr>;})}

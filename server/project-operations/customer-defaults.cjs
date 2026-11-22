@@ -28,6 +28,24 @@ function sourceDefaults(db,customer){
     HAVING COUNT(DISTINCT i.category||':'||i.system)>1`,[customer]).map(row=>row.description));
   return description=>{const saved=exact.get(description);return saved&&!ambiguous.has(description)?types.get(saved.category+':'+saved.system)||saved:null;};
 }
+function projectDefault(db,project,description,category,system){
+  if(!String(description||'').trim())return null;
+  return db.get(`SELECT * FROM ops_project_specs WHERE project_id=? AND description=?
+    AND (?='' OR category=?) AND (?='' OR system=?) ORDER BY save_sequence DESC,updated_at DESC,rowid DESC LIMIT 1`,
+    [project,description,category||'',category||'',system||'',system||'']);
+}
+function rememberProjectSpecification(db,item,user){
+  const description=openingDescription(item);
+  if(!description.trim()||!item.system)return;
+  const technical={...reusableTechnical(item.technical)};
+  for(const key of ['subframe','panel_measurement_basis','fixed_width_mm','fixed_height_mm','leaf_width_mm','leaf_height_mm'])
+    if(Object.hasOwn(item.technical,key))technical[key]=item.technical[key];
+  db.run(`INSERT INTO ops_project_specs(project_id,description,category,system,technical,updated_by,save_sequence)
+    VALUES(?,?,?,?,?,?,(SELECT COALESCE(MAX(save_sequence),0)+1 FROM ops_project_specs WHERE project_id=?))
+    ON CONFLICT(project_id,description,category,system) DO UPDATE SET technical=excluded.technical,updated_by=excluded.updated_by,
+      save_sequence=excluded.save_sequence,updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+    [item.project_id,description,item.category,item.system,encode(technical),user?.id||null,item.project_id]);
+}
 function initializeDefaults(db,migrateOverrides){
   for(const row of db.all('SELECT * FROM ops_customer_specs ORDER BY rowid DESC'))
     db.run(`INSERT OR IGNORE INTO ops_customer_type_specs(customer_id,category,system,technical) VALUES(?,?,?,?)`,
@@ -42,4 +60,4 @@ function initializeDefaults(db,migrateOverrides){
   }
 }
 const openingDescription=item=>String(item?.opening_description||item?.commercial?.description||item?.technical?.tag||item?.code||'');
-module.exports={openingFields,reusableTechnical,typeDefault,sourceDefaults,initializeDefaults,same,openingDescription,normalizeLocks};
+module.exports={openingFields,reusableTechnical,typeDefault,sourceDefaults,projectDefault,rememberProjectSpecification,initializeDefaults,same,openingDescription,normalizeLocks};

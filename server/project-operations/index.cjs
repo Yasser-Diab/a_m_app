@@ -35,6 +35,9 @@ function initializeOperations(db) {
     addColumn("ops_people","signature_label","TEXT NOT NULL DEFAULT ''");
     db.run("UPDATE ops_people SET side=CASE WHEN user_id IS NOT NULL THEN 'company' ELSE 'client' END WHERE side=''");
     addColumn("ops_orders","command_key","TEXT");
+    addColumn("ops_orders","source_document_id","INTEGER REFERENCES documents(id)");
+    addColumn("ops_orders","source_scope","TEXT NOT NULL DEFAULT 'selected' CHECK(source_scope IN ('selected','all'))");
+    addColumn("ops_project_specs","save_sequence","INTEGER NOT NULL DEFAULT 0");
     addColumn("ops_orders","kind","TEXT NOT NULL DEFAULT 'manufacturing' CHECK(kind IN ('manufacturing','maintenance'))");
     addColumn("ops_orders","service_data","TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(service_data))");
     addColumn("ops_orders","loading_settings","TEXT NOT NULL DEFAULT '{\"enabled\":false,\"rows\":[]}' CHECK(json_valid(loading_settings))");
@@ -53,8 +56,22 @@ function initializeOperations(db) {
       db.run(`UPDATE ops_items SET source_document_id=(SELECT boq_id FROM ops_projects p WHERE p.project_id=ops_items.project_id)
         WHERE source_document_id IS NULL`);
     db.exec("CREATE INDEX IF NOT EXISTS ops_item_source ON ops_items(project_id,source_document_id,id)");
+    db.run(`UPDATE ops_orders SET source_document_id=(SELECT MIN(i.source_document_id) FROM ops_order_items oi JOIN ops_items i ON i.id=oi.item_id
+      WHERE oi.order_id=ops_orders.id HAVING COUNT(DISTINCT i.source_document_id)=1) WHERE source_document_id IS NULL`);
+    db.exec("CREATE INDEX IF NOT EXISTS ops_order_source ON ops_orders(project_id,source_document_id,kind)");
     specs.initializeSystems(db);
     require('./customer-defaults.cjs').initializeDefaults(db,migrateOverrides);
+    const defaults=require('./customer-defaults.cjs');
+    const seeded=new Map();
+    for(const item of db.all(`SELECT i.*,MAX(a.id) AS last_save FROM ops_items i LEFT JOIN ops_audit a ON a.entity_id=i.id
+      AND a.project_id=i.project_id AND a.action IN('specification_updated','opening_description_updated')
+      WHERE i.active=1 AND i.system<>'' AND NOT EXISTS(SELECT 1 FROM ops_project_specs s WHERE s.project_id=i.project_id)
+      GROUP BY i.id ORDER BY last_save DESC,i.id DESC`)){
+      const current={...item,commercial:parse(item.commercial,{}),technical:parse(item.technical,{})};
+      const key=encode([item.project_id,defaults.openingDescription(current),item.category,item.system]);
+      if(!seeded.has(key))seeded.set(key,current);
+    }
+    for(const current of [...seeded.values()].reverse())defaults.rememberProjectSpecification(db,current);
   });
 }
 
@@ -172,6 +189,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
     return {id:person.id};
   },true);
   get(base+"/items",(req,_,id)=>core.itemPage(db,id,req.query));
+  get(base+'/order-items',(req,_,id)=>production.availableItems(db,id,req.query));
   get(base+"/specification-groups",(req,_,id)=>core.specificationGroups(db,id,req.query));
   get(base+"/items/:itemId",(req,_,id)=>{
     const current=item(req,id);
@@ -246,6 +264,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   post(base+"/orders/:orderId/complete","ops_edit",(req,access,id)=>
     production.completeService(db,order(req,id),req.body,access.user));
   post(base+"/orders/:orderId/refresh","ops_edit",(req,access,id)=>production.refreshDraftOrder(db,order(req,id),access.user));
+  post(base+'/orders/:orderId/include-remaining','ops_edit',(req,access,id)=>production.includeRemaining(db,order(req,id),req.body,access));
   post(base+"/orders/:orderId/inspections","ops_qc",(req,access,id)=>production.inspect(db,order(req,id),req.body,access));
   post(base+"/orders/:orderId/approvals","ops_release",(req,access,id)=>production.reviewStage(db,order(req,id),req.body,access));
   post(base+"/orders/:orderId/loading","ops_load",(req,access,id)=>production.loadBatch(db,order(req,id),req.body,access.user));

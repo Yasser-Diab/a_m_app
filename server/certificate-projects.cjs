@@ -200,6 +200,15 @@ function updateProject(database, project, body) {
   if (project.historical_only && (address || searchName !== lookup(project.name))) delete raw.workbook_project_missing;
   database.run(`UPDATE cert_projects SET name=?,search_name=?,alternate_name=?,address=?,contract_ref=?,contract_date=?,raw_json=? WHERE id=?`,
     [name,searchName,alternateName,address,contract,contractDate,encode(raw),project.id]);
+  if(database.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ops_projects'")){
+    const state=database.get('SELECT details FROM ops_projects WHERE project_id=?',[project.id]);
+    if(state){
+      const details=parse(state.details,{}),before=encode(details);
+      for(const [key,value,previous] of [['address',address,project.address],['contract_ref',contract,project.contract_ref]])
+        if(Object.hasOwn(body,key)&&(!details[key]||details[key]===previous))details[key]=value;
+      if(encode(details)!==before)database.run('UPDATE ops_projects SET details=?,version=version+1 WHERE project_id=?',[encode(details),project.id]);
+    }
+  }
   return getProject(database,project.id);
 }
 

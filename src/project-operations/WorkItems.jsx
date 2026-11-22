@@ -144,7 +144,7 @@ function Commercial({values,setValues,t}) {
   </div>;
 }
 
-function ItemDialog({mode,item,close,request,path,catalogue,uiLanguage,t,can,reload,apiBase,session,boqId}) {
+function ItemDialog({mode,item,close,request,path,catalogue,uiLanguage,t,can,reload,apiBase,session,boqId,ctx}) {
   const [draft,setDraft]=useState(()=>({...item,technical:item?.technical||{},values:item?.commercial||{},reason:"",remember:false}));
   const [view,setView]=useState("technical");
   const action=useAction(request,()=>{close();reload();});
@@ -162,7 +162,11 @@ function ItemDialog({mode,item,close,request,path,catalogue,uiLanguage,t,can,rel
     {(view==="technical")&&<form className="pc-stack" onSubmit={submit}>
       <fieldset disabled={!can("edit")||action.busy||mode!=="new"&&!item.active}>
         {mode==='new'?<Text label={t("كود البند","Item code")} value={draft.code} required onChange={value=>change('code',value)}/>:
-          <><Text label={t("وصف الفتحة","Opening description")} value={draft.opening_description||draft.commercial.description} onChange={value=>change('opening_description',value)}/>
+          <><Text label={t("وصف الفتحة","Opening description")} value={draft.opening_description||draft.commercial.description} onChange={value=>{
+            const saved=ctx?.specification_defaults?.find(template=>template.description===value&&(!draft.category||template.category===draft.category)&&(!draft.system||template.system===draft.system));
+            setDraft(current=>({...current,opening_description:value,...(saved?{category:saved.category,system:saved.system,
+              technical:{...current.technical,...saved.technical}}:{})}));
+          }}/>
           {item.specification_overrides?.length>0&&<label className="pc-check"><input type="checkbox" checked={Boolean(draft.reset_overrides)} onChange={event=>change('reset_overrides',event.target.checked)}/>
             {t("استخدام المواصفات المشتركة وإلغاء استثناءات هذه الفتحة","Use shared specifications and clear this opening’s exceptions")}</label>}</>}
         <SpecEditor draft={draft} change={setDraft} catalogue={catalogue} locale={uiLanguage} t={t}/>
@@ -302,6 +306,7 @@ export function WorkItems(props) {
   const item=useResource(request,Number.isSafeInteger(id)?path+"/items/"+id:null,revision);
   const attach=useAction(request,reload);
   const sources=new Map([...ctx.boqs,...ctx.linked_boqs].map((source)=>[source.id,source]));
+  useEffect(()=>{if(preferred?.id&&sources.has(preferred.id)){setBoqId(String(preferred.id));list.setPage(1);}},[preferred?.id]);
   const source=sources.get(Number(boqId));
   const linked=ctx.linked_boqs.some(({id})=>id===Number(boqId));
   const fullList=useResource(request,fullscreen&&spreadsheet&&linked?path+'/items'+queryString({q,category,boq_id:boqId,all:1}):null,revision);

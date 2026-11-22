@@ -1,5 +1,6 @@
 const {encode,parse,str,date,fail,idOf,today} = require("../certificate-access.cjs");
-const {getItem,record,people,pageOptions,responsibilityKeys} = require("./core.cjs");
+const {getItem,itemPage,record,people,pageOptions,responsibilityKeys} = require("./core.cjs");
+const {createHash}=require('node:crypto');
 const {nextReference}=require("./references.cjs");
 const {configuration,approvalParts,loadingQuantities,frameQuantity,screenQuantity,number} = require("./specifications.cjs");
 const {openingDescription}=require('./customer-defaults.cjs');
@@ -42,9 +43,12 @@ function order(db,projectId,id) {
 
 function orderPage(db,projectId,query) {
   const {page,limit,offset}=pageOptions(query);
-  const items=db.all(`SELECT id,reference,status,kind,required_date,json_extract(service_data,'$.completed_on') AS completed_on
-    FROM ops_orders WHERE project_id=? ORDER BY id DESC LIMIT ? OFFSET ?`,[projectId,limit,offset]);
-  return {items,total:db.get("SELECT COUNT(*) AS n FROM ops_orders WHERE project_id=?",[projectId]).n,page,limit};
+  const source=idOf(query.source_document_id),params=[projectId,source,source];
+  const items=db.all(`SELECT o.id,o.reference,o.status,o.kind,o.required_date,o.source_document_id,
+    d.operation_no AS source_reference,d.document_type AS source_type,d.title AS source_title,json_extract(o.service_data,'$.completed_on') AS completed_on
+    FROM ops_orders o LEFT JOIN documents d ON d.id=o.source_document_id WHERE o.project_id=? AND (? IS NULL OR o.source_document_id=?)
+    ORDER BY o.id DESC LIMIT ? OFFSET ?`,[...params,limit,offset]);
+  return {items,total:db.get("SELECT COUNT(*) AS n FROM ops_orders WHERE project_id=? AND (? IS NULL OR source_document_id=?)",params).n,page,limit};
 }
 
 function orderItems(db,id) {
@@ -76,6 +80,24 @@ function addOrder(db,projectId,body,user) {
   if (!Array.isArray(body.items) || !body.items.length) fail(400,"Select at least one BOQ item");
   const kind=body.kind==="maintenance"?"maintenance":"manufacturing";
   const maintenance=kind==="maintenance";
+  const prepared=body.items.map(entry=>({entry,item:getItem(db,projectId,idOf(entry.item_id))}));
+  const sources=new Set(prepared.map(({item})=>item.source_document_id).filter(Boolean));
+  const source=idOf(body.source_document_id)||(sources.size===1?[...sources][0]:null);
+  if(body.source_document_id!=null&&(!source||sources.size!==1||!sources.has(source)))fail(400,'Choose openings from the selected invoice or quotation');
+  if(source&&!db.get('SELECT 1 FROM ops_project_boqs WHERE project_id=? AND document_id=?',[projectId,source]))fail(400,'The source is not linked to this project');
+  // Explicit source selection opens one order per source; older partial-order clients remain compatible.
+  if(!maintenance&&body.source_document_id!=null){
+    const existing=db.get("SELECT id,reference FROM ops_orders WHERE project_id=? AND source_document_id=? AND kind='manufacturing' ORDER BY id DESC LIMIT 1",[projectId,source]);
+    if(existing)fail(409,'This source already has a work order. Open it to update its openings',{existing_order:existing});
+  }
+  let sourceScope='selected';
+  if(!maintenance&&body.include_all===true){
+    const active=itemPage(db,projectId,{boq_id:source,all:'1'}).items.filter(item=>item.active);
+    const counts=new Map(prepared.map(({entry,item})=>[item.id,Number(entry.quantity)]));
+    if(!source||active.length!==prepared.length||active.some(item=>!item.system||counts.get(item.id)!==Number(item.technical.quantity)))
+      fail(409,'The source openings changed. Review all openings before creating the order');
+    sourceScope='all';
+  }
   const reference=str(body.reference,120)||nextReference(db,projectId,maintenance?"MT":"WO");
   const requestedPerson=idOf(body.assignee_id);
   const assignee=maintenance&&requestedPerson?people(db,projectId).find(({id})=>id===requestedPerson):null;
@@ -83,11 +105,10 @@ function addOrder(db,projectId,body,user) {
   const service=maintenance?{instructions:str(body.instructions,3000),assignee}:null;
   if (db.get("SELECT 1 FROM ops_orders WHERE project_id=? AND reference=? COLLATE NOCASE",[projectId,reference]))
     fail(409,"An order already uses this reference");
-  const id=db.run("INSERT INTO ops_orders(project_id,reference,required_date,created_by,command_key,kind,service_data) VALUES (?,?,?,?,?,?,?)",
-    [projectId,reference,date(body.required_date,true),user.id,commandKey,kind,encode(service||{})]).lastInsertRowid;
+  const id=db.run("INSERT INTO ops_orders(project_id,source_document_id,source_scope,reference,required_date,created_by,command_key,kind,service_data) VALUES (?,?,?,?,?,?,?,?,?)",
+    [projectId,source,sourceScope,reference,date(body.required_date,true),user.id,commandKey,kind,encode(service||{})]).lastInsertRowid;
   const used=new Set();
-  for (const entry of body.items) {
-    const item=getItem(db,projectId,idOf(entry.item_id));
+  for (const {entry,item} of prepared) {
     if (!item.active || (!maintenance&&!item.system) || used.has(item.id)) fail(400,"Select distinct eligible BOQ items");
     const quantity=number(entry.quantity,maintenance?"maintenance quantity":"production quantity",{integer:true,positive:true});
     if (!quantity) fail(400,"Enter the quantity for "+item.code);
@@ -106,6 +127,51 @@ function addOrder(db,projectId,body,user) {
   }
   record(db,user,projectId,maintenance?"maintenance_order_created":"production_order_created",id,{reference,items:[...used]});
   return order(db,projectId,id);
+}
+
+function availableItems(db,projectId,query={}){
+  const result=itemPage(db,projectId,{...query,all:'1'}),maintenance=query.kind==='maintenance';
+  const reserved=new Map(db.all(`SELECT oi.item_id,SUM(oi.quantity) AS quantity FROM ops_order_items oi JOIN ops_orders o ON o.id=oi.order_id
+    WHERE o.project_id=? AND o.kind='manufacturing' GROUP BY oi.item_id`,[projectId]).map(row=>[row.item_id,Number(row.quantity)]));
+  return {...result,items:result.items.map(item=>({...item,reserved_quantity:reserved.get(item.id)||0,
+    available_quantity:maintenance?(Number(item.technical.quantity)||1):Math.max(0,(Number(item.technical.quantity)||0)-(reserved.get(item.id)||0))}))};
+}
+
+function orderCoverage(db,current,rows=orderItems(db,current.id)){
+  if(current.kind==='maintenance')return null;
+  const sources=new Set(current.source_document_id?[current.source_document_id]:rows.map(row=>row.specification.source_document_id).filter(Boolean));
+  const candidates=availableItems(db,current.project_id).items.filter(item=>item.active&&sources.has(item.source_document_id));
+  const remaining=candidates.filter(item=>item.system&&item.available_quantity>0);
+  const count=rows.reduce((sum,row)=>sum+row.quantity,0),sourceCount=candidates.reduce((sum,item)=>sum+(Number(item.technical.quantity)||0),0);
+  const fingerprint=createHash('sha256').update(JSON.stringify({status:current.status,rows:rows.map(row=>[row.id,row.item_id,row.quantity,row.specification.version]),
+    candidates:candidates.map(item=>[item.id,item.version,item.description_version,item.technical.quantity,item.available_quantity])})).digest('hex');
+  return {included_quantity:count,source_quantity:sourceCount||count,available_quantity:remaining.reduce((sum,item)=>sum+item.available_quantity,0),fingerprint,
+    remaining_items:remaining.map(item=>({id:item.id,description:openingDescription(item),quantity:item.available_quantity,width_mm:item.technical.width_mm,height_mm:item.technical.height_mm})),
+    unconfigured_quantity:candidates.filter(item=>!item.system).reduce((sum,item)=>sum+item.available_quantity,0)};
+}
+
+function includeRemaining(db,current,body,access){
+  if(current.kind==='maintenance'||!['draft','released'].includes(current.status)||db.get('SELECT 1 FROM ops_loads WHERE order_id=?',[current.id]))
+    fail(409,'Add remaining openings before loading begins');
+  if(body.copy_approvals===true&&!access.capabilities.includes('ops_release'))fail(403,'Approval permission is required');
+  const before=orderItems(db,current.id),coverage=orderCoverage(db,current,before);
+  if(!coverage.available_quantity)return orderDetails(db,current);
+  if(body.fingerprint!==coverage.fingerprint)fail(409,'The available openings changed. Reopen the remaining openings list');
+  const approved=body.copy_approvals===true?stageApprovals(db,current).filter(stage=>stage.approved).map(stage=>stage.stage):[];
+  const byItem=new Map(before.map(row=>[row.item_id,row])),affected=[];
+  for(const remaining of coverage.remaining_items){
+    const item=getItem(db,current.project_id,remaining.id),prior=byItem.get(item.id),quantity=(prior?.quantity||0)+remaining.quantity;
+    const system=configuration(db,item.category,item.system),quantities=loadingQuantities(item.category,system,item.technical,quantity);
+    const specification=encode({...item,original:undefined,system_label:{ar:system.ar,en:system.en}});
+    if(prior){db.run('UPDATE ops_order_items SET quantity=?,quantities=?,specification=? WHERE id=?',[quantity,encode(quantities),specification,prior.id]);affected.push(prior.id);}
+    else affected.push(db.run('INSERT INTO ops_order_items(order_id,item_id,quantity,quantities,specification) VALUES(?,?,?,?,?)',
+      [current.id,item.id,quantity,encode(quantities),specification]).lastInsertRowid);
+  }
+  db.run("UPDATE ops_orders SET status='draft',source_scope=? WHERE id=?",
+    [coverage.included_quantity+coverage.available_quantity===coverage.source_quantity?'all':'selected',current.id]);
+  record(db,access.user,current.project_id,'remaining_openings_included',current.id,{before,added_quantity:coverage.available_quantity,order_item_ids:affected,copy_approvals:body.copy_approvals===true});
+  for(const stage of approved)reviewStage(db,order(db,current.project_id,current.id),{stage,approved:true,order_item_ids:affected,note:'Existing order approval explicitly applied to added openings'},access);
+  return orderDetails(db,order(db,current.project_id,current.id));
 }
 
 function inspections(db,id) {
@@ -149,7 +215,11 @@ function reviewStage(db,current,body,access) {
   if (!orderStages.includes(stage)||typeof body.approved!=="boolean"||current.kind==="maintenance")
     fail(400,"Choose a manufacturing approval stage");
   if (current.status==="closed") fail(409,"This order is closed");
-  const rows=orderItems(db,current.id).filter((row)=>!body.order_item_id||row.id===idOf(body.order_item_id));
+  if(body.order_item_ids!=null&&!Array.isArray(body.order_item_ids))fail(400,'Select valid order items');
+  const ids=body.order_item_ids?new Set(body.order_item_ids.map(value=>idOf(value))):null;
+  if(ids?.has(null))fail(400,'Select valid order items');
+  const rows=orderItems(db,current.id).filter((row)=>body.order_item_id?row.id===idOf(body.order_item_id):!ids||ids.has(row.id));
+  if(ids&&rows.length!==ids.size)fail(404,'Order item not found');
   if (!rows.length) fail(404,"Order item not found");
   const approved=body.approved;
   const user=access.user;
@@ -365,7 +435,9 @@ function orderDetails(db,current) {
     byBatch.get(row.load_id).lines.push(row);
   const loadingReference=db.get("SELECT reference FROM ops_loading_orders WHERE order_id=? AND after_load_id=?",
     [current.id,loads[0]?.id||0])?.reference;
-  return {...current,loading_settings:parse(current.loading_settings,{enabled:false,rows:[]}),loading_reference:loadingReference||null,service:parse(current.service_data,{}),items:orderItems(db,current.id),inspections:inspections(db,current.id),
+  const items=orderItems(db,current.id);
+  const source=current.source_document_id?db.get('SELECT id,operation_no,document_type,title,status FROM documents WHERE id=?',[current.source_document_id]):null;
+  return {...current,source,coverage:orderCoverage(db,current,items),loading_settings:parse(current.loading_settings,{enabled:false,rows:[]}),loading_reference:loadingReference||null,service:parse(current.service_data,{}),items,inspections:inspections(db,current.id),
     balances:loadingBalances(db,current.id),loads:[...byBatch.values()],stage_approvals:current.kind==="maintenance"?[]:stageApprovals(db,current)};
 }
 
@@ -426,4 +498,4 @@ function confirmQuantity(db,item,body,access) {
 }
 
 module.exports = {qcStages,qcChecks,qcResults,checks,order,orderPage,orderDetails,addOrder,updateOrderStatus,refreshDraftOrder,prepareOutput,loadingOrder,
-  inspect,loadBatch,loadingBalances,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages,saveLoadingSettings};
+  inspect,loadBatch,loadingBalances,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages,saveLoadingSettings,availableItems,orderCoverage,includeRemaining};

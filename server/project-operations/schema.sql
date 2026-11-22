@@ -29,6 +29,18 @@ CREATE TABLE IF NOT EXISTS ops_customer_specs (
   PRIMARY KEY(customer_id,description)
 );
 
+CREATE TABLE IF NOT EXISTS ops_project_specs (
+  project_id INTEGER NOT NULL REFERENCES ops_projects(project_id) ON DELETE CASCADE,
+  description TEXT NOT NULL,
+  category TEXT NOT NULL,
+  system TEXT NOT NULL REFERENCES ops_systems(id),
+  technical TEXT NOT NULL CHECK(json_valid(technical)),
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  save_sequence INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(project_id,description,category,system)
+);
+
 CREATE TABLE IF NOT EXISTS ops_sequences (
   project_id INTEGER NOT NULL REFERENCES ops_projects(project_id) ON DELETE CASCADE,
   kind TEXT NOT NULL,

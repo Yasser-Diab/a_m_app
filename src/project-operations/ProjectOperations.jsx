@@ -57,7 +57,7 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
   const current=context.data||(cachedContext?.project.id===projectId?cachedContext:null);
   const currentCatalogue=catalogue.data||cachedCatalogue;
   const controls={request,t,can,path,ctx:current,catalogue:currentCatalogue,revision,reload,uiLanguage,apiBase,session,
-    onOpenDocument,saveNativeReport,shareNativeReport,preferred};
+    onOpenDocument,saveNativeReport,shareNativeReport,preferred,onPrepareSource:source=>{setPreferred(source);setTab('items');}};
   async function openProject(row) {
     setDiscoveryError(null);
     const doc=row.matched_document||row.source_document;
