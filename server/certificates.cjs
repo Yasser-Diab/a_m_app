@@ -266,7 +266,7 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     const settings = getProfile(database, model.project_id).settings;
     const header = {...model.header};
     if (["ar", "en"].includes(options.language)) header.locale = options.language;
-    if (["auto", "cover", "detail"].includes(options.layout)) header.output_mode = options.layout;
+    if (["auto", "cover", "detail", "multi"].includes(options.layout)) header.output_mode = options.layout;
     if (["A4", "Letter"].includes(options.paper)) header.paper_size = options.paper;
     header.group_work_types = options.group == null ? (header.group_work_types ?? settings.group_work_types) : options.group === "1";
     if (["none","building","unit","work_type"].includes(options.group_by)) header.group_by = options.group_by;

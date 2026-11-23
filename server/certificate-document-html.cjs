@@ -100,7 +100,7 @@ function compactIdentity(model) {
 }
 
 function pageTemplate(id, title, table, model) {
-  return `<template id="${id}"><article class="sheet">${fullIdentity(model)}${compactIdentity(model)}
+  return `<template id="${id}"${id.startsWith('cover') ? ' data-summary-page' : ''}><article class="sheet${id.startsWith('cover') ? ' cover' : ''}">${fullIdentity(model)}${compactIdentity(model)}
     ${model.watermark ? `<div class="status-watermark" data-approved="${model.approved}" dir="ltr">${escapeHtml(model.watermark)}</div>` : ''}
     <main class="page-content">${title ? `<h1>${escapeHtml(title)}</h1>` : ''}${table || ''}</main>
     <footer><div><div dir="${model.direction}">${escapeHtml(model.labels.page)} <bdi dir="ltr" class="page-number"></bdi> ${escapeHtml(model.labels.of)} <bdi dir="ltr" class="page-total"></bdi></div>
@@ -122,7 +122,7 @@ function financeBlock(model) {
   if (!financeRows.length) return '';
   const showBasis = financeRows.some((row) => row.basis || row.basisValue != null);
   const valueColumns = ['previous', 'current', 'cumulative'];
-  return `<section class="finance" aria-label="${escapeHtml(labels.finance)}"><h2>${escapeHtml(labels.finance)} <span><bdi dir="ltr">${escapeHtml(currency)}</bdi></span></h2>
+  return `<section class="finance settlement-block" aria-label="${escapeHtml(labels.finance)}"><h2>${escapeHtml(labels.finance)} <span><bdi dir="ltr">${escapeHtml(currency)}</bdi></span></h2>
     ${model.historical && labels.recorded_basis ? `<div class="settlement-basis">${escapeHtml(labels.recorded_basis)}</div>` : ''}
     <table aria-label="${escapeHtml(labels.finance)}"><colgroup><col data-key="label" data-weight="${showBasis ? 29 : 43}" data-kind="text">
     ${showBasis ? '<col data-key="basis" data-weight="20" data-kind="text">' : ''}${valueColumns.map((key) => `<col data-key="${key}" data-weight="18" data-kind="money">`).join('')}</colgroup>
@@ -187,15 +187,21 @@ function detailRows(model) {
 function buildCertificateHtml(model) {
   const { labels, locale, direction, columns, coverRows, moneyKeys, workTotals, receiptColumns, landscape, paper } = model;
   const coverTextColumns=model.coverTextColumns||[{key:'name',label:model.groupLabel||labels.work_type,weight:34,kind:'text'}];
-  const coverColumns = [...coverTextColumns,
+  const summaryColumns = (textColumns) => [...textColumns,
     ...(model.showSummaryQuantities!==false&&workTotals.count != null ? [{key:'count',label:labels.count,weight:8,kind:'number'}] : []),
     ...(model.showSummaryQuantities!==false&&workTotals.quantities?.length ? [{key:'billed_quantity',label:labels.billed_quantity,weight:26,kind:'quantity'}] : []),
     ...moneyKeys.map((key) => ({ key, label: labels[key], weight: 18, kind: 'money' }))];
   const size = paper === 'Letter' ? [215.9, 279.4] : [210, 297];
   const [width, height] = landscape ? size.toReversed() : size;
   const style = model.style || {};
-  const cover = coverRows.map((row) => `<tr>${rowCells(row,coverTextColumns)}${rollupCells(row,coverColumns.slice(coverTextColumns.length),moneyKeys)}</tr>`);
-  cover.push(subtotalRow(workTotals, coverColumns, moneyKeys, labels.total));
+  const summaries = (model.summarySections?.length ? model.summarySections : [
+    {id:'cover',title:labels.cover,rows:coverRows,textColumns:coverTextColumns},
+  ]).map(section => {
+    const tableColumns = summaryColumns(section.textColumns);
+    const rows = section.rows.map(row => `<tr>${rowCells(row,section.textColumns)}${rollupCells(row,tableColumns.slice(section.textColumns.length),moneyKeys)}</tr>`);
+    rows.push(subtotalRow(workTotals,tableColumns,moneyKeys,labels.total));
+    return {...section,tableColumns,rows};
+  });
   const receiptRows = model.receipts.map((row) => `<tr>${rowCells(row, receiptColumns)}</tr>`);
   return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline';">
@@ -278,6 +284,7 @@ function buildCertificateHtml(model) {
     .detail .subtotal:last-child, .cover .subtotal { background:${reportColors.subtotal}; }
     .empty { color:${reportColors.muted}; padding-block:4mm; text-align:center; }
     .finance, .payment-details { padding-block-start:1.5mm; }
+    .settlement-block { break-inside:avoid; page-break-inside:avoid; }
     .finance tbody th { font-weight: 400; }
     .finance .basis-cell { text-align:start; }
     .finance .basis-label { white-space:normal; overflow-wrap:anywhere; font-size:inherit; }
@@ -299,13 +306,13 @@ function buildCertificateHtml(model) {
     .signatory { text-align:center; }
     .signatory small { display: block;text-align:center; }
     </style></head><body>
-    ${pageTemplate('cover', labels.cover, tableOpening(coverColumns), model)}
+    ${summaries.map(section => pageTemplate(section.id,section.title,tableOpening(section.tableColumns),model)).join('')}
     ${pageTemplate('detail', labels.detail, tableOpening(columns), model)}
     ${pageTemplate('receipts', '', '', model)}
     ${pageTemplate('settlement', '', '', model)}
     ${pageTemplate('retentions', '', '', model)}
     ${pageTemplate('signoff-page', '', '', model)}
-    ${sourceTemplate('cover-rows', cover)}${sourceTemplate('detail-rows', detailRows(model))}
+    ${summaries.map(section => sourceTemplate(section.id+'-rows',section.rows)).join('')}${sourceTemplate('detail-rows', detailRows(model))}
     <template id="settlement-block">${financeBlock(model)}</template>
     <template id="retentions-block">${retentionBlock(model)}</template>
     <template id="receipts-block"><section class="payment-details"><h2>${escapeHtml(labels.receipts)}</h2>${tableOpening(receiptColumns,receiptRows.join(''))}</section></template>
@@ -369,7 +376,8 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     }
     table.style.setProperty('--value-size', `${9 * scale}pt`);
   }
-  for (const id of ['cover','detail']) {
+  const summaryIds = [...document.querySelectorAll('template[data-summary-page]')].map(template => template.id);
+  for (const id of [...summaryIds,'detail']) {
     fitColumns(document.getElementById(id).content.querySelector('table'),document.getElementById(`${id}-rows`).content);
   }
   for (const id of ['settlement','retentions','receipts']) {
@@ -479,10 +487,22 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     return pages;
   }
 
-  function appendTableSection(id, pages) {
+  function appendTableSection(id, pages, keepTogether = false) {
     const source = document.getElementById(`${id}-block`).content.firstElementChild;
     const rows = source?.querySelectorAll('tbody tr');
     if (!rows?.length) return;
+    if (keepTogether) {
+      const block = source.cloneNode(true);
+      let page = pages.at(-1);
+      page.querySelector('main').append(block);
+      if (fits(page)) return;
+      block.remove();
+      page = makePage(id,true);
+      pages.push(page);
+      page.querySelector('main').append(block);
+      if (!fits(page)) throw new Error('The certificate settlement is too tall for the chosen paper');
+      return;
+    }
     const skeleton = source.cloneNode(true);
     skeleton.querySelector('tbody').replaceChildren();
     function startSection(page) {
@@ -507,14 +527,14 @@ async function paginateCertificate({ measured, outputMode, hasReceipts }) {
     }
   }
 
-  let hasCover = outputMode === 'summary_details';
+  let hasCover = outputMode === 'summary_details' || outputMode === 'multi_summary';
   if (!hasCover && measured && outputMode !== 'detail_only') {
     const detailPages = pagesFor('detail');
     hasCover = detailPages.length > 1;
     detailPages.forEach((page) => page.remove());
   }
-  const openingPages = hasCover ? pagesFor('cover') : pagesFor('detail', false, true, false);
-  appendTableSection('settlement', openingPages);
+  const openingPages = hasCover ? summaryIds.flatMap(id => pagesFor(id)) : pagesFor('detail', false, true, false);
+  appendTableSection('settlement', openingPages, true);
   appendTableSection('retentions', openingPages);
   if (hasReceipts) appendTableSection('receipts', openingPages);
   if (hasCover) {

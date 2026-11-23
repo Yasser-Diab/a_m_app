@@ -306,7 +306,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       <div className="pc-form">
         <Field label={t("لغة المستند", "Document language")}><select disabled={!canWrite} value={header.locale || "ar"} onChange={(event) => changeHeader("locale", event.target.value)}><option value="ar">العربية</option><option value="en">English</option></select></Field>
         <Field label={t("طريقة الإخراج", "Output layout")}><select disabled={!canWrite} value={header.output_mode || ""} onChange={(event) => changeHeader("output_mode", event.target.value)}>
-          <option value="">{t("إعداد المشروع", "Project default")}</option><option value="auto">{t("تلقائي", "Automatic")}</option><option value="cover">{t("ملخص وتفاصيل", "Summary and details")}</option><option value="detail">{t("التفاصيل فقط", "Details only")}</option>
+          <option value="">{t("إعداد المشروع", "Project default")}</option><option value="auto">{t("تلقائي", "Automatic")}</option><option value="cover">{t("ملخص وتفاصيل", "Summary and details")}</option><option value="multi">{t("ملخصات منفصلة وتفاصيل", "Separate summaries and details")}</option><option value="detail">{t("التفاصيل فقط", "Details only")}</option>
         </select></Field>
         <fieldset className="pc-span" disabled={!canWrite}><legend>{t("الحقول الاختيارية في المستند", "Optional document fields")}</legend>
           <div className="pc-choice-grid">{Object.entries(optionalFields).map(([key, labels]) => <label className="pc-check" key={key}><input type="checkbox" checked={header.optional_fields?.[key] !== false} onChange={(event) => changeHeader("optional_fields", { ...header.optional_fields, [key]: event.target.checked })} />{t(...labels)}</label>)}</div>

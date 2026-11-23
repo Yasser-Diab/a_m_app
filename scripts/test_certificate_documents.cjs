@@ -165,6 +165,28 @@ async function main() {
   assert.deepEqual(buildingSummary.coverTextColumns.map(column=>column.key),['building','work_description']);
   assert.deepEqual(buildingSummary.coverRows.map(row=>[row.building,row.work_description]),[['Tower A','Building works'],['Tower B','Building works']]);
   assert.match(buildCertificateHtml(buildingSummary),/data-key="building"/);
+  for (const locale of ['ar','en']) {
+    const summaryInput = fixture(locale,[
+      {...lump,id:'A1',building_unit:'A',work_type:'Aluminium',current:100},
+      {...lump,id:'A2',building_unit:'A',work_type:'Glass',current:200},
+      {...lump,id:'B1',building_unit:'B',work_type:'Aluminium',current:300},
+      {...lump,id:'B2',building_unit:'B',work_type:'Glass',current:400},
+    ],{current:1000,current_payable:900});
+    summaryInput.header.output_mode = 'multi';
+    const separated = buildCertificateDocument(summaryInput);
+    assert.equal(separated.outputMode,'multi_summary');
+    assert.deepEqual(separated.summarySections.map(section=>section.rows.map(row=>[row.name,row.current])),
+      [[['Aluminium',400],['Glass',600]],[['A',300],['B',700]]]);
+    for (const section of separated.summarySections) assert.equal(section.rows.reduce((sum,row)=>sum+row.current,0),1000);
+    assert.equal(separated.workTotals.current,1000,'Multiple summaries must not double the work value');
+    const exportBook = new ExcelJS.Workbook();
+    await exportBook.xlsx.load(await writeCertificateXlsx(separated));
+    for (const section of separated.summarySections) assert.equal(exportBook.getWorksheet(section.title).rowCount,4);
+    const hidden = buildCertificateDocument({...summaryInput,report_options:{show_summary_work_type:false}});
+    assert.deepEqual(hidden.summarySections.map(section=>section.id),['cover-building']);
+    assert.equal(buildCertificateDocument({...summaryInput,header:{...summaryInput.header,output_mode:'cover'}}).summarySections.length,0);
+    await verifyPdf(separated,{pageCount:3,detailPages:1,hasCover:true});
+  }
   byUnit.header.group_by = 'work_type';
   byUnit.header.show_group_subtotals = false;
   const noGroupsSubtotal = buildCertificateDocument(byUnit);

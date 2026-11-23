@@ -434,7 +434,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
       metadata('notes', choices?.notes === true || choices?.includes?.('notes') ? header.notes : '', { wide: true })],
   ].map((group) => visibleMetadata(group, choices, t)).filter((group) => group.length);
   const outputAliases = { automatic: 'auto', summary: 'summary_details', 'summary+details': 'summary_details',
-    details: 'detail_only', detail: 'detail_only', 'detail-only': 'detail_only', cover: 'summary_details' };
+    details: 'detail_only', detail: 'detail_only', 'detail-only': 'detail_only', cover: 'summary_details', multi: 'multi_summary' };
   const outputMode = outputAliases[header.output_mode] || header.output_mode || 'auto';
   const measured = lines.some((line) => line.mode === 'area' || line.mode === 'linear');
 
@@ -465,6 +465,25 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
   ]:[{key:'name',label:grouping.show_summary_work_type===false?(grouping.show_summary_building!==false&&buildings.size?t.building_unit:
     grouping.show_summary_building!==false&&units.size?t.floor_apartment:t.total):
     t[({building:'building_unit',unit:'floor_apartment'})[coverKind]||'work_type'],weight:34,kind:'text'}];
+  const summarySections = [];
+  if (outputMode === 'multi_summary') {
+    for (const [kind,field,label,title] of [
+      ['work-type','work_type',t.work_type,locale === 'ar' ? 'ملخص حسب نوع الأعمال' : 'Summary by work type'],
+      ['building','building_unit',t.building_unit,locale === 'ar' ? 'ملخص حسب المباني' : 'Summary by building'],
+    ]) {
+      if (grouping[kind === 'building' ? 'show_summary_building' : 'show_summary_work_type'] === false) continue;
+      const groups = new Map();
+      for (const line of lines) {
+        const name = line[field] || (locale === 'ar' ? 'غير محدد' : 'Not specified'), key = name.toLowerCase();
+        if (!groups.has(key)) groups.set(key,{name,lines:[]});
+        groups.get(key).lines.push(line);
+      }
+      summarySections.push({ id:'cover-' + kind,title,
+        textColumns:[{key:'name',label,weight:34,kind:'text'}],
+        rows:[...groups.values()].map(({name,lines:entries}) => ({name,...workRollup(entries,moneyKeys)})),
+      });
+    }
+  }
   return {
     modelVersion: MODEL_VERSION, locale, direction: locale === 'ar' ? 'rtl' : 'ltr', labels: t,
     variant, issued, historical, approved, watermark, certificateType, officialNumber, revision: variant === 'internal' ? input.revision ?? '' : '',
@@ -488,7 +507,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     groupLabel: t[({building:'building_unit',unit:'floor_apartment'})[coverKind || groupBy] || 'work_type'],
     identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
-    detailGroups, detailBands:bands, coverRows,coverTextColumns,
+    detailGroups, detailBands:bands, coverRows,coverTextColumns,summarySections,
     workTotals, financeRows,showSummaryQuantities:grouping.show_summary_quantities!==false,showDetailQuantities:grouping.show_detail_quantities!==false,
     holds:variant==='internal'?(totals.holds||[]).filter(hold=>Number(hold.balance)>0).map(hold=>({
       label:text(hold.label||t[hold.category]||t.other_rule),collection_date:text(hold.collection_date),balance:money(hold.balance)})):[],

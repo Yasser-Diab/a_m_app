@@ -22,7 +22,7 @@ function normalizeHeader(input = {}, project, profile, originalType) {
     contract_ref: str(input.contract_ref ?? project.contract_ref), location_id: idOf(input.location_id),
     title: str(input.title), notes: str(input.notes, 3000),
     paper_size: input.paper_size === "Letter" ? "Letter" : "A4",
-    output_mode: ["auto", "cover", "detail"].includes(input.output_mode) ? input.output_mode : profile.settings.output_mode,
+    output_mode: ["auto", "cover", "detail", "multi"].includes(input.output_mode) ? input.output_mode : profile.settings.output_mode,
     group_work_types: input.group_work_types ?? profile.settings.group_work_types ?? false,
     show_group_subtotals: input.show_group_subtotals ?? profile.settings.show_group_subtotals ?? false,
     optional_fields: {},

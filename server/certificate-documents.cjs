@@ -142,6 +142,22 @@ async function writeCertificateXlsx(model) {
     ...(model.showGroupSubtotals && group.name ? [{description:`${model.labels.subtotal} · ${group.name}`,...group.totals}] : []),
   ]) ?? model.lines;
   addWorksheet(workbook, model, model.labels.detail, [type, ...model.columns], [...detail,subtotal(model.labels.total,model.workTotals)]);
+  for (const section of model.summarySections || []) {
+    const columns = [...section.textColumns,
+      ...(model.showSummaryQuantities !== false && model.workTotals.count != null ? [{key:'count',label:model.labels.count,weight:8,kind:'number'}] : []),
+      ...(model.showSummaryQuantities !== false && model.workTotals.quantities?.length ? [{key:'billed_quantity',label:model.labels.billed_quantity,weight:26,kind:'quantity'}] : []),
+      ...model.moneyKeys.map(key => ({key,label:model.labels[key],weight:18,kind:'money'})),
+    ];
+    const rows = [...section.rows,{name:model.labels.total,...model.workTotals,subtotal:true}].map(row => ({...row,
+      billed_quantity:row.quantities?.map(({value,unit}) => `${value} ${unit}`).join('\n'),
+    }));
+    const sheet = addWorksheet(workbook,model,section.title,columns,rows);
+    const quantityColumn = columns.findIndex(column => column.key === 'billed_quantity') + 1;
+    if (quantityColumn) rows.forEach((row,index) => {
+      sheet.getRow(index + 2).getCell(quantityColumn).alignment = {vertical:'top',wrapText:true,readingOrder:model.direction};
+      if (row.quantities?.length > 1) sheet.getRow(index + 2).height = 15 * row.quantities.length + 2;
+    });
+  }
   if (model.financeRows.length) addWorksheet(workbook, model, model.labels.finance, [
     { key: 'label', label: model.labels.finance, weight: 38, kind: 'text' },
     { key: 'basis', label: model.labels.basis, weight: 19, kind: 'text' },

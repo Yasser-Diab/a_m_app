@@ -329,7 +329,7 @@ function cleanSettings(input = {}, base = {}) {
     else if (decimal(input.minimum_area) === null || decimal(input.minimum_area) < 0n) fail(400, "Minimum area must be zero or greater");
     else settings.minimum_area = str(input.minimum_area, 40);
   }
-  for (const [key,choices] of [["collections_basis",["cleared","received"]],["output_mode",["auto","detail","cover"]]]) {
+  for (const [key,choices] of [["collections_basis",["cleared","received"]],["output_mode",["auto","detail","cover","multi"]]]) {
     if (!Object.hasOwn(input,key)) continue;
     if (input[key] === "inherit" || input[key] == null || input[key] === "") delete settings[key];
     else if (!choices.includes(input[key])) fail(400,"Unsupported " + key.replace("_"," "));

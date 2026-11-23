@@ -16,7 +16,7 @@ async function printCertificate(inputPath, options) {
     const pagination = await window.webContents.executeJavaScript(`(${paginateCertificate.toString()})(${JSON.stringify({
       issued: options.issued === true,
       measured: options.measured === true,
-      outputMode: ['auto', 'detail_only', 'summary_details'].includes(options.outputMode) ? options.outputMode : 'auto',
+      outputMode: ['auto', 'detail_only', 'summary_details', 'multi_summary'].includes(options.outputMode) ? options.outputMode : 'auto',
       hasReceipts: options.hasReceipts === true,
     })})`);
     await window.webContents.executeJavaScript('Promise.all(Array.from(document.querySelectorAll("img"), image => image.decode().catch(() => {})))');

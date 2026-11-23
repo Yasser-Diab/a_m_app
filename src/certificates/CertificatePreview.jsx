@@ -116,6 +116,7 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
       <Field label={t("القالب", "Layout")}><select value={options.layout || ""} onChange={(event) => { setError(null); setOptions({ ...options, layout: event.target.value }); }}>
         <option value="">{t("الافتراضي", "Default")}</option><option value="auto">{t("تلقائي", "Automatic")}</option>
         <option value="detail">{t("التفاصيل فقط", "Details only")}</option><option value="cover">{t("ملخص وتفاصيل", "Summary and details")}</option>
+        <option value="multi">{t("ملخصات منفصلة وتفاصيل", "Separate summaries and details")}</option>
       </select></Field>
       <Field label={t("مقاس الورق", "Paper size")}><select value={options.paper || ""} onChange={(event) => { setError(null); setOptions({ ...options, paper: event.target.value }); }}>
         <option value="">{t("الافتراضي", "Default")}</option><option value="A4">A4</option><option value="Letter">Letter</option>
@@ -134,6 +135,9 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
       <ReportGroupingChecks values={grouping} t={t} onChange={(key,checked) => {
         setError(null); setOptions((current) => ({...current,[key]:checked ? "1" : "0"}));
       }} />
+      {(options.layout || certificate.header?.output_mode) === 'multi' && <small className="pc-span">{t(
+        'ملخص لأنواع الأعمال وآخر للمباني؛ يبدأ كل ملخص محدد في صفحة جديدة.',
+        'Work types and buildings have separate summaries; each selected summary starts on a new page.')}</small>}
     </div>
     <div className="pc-toolbar pc-output-actions">
       {output?.pages && <span className="pc-chip">{t("الصفحات", "Pages")} <bdi>&nbsp;{output.pages}</bdi></span>}
