@@ -355,9 +355,9 @@ function inspect(db,current,body,access) {
   return {id,reference,...recordData};
 }
 
-function loadingBalances(db,orderId) {
+function loadingBalances(db,orderId,cutoff=null) {
   const loaded=new Map(db.all(`SELECT l.order_item_id,l.kind,SUM(l.quantity) AS quantity FROM ops_load_lines l
-    JOIN ops_loads b ON b.id=l.load_id WHERE b.order_id=? GROUP BY l.order_item_id,l.kind`,[orderId])
+    JOIN ops_loads b ON b.id=l.load_id WHERE b.order_id=? AND (? IS NULL OR b.id<=?) GROUP BY l.order_item_id,l.kind`,[orderId,cutoff,cutoff])
     .map((row)=>[row.order_item_id+":"+row.kind,row.quantity]));
   return orderItems(db,orderId).flatMap((row)=>Object.entries(row.quantities).map(([kind,required])=>{
     const quantity=loaded.get(row.id+":"+kind)||0;
@@ -390,10 +390,13 @@ function loadBatch(db,current,input,user) {
   const commandKey=str(input.command_key,100)||null;
   const prior=commandKey&&db.get("SELECT id,reference FROM ops_loads WHERE order_id=? AND command_key=?",[current.id,commandKey]);
   if (prior) return {...prior,balances:loadingBalances(db,current.id)};
-  const reference=str(input.reference,100)||loadingOrder(db,current,user).reference;
+  const requested=str(input.reference,100);
+  const alias=requested&&db.get('SELECT reference,previous_reference FROM ops_loading_orders WHERE order_id=? AND (reference=? COLLATE NOCASE OR previous_reference=? COLLATE NOCASE)',[current.id,requested,requested]);
+  const reference=alias?.reference||requested||loadingOrder(db,current,user).reference;
   const loadedOn=date(input.loading_date,true)||today();
   if (!Array.isArray(input.lines) || !input.lines.length) fail(400,"Enter actual loading quantities");
-  const existing=db.get("SELECT id FROM ops_loads WHERE order_id=? AND reference=? COLLATE NOCASE",[current.id,reference]);
+  const previousReference=alias?.previous_reference||db.get('SELECT previous_reference FROM ops_loading_orders WHERE order_id=? AND reference=?',[current.id,reference])?.previous_reference;
+  const existing=db.get("SELECT id FROM ops_loads WHERE order_id=? AND (reference=? COLLATE NOCASE OR reference=? COLLATE NOCASE)",[current.id,reference,previousReference||reference]);
   if (existing) fail(409,"This loading reference was already recorded");
   if (current.status!=="released") fail(409,"Release the order for manufacturing before recording loading");
   const balances=new Map(loadingBalances(db,current.id).map((row)=>[row.order_item_id+":"+row.kind,row]));
@@ -433,11 +436,13 @@ function orderDetails(db,current) {
   for (const row of db.all(`SELECT l.*,i.code FROM ops_load_lines l JOIN ops_loads b ON b.id=l.load_id
     JOIN ops_order_items oi ON oi.id=l.order_item_id JOIN ops_items i ON i.id=oi.item_id WHERE b.order_id=? ORDER BY l.load_id`,[current.id]))
     byBatch.get(row.load_id).lines.push(row);
-  const loadingReference=db.get("SELECT reference FROM ops_loading_orders WHERE order_id=? AND after_load_id=?",
-    [current.id,loads[0]?.id||0])?.reference;
+  const transport=db.get("SELECT reference,vehicle_plate,driver_name,version FROM ops_loading_orders WHERE order_id=? AND after_load_id=?",
+    [current.id,loads[0]?.id||0]);
+  const loadingReference=transport?.reference;
   const items=orderItems(db,current.id);
   const source=current.source_document_id?db.get('SELECT id,operation_no,document_type,title,status FROM documents WHERE id=?',[current.source_document_id]):null;
-  return {...current,source,coverage:orderCoverage(db,current,items),loading_settings:parse(current.loading_settings,{enabled:false,rows:[]}),loading_reference:loadingReference||null,service:parse(current.service_data,{}),items,inspections:inspections(db,current.id),
+  return {...current,source,coverage:orderCoverage(db,current,items),loading_settings:parse(current.loading_settings,{enabled:false,rows:[]}),loading_reference:loadingReference||null,
+    loading_transport:transport||{reference:null,vehicle_plate:'',driver_name:'',version:0},service:parse(current.service_data,{}),items,inspections:inspections(db,current.id),
     balances:loadingBalances(db,current.id),loads:[...byBatch.values()],stage_approvals:current.kind==="maintenance"?[]:stageApprovals(db,current)};
 }
 
@@ -467,14 +472,34 @@ function loadingOrder(db,current,user) {
   return db.get("SELECT * FROM ops_loading_orders WHERE id=?",[id]);
 }
 
+function loadingTransport(db,current,user,reference){
+  if(current.kind==='maintenance')fail(400,'Loading applies to manufacturing orders');
+  const row=reference?db.get('SELECT * FROM ops_loading_orders WHERE order_id=? AND (reference=? OR previous_reference=?)',[current.id,reference,reference]):loadingOrder(db,current,user);
+  if(!row)fail(404,'Loading order not found');
+  return {reference:row.reference,vehicle_plate:row.vehicle_plate,driver_name:row.driver_name,version:row.version};
+}
+function saveLoadingTransport(db,current,body,user){
+  const before=loadingTransport(db,current,user,body.document_ref);
+  if(body.document_ref!==before.reference||Number(body.version)!==before.version)fail(409,'The loading order changed. Reopen its vehicle and driver details');
+  const next={vehicle_plate:str(body.vehicle_plate,100),driver_name:str(body.driver_name,200)};
+  if(next.vehicle_plate===before.vehicle_plate&&next.driver_name===before.driver_name)return before;
+  db.run('UPDATE ops_loading_orders SET vehicle_plate=?,driver_name=?,version=version+1 WHERE order_id=? AND reference=?',
+    [next.vehicle_plate,next.driver_name,current.id,before.reference]);
+  record(db,user,current.project_id,'loading_transport_updated',current.id,{before,after:next,reference:before.reference});
+  return {...before,...next,version:before.version+1};
+}
+
 function prepareOutput(db,current,options,user) {
   if (current.status==="draft"&&current.kind!=="maintenance"&&orderItems(db,current.id).some((row)=>
     getItem(db,current.project_id,row.item_id).version!==row.specification.version)) {
     refreshDraftOrder(db,current,user);
     current=order(db,current.project_id,current.id);
   }
-  if (options.kind==="loading"&&current.kind!=="maintenance")
-    current={...current,loading_reference:loadingOrder(db,current,user).reference};
+  if (options.kind==="loading"&&current.kind!=="maintenance"){
+    const loading=options.loading_reference?db.get('SELECT * FROM ops_loading_orders WHERE order_id=? AND (reference=? OR previous_reference=?)',[current.id,options.loading_reference,options.loading_reference]):loadingOrder(db,current,user);
+    if(!loading)fail(404,'Loading order not found');
+    current={...current,loading_reference:loading.reference,loading_previous_reference:loading.previous_reference,loading_after_load_id:loading.after_load_id};
+  }
   return current;
 }
 
@@ -498,4 +523,4 @@ function confirmQuantity(db,item,body,access) {
 }
 
 module.exports = {qcStages,qcChecks,qcResults,checks,order,orderPage,orderDetails,addOrder,updateOrderStatus,refreshDraftOrder,prepareOutput,loadingOrder,
-  inspect,loadBatch,loadingBalances,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages,saveLoadingSettings,availableItems,orderCoverage,includeRemaining};
+  inspect,loadBatch,loadingBalances,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages,saveLoadingSettings,availableItems,orderCoverage,includeRemaining,loadingTransport,saveLoadingTransport};

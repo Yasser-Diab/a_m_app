@@ -10,6 +10,7 @@ import Production from "./Production.jsx";
 import ProjectSignatures from "./ProjectSignatures.jsx";
 import SourceRefresh from './SourceRefresh.jsx';
 import {RunningProjects,QuantityTakeoff} from "./OperationsReports.jsx";
+import LoadingOrders from './LoadingOrders.jsx';
 
 const tabs=[
   ["items","جدول الكميات","BOQ",Layers3],["overview","بيانات المشروع","Project details",ClipboardList],
@@ -56,7 +57,7 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
   useEffect(()=>{if (catalogue.data) setCatalogue(catalogue.data);},[catalogue.data]);
   const current=context.data||(cachedContext?.project.id===projectId?cachedContext:null);
   const currentCatalogue=catalogue.data||cachedCatalogue;
-  const controls={request,t,can,path,ctx:current,catalogue:currentCatalogue,revision,reload,uiLanguage,apiBase,session,
+  const controls={api,access,request,t,can,path,ctx:current,catalogue:currentCatalogue,revision,reload,uiLanguage,apiBase,session,
     onOpenDocument,saveNativeReport,shareNativeReport,preferred,onPrepareSource:source=>{setPreferred(source);setTab('items');}};
   async function openProject(row) {
     setDiscoveryError(null);
@@ -73,7 +74,7 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
   const documentLabel=(doc)=>doc.document_type==="invoice"?t("فاتورة","Invoice"):t("عرض سعر","Quotation");
   return <div className="pc-workspace ops-workspace" dir={uiLanguage==="ar"?"rtl":"ltr"}>
     <nav className="pc-tabs" aria-label={t("أقسام إدارة التشغيل","Operations management sections")}>
-      {[["projects","المشروعات","Projects"],["progress","متابعة التشغيل","Work progress"],["quantities","حصر الكميات","Quantity takeoff"]].map(([id,ar,en])=>
+      {[["projects","المشروعات","Projects"],["loading","أوامر التحميل","Loading Orders"],["progress","متابعة التشغيل","Work progress"],["quantities","حصر الكميات","Quantity takeoff"]].map(([id,ar,en])=>
         <button type="button" key={id} aria-pressed={view===id} onClick={()=>setView(id)}>{t(ar,en)}</button>)}
     </nav>
     <div className="pc-stack" hidden={view!=="projects"}>
@@ -119,6 +120,7 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
       </section>}
     </>}
     </div>
+    <div hidden={view!=='loading'}><LoadingOrders {...controls} active={view==='loading'}/></div>
     <div hidden={view!=="progress"}><RunningProjects {...controls} active={view==="progress"} onOpenProject={row=>{setView("projects");openProject(row);}}/></div>
     <div hidden={view!=="quantities"}><QuantityTakeoff {...controls} active={view==="quantities"}/></div>
   </div>;

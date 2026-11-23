@@ -27,6 +27,7 @@ const {getProject: getCertificateProject, projectLocations: certificateLocations
 const {addReceipt: addCertificateReceipt} = require("./certificate-ledger.cjs");
 const {initializeOperations,registerOperations,isAdjustment: isOpsAdjustment} = require("./project-operations/index.cjs");
 const {deleteDocumentEverywhere}=require("./project-operations/document-deletion.cjs");
+const {footerMetadata,footerContents,pdfFooter}=require("./report-footer.cjs");
 const {
   fetchManagerSubscriptionStatus,
   registerManagerGatewayRoutes,
@@ -4039,6 +4040,9 @@ function resetLocalCompanyAccount(database, { dataDir, dbPath, chatUploadDir } =
     BEGIN TRANSACTION;
     DELETE FROM cert_pdf_artifacts;
     DELETE FROM cert_audit;
+    DELETE FROM ops_manual_loading_history;
+    DELETE FROM ops_manual_loading_orders;
+    DELETE FROM ops_loading_sequences;
     DELETE FROM ops_audit;
     DELETE FROM ops_confirmations;
     DELETE FROM ops_load_lines;
@@ -7075,7 +7079,8 @@ function renderReportHtmlV2(data) {
     .term-block li.important span{color:#c00000;font-weight:700}
     .footer{margin-top:12px;padding-top:7px;border-top:1px solid var(--report-line);display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;color:var(--brand-name);font-size:11px;direction:ltr;line-height:1.45;align-items:center}
     .footer .left{text-align:left;justify-items:start}.footer .center{text-align:center}.footer .right{text-align:right;justify-items:end}.footer span{display:grid;min-height:42px;align-content:center;gap:2px}.footer em{font-style:normal}
-    @media print{.footer{display:none}}
+    .footer.footer-shared{display:block;border:0;padding-top:0}
+    @media print{.footer,.footer.footer-shared{display:none}}
   </style></head><body><div class="page">
     <header class="brand-head">
       <img class="qr" src="${qrData}" />
@@ -7094,11 +7099,7 @@ function renderReportHtmlV2(data) {
     ${summaryHtml}${statementHtml}${detailHtml}${data.contractor_modern_certificate ? "" : contractorPaymentTableHtml(data)}
     ${totalsHtml(data)}
     ${termsHtml(data)}
-    <footer class="footer">
-      <span class="left"><strong>${reportText(locale, "pagePreview")}</strong><em>EasyCommercial ${escapeHtml(APP_VERSION)}</em></span>
-      <span class="center"><strong>${escapeHtml(footerCenterContact)}</strong><em>${escapeHtml(branding.companyAbbreviation)}</em></span>
-      <span class="right">${reportText(locale, "by")} ${escapeHtml(data.prepared_by || "Eng. Yasser")}</span>
-    </footer>
+    <footer class="footer footer-shared">${footerContents({...footerMetadata(data,branding,APP_VERSION),footerContact:footerCenterContact},true)}</footer>
   </div></body></html>`;
 }
 
@@ -7999,16 +8000,7 @@ function writePdf(html, outputPath, data = {}) {
   const footerContact = brandingFooterContact(branding);
   const footerCenterContact = branding.website || footerContact;
   const locale = reportLocaleFrom(data.report_language);
-  const footerMeta = {
-    companyAbbreviation: branding.companyAbbreviation,
-    companyNameColor: branding.companyNameColor,
-    lineColor: branding.lineColor,
-    bodyFontStack: branding.bodyFontStack,
-    footerContact: footerCenterContact,
-    preparedBy: data.prepared_by || "Eng. Yasser",
-    appVersion: APP_VERSION,
-    locale,
-  };
+  const footerMeta = {...footerMetadata(data,branding,APP_VERSION),footerContact:footerCenterContact};
   if (
     electronRuntime &&
     typeof electronRuntime === "object" &&
@@ -8026,14 +8018,12 @@ function writePdf(html, outputPath, data = {}) {
         await new Promise((resolve) => setTimeout(resolve, 450));
         const {prepareOperationsPrint}=require('./project-operations/print-layout.cjs');
         await win.webContents.executeJavaScript(`(${prepareOperationsPrint.toString()})()`);
-        const preparedBy = escapeHtml(footerMeta.preparedBy);
-        const pdfFontStack = branding.bodyFontStack.replace(/"/g, "'");
         const pdf = await win.webContents.printToPDF({
           landscape: false,
           printBackground: true,
           displayHeaderFooter: true,
           headerTemplate: "<div></div>",
-          footerTemplate: `<div style="width:100%;font-size:9.5px;color:${branding.companyNameColor};padding:4px 28px 0;font-family:${pdfFontStack};background:white;direction:ltr"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;width:100%;min-height:42px;border-top:1px solid ${branding.lineColor}"><div style="text-align:left;line-height:1.45;min-width:0"><bdi dir="${locale === "ar" ? "rtl" : "ltr"}">${locale === "ar" ? "صفحة" : "Page"} <span class="pageNumber"></span> ${locale === "ar" ? "من" : "of"} <span class="totalPages"></span></bdi><br>EasyCommercial ${APP_VERSION}</div><div style="text-align:center;line-height:1.45;min-width:0">${escapeHtml(footerCenterContact)}<br>${escapeHtml(branding.companyAbbreviation)}</div><div style="text-align:right;line-height:1.45;min-width:0"><bdi>${reportText(locale, "by")} ${preparedBy}</bdi></div></div></div>`,
+          footerTemplate: pdfFooter(footerMeta),
           pageSize: "A4",
           margins: {
             marginType: "custom",

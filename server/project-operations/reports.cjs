@@ -48,11 +48,11 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   return `<!doctype html><html lang="${locale}" dir="${locale==="ar"?"rtl":"ltr"}"><head><meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
   <title>${escape(title)}</title><style>
-  @page{size:A4;margin:12mm}*{box-sizing:border-box}
+  @page{size:A4;margin:12mm 12mm 20mm}*{box-sizing:border-box}
   body{font:9.5pt ${String(branding.bodyFontStack||"Arial,Tahoma,sans-serif").replace(/[<>]/g,"")};color:#183148;background:#fff;margin:0;line-height:1.32;print-color-adjust:exact}
   header{display:flex;gap:10px;align-items:center;border-block-end:2px solid ${hex(branding.lineColor,"#26465b")};padding-bottom:7px}
   header img{max-width:56px;max-height:52px}header strong{font-size:17pt;color:${hex(branding.companyNameColor,"#203956")}}
-  h1{font-size:18pt;margin:12px 0 5px}h2{font-size:13pt;margin:10px 0 5px}h3{margin:0 0 5px;font-size:12pt}
+  h1{font-size:18pt;margin:12px 0 5px;color:${hex(branding.companyNameColor,"#203956")}}h2{font-size:13pt;margin:10px 0 5px}h3{margin:0 0 5px;font-size:12pt}
   header strong,h1,h2,h3{font-family:${String(branding.headingFontStack||"Arial,Tahoma,sans-serif").replace(/[<>]/g,"")}}
   .classification{font-weight:700}.watermark{position:fixed;inset:45% 0 auto;text-align:center;z-index:0;
   font-size:28pt;font-weight:800;transform:rotate(-29deg);opacity:.20;color:${watermarkColor||color};pointer-events:none}
@@ -67,7 +67,7 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   dl div{break-inside:avoid}dt{font-size:9pt;font-weight:700;color:#405467}dd{margin:0;overflow-wrap:anywhere}
   table{border-collapse:collapse;width:100%;margin-block:7px}th,td{text-align:start;border-bottom:1px solid #dce7e9;padding:4px}
   td.number{white-space:nowrap;font-variant-numeric:tabular-nums}.work-group h3{font-size:10.5pt}
-  thead{display:table-header-group;background:#e5eef1}tr{break-inside:avoid}
+  thead{display:table-header-group;background:#e5eef1}tr,td,th{break-inside:avoid!important;page-break-inside:avoid!important}
   .loading-sheet{table-layout:fixed;font-size:8.5pt}.loading-sheet td{height:12mm}
   .loading-sheet tbody.opening-band-0{background:#f1f6f8}.loading-sheet tbody.opening-band-1{background:#fff}
   .loading-sheet td:nth-child(2),.loading-sheet td:nth-child(n+4):nth-child(-n+8){white-space:nowrap}
@@ -80,6 +80,9 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   .signatures{display:grid;grid-template-columns:repeat(var(--signers),minmax(0,1fr));gap:16px;padding-top:12px;align-items:start}
   .signatures div{border-top:1px solid #587384;padding-top:6px;min-height:39px;min-width:0;text-align:center;overflow-wrap:anywhere;break-inside:avoid}
   .signoff{break-inside:avoid}
+  .loading-transport dl{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+  .loading-transport dd{min-height:8mm;padding-top:2mm;border-bottom:1px dotted #587384}
+  .project-people{display:flex;gap:6px 22px;flex-wrap:wrap;margin-top:8px}.project-person{white-space:normal;break-inside:avoid}
   </style></head><body>${watermark?`<div class="watermark" lang="en" dir="ltr">${escape(watermark)}</div>`:""}
   <header>${logo?`<img alt="" src="${escape(logo)}">`:""}<div><strong>${escape(name)}</strong>
   ${secondary?`<div>${escape(secondary)}</div>`:""}</div></header><h1>${escape(title)}</h1>
@@ -89,13 +92,13 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
 function projectBlock(db,project,customer,state,order,locale,branding) {
   const t=(ar,en)=>label(ar,en,locale);
   const info=state.details;
-  const organization=(locale==="ar"?branding.companyNameAr:branding.companyNameEn)||branding.companyName;
-  const representatives=people(db,project.id).map((person)=>row([person.name,person.side==="company"?(person.company||organization):person.company,person.position]));
+  const representatives=people(db,project.id).map(person=>'<span class="project-person"><bdi>'+escape(person.name)+'</bdi>'+
+    (person.name&&person.position?' : ':'')+'<bdi>'+escape(person.position)+'</bdi></span>');
   const sources=new Set(order.items.map(({specification})=>specification.source_document_id||state.boq_id));
   const projectBoqs=db.all(`SELECT b.document_id,b.snapshot,d.operation_no,d.document_type FROM ops_project_boqs b
     JOIN documents d ON d.id=b.document_id WHERE b.project_id=?`,[project.id])
     .filter(({document_id})=>sources.has(document_id)).map(({snapshot,...source})=>({...JSON.parse(snapshot),...source}));
-  return `<section>${grid([
+  return `<section class="project-info">${grid([
     [t("المشروع","Project"),project.name],[t("رمز المشروع","Project code"),project.code],
     [t("كود المشروع لدى العميل","Customer project code"),project.customer_project_code],
     [t("العميل","Customer"),customer.display_name],[t("الموقع","Site"),info.location],
@@ -109,8 +112,7 @@ function projectBlock(db,project,customer,state,order,locale,branding) {
     [t("تاريخ الأمر","Order date"),order.created_at?.slice(0,10)],
     [t("موعد التسليم","Required by"),order.required_date],[t("المخطط","Drawing number"),info.drawing_ref],
     [t("إصدار المخطط","Drawing revision"),info.drawing_revision],
-  ])}${representatives.length?`<table><thead>${row([t("الاسم","Name"),t("الشركة","Company"),t("المنصب","Position")],"th")}</thead>
-    <tbody>${representatives.join("")}</tbody></table>`:""}</section>`;
+  ])}${representatives.length?'<div class="project-people">'+representatives.join('')+'</div>':''}</section>`;
 }
 
 const internalFields=new Set(["measurement_status","material_status","manufacturing_status","safety_approval"]);
@@ -322,6 +324,14 @@ function loadingExtras(order,locale){
       entry.label,unitName(unitKey(entry.unit),locale),entry.quantity])).join('')+'</tbody></table></section>';
 }
 
+function loadingTransportBlock(order,locale){
+  const transport=order.loading_transport||{};
+  return '<section class="loading-transport"><dl>'+[
+    [label('رقم السيارة','Vehicle license plate',locale),transport.vehicle_plate],
+    [label('اسم السائق','Driver name',locale),transport.driver_name],
+  ].map(([name,value])=>'<div><dt>'+escape(name)+'</dt><dd><bdi dir="auto">'+escape(value||'')+'</bdi></dd></div>').join('')+'</dl></section>';
+}
+
 function orderSummary(order,locale){
   const totals=orderQuantities(order),t=(ar,en)=>label(ar,en,locale);
   const format=value=>new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(value);
@@ -366,6 +376,11 @@ function report(db,state,rawOrder,options,branding) {
   const project=getProject(db,state.project_id);
   const customer=getCustomer(db,project.customer_id);
   const order=orderDetails(db,rawOrder);
+  if(options.kind==='loading'&&rawOrder.loading_reference){
+    order.loading_reference=rawOrder.loading_reference;
+    order.loading_transport=db.get('SELECT * FROM ops_loading_orders WHERE order_id=? AND reference=?',[order.id,rawOrder.loading_reference]);
+    if(rawOrder.loading_after_load_id!=null)order.balances=require('./production.cjs').loadingBalances(db,order.id,rawOrder.loading_after_load_id);
+  }
   if (order.kind==="maintenance") {
     const body=projectBlock(db,project,customer,state,order,locale,branding)+maintenanceBlock(order,locale)+
       signatures(db,project.id,order,"maintenance",locale);
@@ -381,7 +396,7 @@ function report(db,state,rawOrder,options,branding) {
     approved?t("أمر تصنيع","Manufacturing Order"):t("طلب توريد الخامات","Material Requisition");
   const drawingSets=!loading && !approvals && options.drawings===true ? order.items.map((item)=>eligibleDrawings(db,item)) : [];
   const body=projectBlock(db,project,customer,state,order,locale,branding)+(approvals?approvalReport(db,order,locale):loading?loadingBlock(order,locale):
-    groupedWork(db,order.items,locale,drawingSets))+(!approvals?orderSummary(order,locale):'')+
+    groupedWork(db,order.items,locale,drawingSets))+(!approvals?orderSummary(order,locale):'')+(loading?loadingTransportBlock(order,locale):'')+
     signatures(db,project.id,order,loading?"loading":"manufacturing",locale,options.people);
   const measured=order.stage_approvals.find(({stage})=>stage==="measurement");
   const approvedMeasurements=measured?.items.filter(({approved})=>approved).length||0;
@@ -412,4 +427,4 @@ async function appendDrawings(buffer,drawings) {
   return Buffer.from(await output.save());
 }
 
-module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair,orderSummary};
+module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair,orderSummary,loadingTransportBlock};

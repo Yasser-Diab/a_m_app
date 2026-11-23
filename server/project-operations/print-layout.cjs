@@ -2,17 +2,25 @@
 // keeping small groups intact while allowing long groups to start on page one.
 async function prepareOperationsPrint() {
   const groups=[...document.querySelectorAll('.work-group')];
-  if(!groups.length)return {groups:0,flowing:0};
+  if(!groups.length&&!document.querySelector('.loading-transport,.loading-sheet'))return {groups:0,flowing:0};
   await document.fonts?.ready;
   await Promise.all([...document.images].map(image=>image.decode().catch(()=>{})));
   document.body.style.width='186mm';
   const ruler=document.createElement('div');
-  ruler.style.cssText='position:absolute;visibility:hidden;height:273mm;width:1mm;pointer-events:none';
+  // The native footer needs a real reserved margin; otherwise its white background clips the last row.
+  ruler.style.cssText='position:absolute;visibility:hidden;height:265mm;width:1mm;pointer-events:none';
   document.body.append(ruler);
   const pageHeight=ruler.getBoundingClientRect().height;ruler.remove();
   const style=document.createElement('style');
-  style.textContent='.work-group.ops-flow-group,.shared-specifications.ops-flow-block{break-inside:auto!important;page-break-inside:auto!important}';
+  style.textContent='.work-group.ops-flow-group,.shared-specifications.ops-flow-block{break-inside:auto!important;page-break-inside:auto!important}.loading-dispatch{break-inside:avoid;page-break-inside:avoid}';
   document.head.append(style);
+  for(const transport of document.querySelectorAll('.loading-transport')){
+    const signoffs=transport.nextElementSibling;
+    if(signoffs?.matches('.signoffs')&&!transport.parentElement.matches('.loading-dispatch')){
+      const together=document.createElement('div');together.className='loading-dispatch';transport.before(together);together.append(transport,signoffs);
+      if(together.getBoundingClientRect().height>pageHeight-2)together.style.breakInside='auto';
+    }
+  }
   const bodyTop=document.body.getBoundingClientRect().top;
   let flowing=0;
   for(const [index,group] of groups.entries()){

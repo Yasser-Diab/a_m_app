@@ -140,15 +140,28 @@ function customerData(database,id){
   return {...customer,...party,...raw.company_data};
 }
 function saveCustomerData(database,id,input,user){
-  getCustomer(database,id);
+  const before=customerData(database,id);
+  const name=stripPartyPrefix(str(input.name??before.name));if(!name)fail(400,'Customer name is required');
+  const oldCategory=['retail','corporate'].includes(before.category)?before.category:null;
+  const category=Object.hasOwn(input,'category')?(['retail','corporate'].includes(input.category)?input.category:null):oldCategory;
+  const tax=str(input.tax_no??before.tax_no),search=lookup(name);
+  const other=database.get("SELECT id,tax_no FROM parties WHERE role='customer' AND search_name=? AND id<>?",[search,id]);
+  if(other&&(!tax||!other.tax_no||other.tax_no===tax))fail(409,'Another customer already uses this name');
+  const display=Object.hasOwn(input,'display_name')&&input.display_name!==before.display_name?str(input.display_name):
+    (name===before.name||input.name===before.name)&&category===oldCategory?before.display_name:displayPartyName(name,category||'unselected');
   const raw=parse(database.get('SELECT raw_json FROM cert_customer_profiles WHERE customer_id=?',[id])?.raw_json,{});
   const keys=['legal_name','commercial_registration','vat_registration','tax_office','billing_address','contact_name','contact_position','website'];
-  raw.company_data={...raw.company_data,...Object.fromEntries(keys.map(key=>[key,str(input[key],2000)]))};
+  raw.company_data={...raw.company_data,...Object.fromEntries(keys.filter(key=>Object.hasOwn(input,key)).map(key=>[key,str(input[key],2000)]))};
   database.run('UPDATE parties SET address=?,tax_no=?,phone=?,email=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    [str(input.address,2000),str(input.tax_no),str(input.phone),str(input.email),str(input.notes,4000),id]);
+    [str(input.address??before.address,2000),tax,str(input.phone??before.phone),str(input.email??before.email),str(input.notes??before.notes,4000),id]);
+  database.run('UPDATE parties SET base_name=?,display_name=?,search_name=?,category=? WHERE id=?',[name,display,other?search+' '+lookup(tax):search,category,id]);
+  database.run("UPDATE documents SET customer_name=?,search_party_name=?,party_category=?,updated_at=CURRENT_TIMESTAMP WHERE party_id=?",[display,search,category||'unselected',id]);
+  database.run("UPDATE work_items SET customer_name=?,customer_display_name=?,search_party_name=?,party_category=?,updated_at=CURRENT_TIMESTAMP WHERE party_id=?",[name,display,search,category||'unselected',id]);
   database.run(`INSERT INTO cert_customer_profiles(customer_id,raw_json) VALUES(?,?)
     ON CONFLICT(customer_id) DO UPDATE SET raw_json=excluded.raw_json`,[id,encode(raw)]);
-  audit(database,user,'customer_data_updated',{details:{customer_id:id}});
+  database.run('UPDATE cert_customer_profiles SET alternate_name=?,print_contact=? WHERE customer_id=?',
+    [str(input.alternate_name??before.alternate_name),str(input.print_contact??before.print_contact),id]);
+  audit(database,user,'customer_data_updated',{details:{customer_id:id,before,after:{name,display_name:display,category}}});
   return customerData(database,id);
 }
 
@@ -198,14 +211,22 @@ function updateProject(database, project, body) {
   const previousNames = [...parse(project.name_history,[]),project.name,project.alternate_name];
   raw.name_history = [...new Set(previousNames.filter((previous) => !currentNames.has(lookup(previous))))];
   if (project.historical_only && (address || searchName !== lookup(project.name))) delete raw.workbook_project_missing;
-  database.run(`UPDATE cert_projects SET name=?,search_name=?,alternate_name=?,address=?,contract_ref=?,contract_date=?,raw_json=? WHERE id=?`,
-    [name,searchName,alternateName,address,contract,contractDate,encode(raw),project.id]);
+  database.run(`UPDATE cert_projects SET name=?,search_name=?,alternate_name=?,address=?,contract_ref=?,contract_date=?,currency=?,raw_json=? WHERE id=?`,
+    [name,searchName,alternateName,address,contract,contractDate,currency(body.currency??project.currency),encode(raw),project.id]);
+  if(name!==project.name){
+    const aliases=projectLookupKeys(project);
+    const ambiguous=database.all('SELECT id,name,alternate_name,code,raw_json FROM cert_projects WHERE customer_id=? AND id<>?',[project.customer_id,project.id])
+      .some(other=>[other.name,other.alternate_name,...parse(other.raw_json,{}).name_history||[]].some(value=>aliases.has(lookup(value))));
+    if(!ambiguous)for(const table of ['documents','work_items'])
+      for(const row of database.all(`SELECT id,project FROM ${table} WHERE party_id=? AND project<>''`,[project.customer_id]))
+        if(aliases.has(lookup(row.project)))database.run(`UPDATE ${table} SET project=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`,[name,row.id]);
+  }
   if(database.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ops_projects'")){
     const state=database.get('SELECT details FROM ops_projects WHERE project_id=?',[project.id]);
     if(state){
       const details=parse(state.details,{}),before=encode(details);
       for(const [key,value,previous] of [['address',address,project.address],['contract_ref',contract,project.contract_ref]])
-        if(Object.hasOwn(body,key)&&(!details[key]||details[key]===previous))details[key]=value;
+        if(Object.hasOwn(body,key)&&(value!==previous||!details[key]||details[key]===previous))details[key]=value;
       if(encode(details)!==before)database.run('UPDATE ops_projects SET details=?,version=version+1 WHERE project_id=?',[encode(details),project.id]);
     }
   }

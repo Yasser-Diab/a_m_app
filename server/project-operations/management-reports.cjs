@@ -5,7 +5,7 @@ const {pageOptions}=require("./core.cjs");
 const {unitKey,unitName}=require('./order-quantities.cjs');
 const stages={specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],
   materials:["اعتماد الخامات","Materials"],manufacturing:["التصنيع","Manufacturing"],qc:["فحص ما قبل الشحن","Pre-shipment QC"],
-  loading:["التحميل","Loading"],maintenance:["الصيانة","Maintenance"],completed:["مكتمل","Completed"],review:["مراجعة التعديلات","Changes to review"]};
+  loading:["التحميل","Loading"],maintenance:["الصيانة","Maintenance"],completed:["مكتمل","Completed"],review:["مراجعة التعديلات","Changes to review"],rejected:["مرفوض","Rejected"]};
 const components={frames:["حلوق","Frames"],screens:["ضلف سلك","Flyscreen leaves"],sliding:["ضلف جرار","Sliding leaves"],
   hinged:["ضلف مفصلي","Hinged leaves"],fixed:["ثوابت","Fixed panels"],other:["ضلف أخرى","Other leaves"],items:["وحدات","Items"]};
 const round=value=>Math.round((value+Number.EPSILON)*1e6)/1e6;
@@ -28,7 +28,7 @@ function reportOptions(db,access){
 function grouped(rows,key){const result=new Map();for(const item of rows){const entries=result.get(item[key])||[];entries.push(item);result.set(item[key],entries);}return result;}
 function sourceData(db,projects){
   const ids=JSON.stringify(projects.map(({id})=>id)),inside="IN (SELECT value FROM json_each(?))";
-  const items=db.all(`SELECT id,code,project_id,active,version,category,system,technical,commercial FROM ops_items WHERE project_id ${inside}`,[ids])
+  const items=db.all(`SELECT id,code,project_id,source_document_id,active,version,category,system,technical,commercial FROM ops_items WHERE project_id ${inside}`,[ids])
     .map(item=>({...item,technical:parse(item.technical,{}),commercial:parse(item.commercial,{})}));
   const orders=db.all(`SELECT * FROM ops_orders WHERE project_id ${inside} ORDER BY id DESC`,[ids]);
   const openings=db.all(`SELECT oi.*,o.project_id,o.status,o.kind FROM ops_order_items oi JOIN ops_orders o ON o.id=oi.order_id
@@ -61,9 +61,32 @@ function runningProjects(db,access,query={},all=false){
   inspections.forEach(item=>{const record=parse(item.record,{}),key=item.order_item_id+":"+record.item_version+":"+item.stage;
     if(!qc.has(key))qc.set(key,record.release==="approved");});
   reviews.forEach(item=>decisions.set(item.order_item_id+":"+item.item_version+":"+item.stage,item.approved));
+  const seenItems=new Set(approvals.map(item=>item.item_id)),seenOrders=new Set();
+  for(const entry of db.all(`SELECT action,entity_id,details FROM ops_audit WHERE project_id IN (SELECT value FROM json_each(?))
+    AND action IN('manufacturing_components_reviewed','order_stage_approved')`,[data.ids])){
+    if(entry.action==='order_stage_approved')seenOrders.add(entry.entity_id);
+    else if(parse(entry.details,{}).decisions?.length)seenItems.add(entry.entity_id);
+  }
+  const orderStates=new Map();
+  const openingsByOrder=grouped(data.openings,'order_id'),openingsByItem=grouped(data.openings,'item_id');
+  const withdrawn=new Set(reviews.filter(review=>review.approved===0).map(review=>review.order_item_id+':'+review.item_version));
+  for(const order of data.orders){
+    const rows=openingsByOrder.get(order.id)||[];
+    const started=order.kind==='maintenance'||seenOrders.has(order.id)||rows.some(row=>seenItems.has(row.item_id));
+    const rejected=started&&order.kind!=='maintenance'&&rows.some(row=>withdrawn.has(row.id+':'+byId.get(row.item_id)?.version));
+    orderStates.set(order.id,{started,rejected});
+  }
   const records=projects.map(project=>{
-    const items=(data.itemsByProject.get(project.id)||[]).filter(item=>item.active),orders=data.ordersByProject.get(project.id)||[];
-    const projectOpenings=data.openingsByProject.get(project.id)||[],openings=projectOpenings.filter(item=>item.kind!=="maintenance");
+    const allItems=data.itemsByProject.get(project.id)||[],allOrders=data.ordersByProject.get(project.id)||[],allOpenings=data.openingsByProject.get(project.id)||[];
+    const orders=allOrders.filter(order=>orderStates.get(order.id)?.started&&!(query.exclude_rejected==='1'&&orderStates.get(order.id)?.rejected));
+    const orderIds=new Set(orders.map(order=>order.id));
+    const projectOpenings=allOpenings.filter(item=>orderIds.has(item.order_id)),openings=projectOpenings.filter(item=>item.kind!=="maintenance");
+    const includedSources=new Set(projectOpenings.map(item=>byId.get(item.item_id)?.source_document_id));
+    for(const item of allItems)if(seenItems.has(item.id)&&!openingsByItem.has(item.id))includedSources.add(item.source_document_id);
+    const items=allItems.filter(item=>item.active&&includedSources.has(item.source_document_id));
+    if(!items.length&&!orders.length)return null;
+    const rejected=orders.length?orders.every(order=>orderStates.get(order.id)?.rejected):items.some(item=>seenItems.has(item.id))&&!items.some(item=>parts.get(item.id)?.size);
+    if(query.exclude_rejected==='1'&&rejected)return null;
     const counts={items:items.length,specifications:items.filter(item=>item.system).length,measurement:0,materials:0,
       manufacturing:0,qc:0,ordered:0,required:0,loaded:0,stale:0,maintenance:orders.filter(order=>order.kind==="maintenance"&&order.status!=="closed").length};
     for(const item of items){const approved=parts.get(item.id)||new Set();if(approved.has("measurement"))counts.measurement++;
@@ -76,15 +99,15 @@ function runningProjects(db,access,query={},all=false){
         decisions.get(opening.id+":"+version+":manufacturing")!==0)counts.manufacturing+=opening.quantity;
       if(qc.get(opening.id+":"+version+":pre_shipment"))counts.qc+=opening.quantity;
     }
-    counts.loaded=(data.loadsByProject.get(project.id)||[]).reduce((sum,load)=>sum+load.quantity,0);
+    counts.loaded=(data.loadsByProject.get(project.id)||[]).filter(load=>orderIds.has(load.order_id)).reduce((sum,load)=>sum+load.quantity,0);
     const fullyOrdered=items.length>0&&items.every(item=>item.technical.quantity>0&&projectOpenings.filter(opening=>opening.item_id===item.id)
       .reduce((sum,opening)=>sum+opening.quantity,0)>=item.technical.quantity);
     const completed=/^(مكتمل|مغلق|ملغي|completed|closed|cancelled)$/i.test(project.details.status||"")||fullyOrdered&&orders.length>0&&orders.every(order=>order.status==="closed");
-    const stage=completed?"completed":counts.stale?"review":counts.maintenance&&!openings.length?"maintenance":
+    const stage=rejected?'rejected':completed?"completed":counts.stale?"review":counts.maintenance&&!openings.length?"maintenance":
       !counts.items||counts.specifications<counts.items?"specifications":counts.measurement<counts.items?"measurement":counts.materials<counts.items?"materials":
       !counts.ordered||counts.manufacturing<counts.ordered?"manufacturing":counts.qc<counts.ordered?"qc":"loading";
-    return {...project,counts,stage,completed,loading_percent:counts.required?round(Math.min(100,counts.loaded/counts.required*100)):0};
-  }).filter(item=>query.include_completed==="1"||!item.completed);
+    return {...project,counts,stage,completed,has_rejected:rejected||orders.some(order=>orderStates.get(order.id)?.rejected),orders:orders.map(order=>({id:order.id,reference:order.reference,rejected:orderStates.get(order.id)?.rejected})),loading_percent:counts.required?round(Math.min(100,counts.loaded/counts.required*100)):0};
+  }).filter(item=>item&&(item.has_rejected||query.include_completed==="1"||!item.completed));
   const paging=pageOptions(query);
   return {items:all?records:records.slice(paging.offset,paging.offset+paging.limit),total:records.length,page:paging.page,limit:paging.limit};
 }
@@ -140,7 +163,7 @@ function managementReport(kind,data,options,branding){
     body='<section>'+grid([[t("تاريخ التقرير","Report date"),today()],[t("المشروعات","Projects"),data.total]])+'</section>'+
       '<section class="loading"><table><thead>'+row([t("المشروع / العميل","Project / customer"),t("المرحلة الحالية","Current stage"),t("المواصفات","Specifications"),
         t("المقاسات","Measurements"),t("الخامات","Materials"),t("التصنيع","Manufacturing"),t("الفحص","QC"),t("التحميل","Loading")],"th")+'</thead><tbody>'+
-      data.items.map(item=>row([item.code+' · '+item.name+' / '+item.customer,[t(...stages[item.stage]),item.details.status].filter(Boolean).join(' · '),ratio(item.counts.specifications,item.counts.items),
+      data.items.map(item=>row([item.code+' · '+item.name+' / '+item.customer+(item.orders?.length?' · '+item.orders.map(order=>order.reference+(order.rejected?' ('+t(...stages.rejected)+')':'')).join(' / '):''),[t(...stages[item.stage]),item.details.status].filter(Boolean).join(' · '),ratio(item.counts.specifications,item.counts.items),
         ratio(item.counts.measurement,item.counts.items),ratio(item.counts.materials,item.counts.items),ratio(item.counts.manufacturing,item.counts.ordered),
         ratio(item.counts.qc,item.counts.ordered),item.counts.required?format(item.loading_percent)+'%':'—'])).join('')+'</tbody></table></section>';
   }else{

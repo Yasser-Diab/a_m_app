@@ -209,6 +209,37 @@ CREATE TABLE IF NOT EXISTS ops_loading_orders (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(order_id,after_load_id)
 );
+CREATE TABLE IF NOT EXISTS ops_loading_sequences (
+  project_id INTEGER PRIMARY KEY REFERENCES cert_projects(id) ON DELETE CASCADE,
+  number INTEGER NOT NULL CHECK(number>0)
+);
+CREATE TABLE IF NOT EXISTS ops_manual_loading_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES cert_projects(id) ON DELETE RESTRICT,
+  reference TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  command_key TEXT NOT NULL UNIQUE,
+  loading_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','issued','cancelled')),
+  items TEXT NOT NULL CHECK(json_valid(items)),
+  signatures TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(signatures)),
+  vehicle_plate TEXT NOT NULL DEFAULT '',
+  driver_name TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS ops_manual_loading_project ON ops_manual_loading_orders(project_id,id DESC);
+CREATE TABLE IF NOT EXISTS ops_manual_loading_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  loading_order_id INTEGER NOT NULL REFERENCES ops_manual_loading_orders(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(loading_order_id,version)
+);
 CREATE TABLE IF NOT EXISTS ops_load_lines (
   load_id INTEGER NOT NULL REFERENCES ops_loads(id) ON DELETE CASCADE,
   order_item_id INTEGER NOT NULL REFERENCES ops_order_items(id),

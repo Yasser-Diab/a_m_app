@@ -346,12 +346,25 @@ function Loading({order,endpoint,request,t,people,reload,close}) {
   </Dialog>;
 }
 
-function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,close,apiBase,session,reference,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}) {
+export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenance,approvals,people,close,apiBase,session,reference,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}) {
   const [draft,setDraft]=useState({classification:"materials",drawings:true,measurement_watermark:false,people:{},locale:uiLanguage});
   const [pdf,setPdf]=useState(null);
   const [error,setError]=useState(null);
   const [busy,setBusy]=useState(false);
   const [editingReport,setEditingReport]=useState(false),[reportSaved,setReportSaved]=useState(false);
+  const [transport,setTransport]=useState(null),[transportDirty,setTransportDirty]=useState(false);
+  useEffect(()=>{
+    if(!loading)return;
+    const controller=new AbortController();
+    request(endpoint+'/loading-transport/prepare',{method:'POST',body:{loading_reference:loadingReference},signal:controller.signal}).then(data=>{setTransport(data);setDraft(current=>({...current,loading_reference:data.reference}));})
+      .catch(cause=>{if(!controller.signal.aborted)setError(cause);});
+    return()=>controller.abort();
+  },[loading,loadingReference,endpoint,request]);
+  async function saveTransport(){
+    if(!loading||!transportDirty)return;
+    const saved=await request(endpoint+'/loading-transport',{method:'PATCH',body:{...transport,document_ref:transport.reference}});
+    setTransport(saved);setTransportDirty(false);reload();
+  }
   const frame=useRef(null);
   const abort=useRef(null);
   useEffect(()=>()=>abort.current?.abort(),[]);
@@ -367,6 +380,7 @@ function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,clos
     const controller=new AbortController();
     abort.current=controller;
     try {
+      await saveTransport();
       const response=await fetch(`${apiBase.replace(/\/$/,"")}/api/project-operations${endpoint}/pdf`,{
         method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session}`},signal:controller.signal,
         body:JSON.stringify({...draft,kind}),
@@ -410,6 +424,13 @@ function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,clos
             ["materials",t("طلب خامات","Material requisition")],["manufacturing",t("أمر تصنيع","Manufacturing order")],
           ]}/>}
       </div>
+      {loading&&<div className="pc-stack">
+        <div className="pc-form">{[['vehicle_plate',t('رقم السيارة','Vehicle license plate')],['driver_name',t('اسم السائق','Driver name')]].map(([key,label])=>
+          <label key={key}>{label}<input type="text" value={transport?.[key]||''} maxLength={key==='vehicle_plate'?100:200} disabled={!transport||!can('edit')}
+            onChange={event=>{setTransport({...transport,[key]:event.target.value});setTransportDirty(true);setPdf(null);}}/></label>)}</div>
+        <small>{t('اختياري — عند تركه فارغًا تظهر خانة للكتابة اليدوية في التقرير. تحفظ البيانات لهذا الأمر عند المعاينة.',
+          'Optional — blank fields remain available for handwriting. Details are saved for this loading order when you preview.')}</small>
+      </div>}
       {!maintenance&&!approvals&&(loading?null:
         <div className="ops-options">
           <label className="pc-check"><input type="checkbox" checked={draft.drawings} onChange={(event)=>set("drawings",event.target.checked)}/>{t("إدراج الرسومات","Include drawings")}</label>
@@ -420,8 +441,8 @@ function Report({endpoint,t,uiLanguage,loading,maintenance,approvals,people,clos
         <ProjectSignatures {...{ctx,path,request,t,can,reload,people}} initialKind={loading?"loading":"manufacturing"} fixedKind/>
       </details>}
       <div className="pc-toolbar">
-        {!approvals&&<button type="button" onClick={()=>{setEditingReport(true);setPdf(null);setReportSaved(false);}}>{t('تحرير قبل التصدير','Edit before export')}</button>}
-        <button className="primary" type="submit">{t("معاينة","Preview")}</button>
+        {!approvals&&<button type="button" disabled={loading&&!transport} onClick={async()=>{try{await saveTransport();setEditingReport(true);setPdf(null);setReportSaved(false);}catch(cause){setError(cause);}}}>{t('تحرير قبل التصدير','Edit before export')}</button>}
+        <button className="primary" type="submit" disabled={loading&&!transport}>{t("معاينة","Preview")}</button>
         <button type="button" disabled={!pdf} onClick={()=>output(false)}>{t("تنزيل PDF","Download PDF")}</button>
         <button type="button" disabled={!pdf} onClick={()=>output(true)}>{t("فتح للطباعة","Open for printing")}</button>
       </div>

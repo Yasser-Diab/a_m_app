@@ -10,6 +10,7 @@ const production = require("./production.cjs");
 const finance = require("./finance.cjs");
 const management = require("./management-reports.cjs");
 const sourceRefresh=require("./source-refresh.cjs");
+const loadingOrders=require('./loading-orders.cjs');
 const {editedReport,saveReportEdit}=require('./report-edits.cjs');
 const {report,appendDrawings,reportFilename} = require("./reports.cjs");
 const {awardReference}=require("./references.cjs");
@@ -42,6 +43,10 @@ function initializeOperations(db) {
     addColumn("ops_orders","service_data","TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(service_data))");
     addColumn("ops_orders","loading_settings","TEXT NOT NULL DEFAULT '{\"enabled\":false,\"rows\":[]}' CHECK(json_valid(loading_settings))");
     addColumn("ops_orders","loading_settings_version","INTEGER NOT NULL DEFAULT 0");
+    addColumn("ops_loading_orders","vehicle_plate","TEXT NOT NULL DEFAULT ''");
+    addColumn("ops_loading_orders","driver_name","TEXT NOT NULL DEFAULT ''");
+    addColumn("ops_loading_orders","version","INTEGER NOT NULL DEFAULT 0");
+    addColumn("ops_loading_orders","previous_reference","TEXT");
     addColumn("ops_loads","command_key","TEXT");
     addColumn("ops_inspections","reference","TEXT");
     addColumn("ops_confirmations","command_key","TEXT");
@@ -72,6 +77,7 @@ function initializeOperations(db) {
       if(!seeded.has(key))seeded.set(key,current);
     }
     for(const current of [...seeded.values()].reverse())defaults.rememberProjectSpecification(db,current);
+    require('./references.cjs').migrateLoadingReferences(db);
   });
 }
 
@@ -138,6 +144,17 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   const order=(req,id)=>production.order(db,id,idOf(req.params.orderId));
   const change=(req,id)=>core.getChange(db,id,idOf(req.params.changeId));
   const base="/projects/:projectId";
+  get('/loading-options',(req,access)=>loadingOrders.options(db,access,req.query));
+  get('/loading-orders',(req,access)=>loadingOrders.list(db,access,req.query));
+  get('/loading-orders/:loadingId',(req,access)=>loadingOrders.get(db,access,idOf(req.params.loadingId)));
+  post('/loading-orders','ops_edit',(req,access)=>loadingOrders.create(db,access,req.body));
+  patch('/loading-orders/:loadingId','ops_edit',(req,access)=>loadingOrders.update(db,access,idOf(req.params.loadingId),req.body));
+  endpoint('post','/loading-orders/:loadingId/pdf','ops_export',async(req,access,_,res)=>{
+    const order=loadingOrders.get(db,access,idOf(req.params.loadingId)),html=loadingOrders.manualReport(order,req.body,branding());
+    const pdf=await renderPdf(html,{report_language:req.body.locale==='en'?'en':'ar',prepared_by:access.user.display_name||access.user.username});
+    const name=reportFilename(order.customer,{reference:order.reference,loading_reference:order.reference},{kind:'loading',locale:req.body.locale});
+    res.set('Cache-Control','no-store').set('Access-Control-Expose-Headers','Content-Disposition').attachment(name).type('application/pdf').send(pdf);
+  });
   get("/catalogue",()=>specs.catalogueForClient(db));
   get("/projects",(req,access)=>core.projectChoices(db,access,req.query));
   get("/report-options",(_,access)=>management.reportOptions(db,access));
@@ -260,6 +277,8 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   get(base+"/orders/:orderId",(req,_,id)=>production.orderDetails(db,order(req,id)));
   patch(base+"/orders/:orderId/loading-settings","ops_edit",(req,access,id)=>
     production.saveLoadingSettings(db,order(req,id),req.body,access.user));
+  post(base+"/orders/:orderId/loading-transport/prepare","ops_export",(req,access,id)=>production.loadingTransport(db,order(req,id),access.user,req.body.loading_reference));
+  patch(base+"/orders/:orderId/loading-transport","ops_edit",(req,access,id)=>production.saveLoadingTransport(db,order(req,id),req.body,access.user));
   patch(base+"/orders/:orderId","ops_release",(req,access,id)=>production.updateOrderStatus(db,order(req,id),req.body,access.user));
   post(base+"/orders/:orderId/complete","ops_edit",(req,access,id)=>
     production.completeService(db,order(req,id),req.body,access.user));

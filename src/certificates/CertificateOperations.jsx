@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, ProjectDetailsFields, queryString, ReportGroupingChecks, Status, useDebounce, useResource } from "./shared.jsx";
 import "./certificates.css";
+import {CustomerForm} from './CustomersData.jsx';
 
 export function ProjectPicker({ value, onSelect, request, t, disabled }) {
   const [search, setSearch] = useState("");
@@ -27,6 +28,7 @@ export function ProjectSettings({ request, project: startProject, canManage, t, 
   const [reload, setReload] = useState(0);
   const [updatedProject, setUpdatedProject] = useState(null);
   const project = useResource(request, choice?.id ? `/projects/${choice.id}` : null, reload);
+  const customer=useResource(request,project.data?.customer_id?'/customers/'+project.data.customer_id:null,reload);
   const details = project.data && updatedProject?.id === project.data.id ? {...project.data,...updatedProject} : project.data;
   return <section className="pc-panel pc-stack">
     <div className="pc-toolbar"><h2>{t("إعدادات المشروع", "Project settings")}</h2></div>
@@ -34,6 +36,9 @@ export function ProjectSettings({ request, project: startProject, canManage, t, 
     <Problem error={project.error} t={t} />
     {project.pending && <p role="status">{t("جارٍ تحميل الإعدادات…", "Loading settings…")}</p>}
     {details && <>
+      {customer.data&&<details><summary>{t('بيانات العميل','Customer details')}</summary><CustomerForm key={customer.data.id+':'+reload} data={customer.data} {...{request,t}} canEdit={canManage&&customer.data.can_edit!==false} saved={async()=>{
+        const current=await request('/projects/'+choice.id);setChoice(current);setUpdatedProject(current);setReload(value=>value+1);onProjectSaved?.(current);
+      }}/></details>}
       <ProjectDetailsForm key={details.id} project={details} request={request} canManage={canManage} t={t} onSaved={(saved) => {
         setChoice(saved);
         setUpdatedProject(saved);

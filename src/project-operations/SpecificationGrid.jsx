@@ -10,7 +10,7 @@ import {technicalText,fieldOptions,configurationTags,perimeterText,hasTrim,partM
 import {ColumnFilter,SelectionStatus,TableSearchPanel,SearchMatchText} from '../table-tools.jsx';
 import {tableReplacementCandidates,offsetIndex} from '../table-tools.mjs';
 
-const mainKeys=["opening_description","tag","category","system","quantity","width_mm","height_mm","profile","color","infill"];
+const mainKeys=["opening_description","tag","category","system","quantity","width_mm","height_mm","profile","color","infill","trim_type","trim_size_cm"];
 const special={
   opening_description:{ar:"وصف الفتحة",en:"Opening description"},
   category:{ar:"نوع البند",en:"Work type"},

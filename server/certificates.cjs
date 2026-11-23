@@ -81,7 +81,7 @@ function projectsResponse(database, req, access) {
       AND (? = '' OR search_name LIKE ? OR alternate_name LIKE ? OR code LIKE ? OR contract_ref LIKE ? OR address LIKE ?
         OR EXISTS (SELECT 1 FROM json_each(cert_projects.raw_json,'$.name_history') WHERE value LIKE ?)
         OR json_extract(raw_json,'$.customer_project_code') LIKE ?)
-    ORDER BY created_at DESC,id DESC LIMIT 200
+    ORDER BY created_at DESC,id DESC ${customerId&&req.query.all==='1'?'':'LIMIT 200'}
   `, [...scope.params,customerId,customerId,matches,`%${matches}%`,`%${str(req.query.q)}%`,`%${matches}%`,`%${str(req.query.q)}%`,
     `%${str(req.query.q)}%`,`%${str(req.query.q)}%`,`%${str(req.query.q)}%`]);
   return rows.map(({name_history,...row}) => ({...row,search_aliases:parse(name_history,[])}));
@@ -372,7 +372,7 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     if(!access.all_projects&&!database.get(`SELECT 1 FROM cert_projects cp WHERE cp.customer_id=? AND ${scope.clause}`,[id,...scope.params]))fail(404,'Customer not found');
     return {access,id};
   }
-  router.get('/customers/:customerId',(req,res)=>{const {id}=scopedCustomer(req,'view');res.json(customerData(database,id));});
+  router.get('/customers/:customerId',(req,res)=>{const {id,access}=scopedCustomer(req,'view');res.json({...customerData(database,id),can_edit:access.capabilities.includes('create_master')&&hasMasterPermission(access)});});
   router.put('/customers/:customerId',(req,res)=>{
     const {access,id}=scopedCustomer(req,'create_master');
     if(!hasMasterPermission(access))fail(403,'Company settings permission is required to edit customer data');

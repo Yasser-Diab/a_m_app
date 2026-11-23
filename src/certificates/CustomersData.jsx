@@ -1,7 +1,7 @@
 import {useCallback,useState} from 'react';
 import {Combobox,Field,Problem,ProjectDetailsFields,queryString,useCertificateApi,useDebounce,useResource} from './shared.jsx';
 import './certificates.css';
-const fields=[['legal_name','الاسم القانوني / الضريبي','Registered / tax name'],['address','عنوان المقر الرئيسي','Head office address'],
+const fields=[['name','اسم العميل','Customer name'],['alternate_name','الاسم باللغة الأخرى','Name in other language'],['print_contact','بيانات التواصل المطبوعة','Printed contact'],['legal_name','الاسم القانوني / الضريبي','Registered / tax name'],['address','عنوان المقر الرئيسي','Head office address'],
   ['tax_no','رقم التسجيل الضريبي','Tax registration no.'],['commercial_registration','رقم السجل التجاري','Commercial registration no.'],
   ['vat_registration','رقم تسجيل القيمة المضافة','VAT registration no.'],['tax_office','المأمورية الضريبية','Tax office'],
   ['billing_address','عنوان المراسلات والفواتير','Billing address'],['phone','هاتف الشركة','Company phone'],['email','البريد الإلكتروني','Email'],
@@ -11,31 +11,33 @@ export default function CustomersData({api,session,access,uiLanguage}){
   const [selected,setSelected]=useState(null),[search,setSearch]=useState(''),[revision,reload]=useState(0),q=useDebounce(search);
   const choices=useResource(request,'/customers'+queryString({q}),revision);
   const data=useResource(request,selected?'/customers/'+selected.id:null,revision);
-  const projects=useResource(request,selected?'/projects'+queryString({customer_id:selected.id}):null,revision);
+  const projects=useResource(request,selected?'/projects'+queryString({customer_id:selected.id,all:1}):null,revision);
   const canEdit=access?.capabilities?.includes('create_master')&&Boolean(access.can_admin||access.user?.can_edit_company_settings||access.inherited_from_role);
   return <div className="pc-workspace" dir={uiLanguage==='ar'?'rtl':'ltr'}><section className="pc-panel pc-stack"><h2>{t('بيانات العملاء','Customers Data')}</h2>
     <Combobox label={t('العميل','Customer')} selected={selected} options={choices.data||[]} onSelect={setSelected} onSearch={setSearch}
       onClear={()=>{setSelected(null);setSearch('');}} t={t}/><Problem error={choices.error||data.error||projects.error} t={t}/>
-    {data.data&&<CustomerForm key={data.data.id+':'+revision} data={data.data} {...{request,t,canEdit}} saved={()=>reload(value=>value+1)}/>}
+    {data.data&&<CustomerForm key={data.data.id+':'+revision} data={data.data} {...{request,t,canEdit}} saved={customer=>{setSelected(customer);reload(value=>value+1);}}/>}
     {!!projects.data?.length&&<section className="pc-stack"><h3>{t('مشروعات العميل','Customer projects')}</h3>
-      {projects.data.map(project=><ProjectForm key={project.id} {...{project,request,t}} canEdit={access?.capabilities?.includes('manage_settings')}/>)}</section>}
+      <div className="pc-table-scroll"><table className="pc-table"><thead><tr>{[t('المشروع','Project'),t('الكود','Code'),t('العنوان','Address'),t('العقد','Contract'),''].map((label,index)=><th key={index}>{label}</th>)}</tr></thead><tbody>
+        {projects.data.map(project=><ProjectForm key={project.id+':'+revision} {...{project,request,t}} canEdit={access?.capabilities?.includes('manage_settings')}/>)}</tbody></table></div></section>}
   </section></div>;
 }
-function CustomerForm({data,request,t,canEdit,saved}){
+export function CustomerForm({data,request,t,canEdit,saved}){
   const [draft,setDraft]=useState(data),[busy,setBusy]=useState(false),[error,setError]=useState(null);
   return <form className="pc-stack" onSubmit={async event=>{event.preventDefault();setBusy(true);setError(null);
-    try{await request('/customers/'+data.id,{method:'PUT',body:draft});saved();}catch(cause){setError(cause);}finally{setBusy(false);}}}>
+    try{const result=await request('/customers/'+data.id,{method:'PUT',body:draft});await saved(result);}catch(cause){setError(cause);}finally{setBusy(false);}}}>
     <p><bdi>{data.display_name}</bdi> · <bdi>{data.code}</bdi></p><fieldset disabled={!canEdit||busy}><div className="pc-form">
+      <Field label={t('نوع العميل','Customer type')}><select value={draft.category||''} onChange={event=>setDraft({...draft,category:event.target.value})}><option value="">—</option><option value="retail">{t('فرد','Individual')}</option><option value="corporate">{t('شركة','Company')}</option></select></Field>
       {fields.map(([key,ar,en])=><Field key={key} label={t(ar,en)}><input dir="auto" value={draft[key]||''} onChange={event=>setDraft({...draft,[key]:event.target.value})}/></Field>)}
     </div></fieldset><Problem error={error} t={t}/>{canEdit&&<div><button type="submit" className="primary" disabled={busy}>{t('حفظ بيانات العميل','Save customer data')}</button></div>}
   </form>;
 }
 function ProjectForm({project,request,t,canEdit}){
   const [draft,setDraft]=useState(project),[error,setError]=useState(null),[busy,setBusy]=useState(false),[saved,setSaved]=useState(false);
-  return <details><summary><bdi>{project.name} · {project.code}</bdi></summary><form className="pc-stack" onSubmit={async event=>{
+  return <tr><td>{draft.name}</td><td><bdi>{project.code}</bdi></td><td>{draft.address}</td><td>{draft.contract_ref}</td><td><details><summary>{t('تعديل البيانات','Edit details')}</summary><form className="pc-stack" onSubmit={async event=>{
     event.preventDefault();setBusy(true);setError(null);try{setDraft(await request('/projects/'+project.id,{method:'PATCH',body:draft}));setSaved(true);}catch(cause){setError(cause);}finally{setBusy(false);}}}>
     <fieldset disabled={!canEdit||busy}><ProjectDetailsFields {...{draft,t}} onChange={(key,value)=>{setDraft({...draft,[key]:value});setSaved(false);}}/></fieldset>
     <Problem error={error} t={t}/>{canEdit&&<div><button type="submit" disabled={busy}>{t('حفظ بيانات المشروع','Save project details')}</button></div>}
     {saved&&<p role="status">{t('تم حفظ بيانات المشروع.','Project details saved.')}</p>}
-  </form></details>;
+  </form></details></td></tr>;
 }

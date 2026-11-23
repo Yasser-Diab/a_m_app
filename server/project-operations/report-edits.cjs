@@ -31,6 +31,19 @@ function saved(db,current,options){const key=identity(current,options);return {k
 function editedReport(db,current,options,html){
   const {key,row}=saved(db,current,options);
   let body=row?.body_html;
+  if(body!=null){
+    const fresh=html.match(/<section class="project-info">[\s\S]*?<\/section>/)?.[0];
+    const previous=[...body.matchAll(/<section\b[^>]*>[\s\S]*?<\/section>/g)].map(match=>match[0]).find(section=>
+      section.startsWith('<section class="project-info">')||section.includes('<dt>المشروع</dt>')&&section.includes('<dt>رمز المشروع</dt>')||section.includes('<dt>Project</dt>')&&section.includes('<dt>Project code</dt>'));
+    if(fresh&&previous){
+      const managed=new Set(['المشروع','رمز المشروع','كود المشروع لدى العميل','العميل','الموقع','عنوان الموقع','المبنى / القطاع','رقم الإسناد','رقم عقد العميل أو أمر الشراء','الفاتورة','عرض السعر','رقم أمر الصيانة','رقم أمر التشغيل','تاريخ الأمر','موعد التسليم','المخطط','إصدار المخطط',
+        'Project','Project code','Customer project code','Customer','Site','Site address','Building / sector','Award no.','Client contract or PO no.','Invoice','Quotation','Maintenance order no.','Work order no.','Order date','Required by','Drawing number','Drawing revision']);
+      const custom=[...previous.matchAll(/<div><dt>([\s\S]*?)<\/dt><dd>[\s\S]*?<\/dd><\/div>/g)].filter(match=>!managed.has(match[1])).map(match=>match[0]).join('');
+      body=body.replace(previous,()=>fresh.replace('</section>',(custom?'<dl>'+custom+'</dl>':'')+'</section>'));
+    }
+  }
+  if(body!=null&&options.kind==='loading'&&current.loading_previous_reference)
+    body=body.replace(/<h1\b[^>]*>[\s\S]*?<\/h1>/i,heading=>heading.replaceAll(current.loading_previous_reference,current.loading_reference));
   if(body!=null&&options.kind==='loading'){
     const extras=html.match(/<section class="loading-extras">[\s\S]*?<\/section>/)?.[0]||'';
     const section=/<section class="loading-extras">[\s\S]*?<\/section>/;
@@ -42,6 +55,12 @@ function editedReport(db,current,options,html){
     const summary=html.match(section)?.[0];
     if(summary)body=section.test(body)?body.replace(section,()=>summary):body.includes('<div class="signoffs">')?
       body.replace('<div class="signoffs">',()=>summary+'<div class="signoffs">'):body+summary;
+  }
+  if(body!=null&&options.kind==='loading'){
+    const section=/<section class="loading-transport">[\s\S]*?<\/section>/;
+    const transport=html.match(section)?.[0]||'';
+    body=section.test(body)?body.replace(section,()=>transport):body.includes('<div class="signoffs">')?
+      body.replace('<div class="signoffs">',()=>transport+'<div class="signoffs">'):body+transport;
   }
   return {html:body!=null?html.replace(/<body[^>]*>[\s\S]*<\/body>/i,()=>'<body>'+body+'</body>'):html,
     edit_version:row?.version||0,document_ref:key.document_ref,report_key:key.report_kind+':'+key.locale,customized:row?.body_html!=null};

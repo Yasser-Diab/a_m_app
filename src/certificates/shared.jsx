@@ -111,7 +111,7 @@ export function ProjectDetailsFields({ draft, onChange, t, creating = false }) {
       ["address", t("عنوان المشروع", "Project address")],
       ["contract_ref", t("مرجع العقد / أمر الشراء", "Contract / PO reference")],
       ["contract_date", t("تاريخ العقد", "Contract date"), {type:"date",dir:"ltr"}],
-      ["currency", t("رمز العملة", "Currency code"), {dir:"ltr",minLength:3,maxLength:3,pattern:"[A-Za-z]{3}",required:true,readOnly:!creating}],
+      ["currency", t("رمز العملة", "Currency code"), {dir:"ltr",minLength:3,maxLength:3,pattern:"[A-Za-z]{3}",required:true}],
     ].map(([key,label,props]) => <Field key={key} label={label}>
       <input dir="auto" {...props} value={draft[key] ?? ""} onChange={(event) => onChange(key,event.target.value)} />
     </Field>)}
