@@ -339,7 +339,7 @@ function cleanSettings(input = {}, base = {}) {
   if (Array.isArray(input.signatures)) settings.signatures = input.signatures.slice(0, 6)
     .map((person) => ({name: str(person?.name, 100), title: str(person?.title, 100)})).filter(({name,title}) => name || title);
   for (const key of ["group_work_types", "show_group_subtotals", "show_building_subtotals", "show_unit_subtotals", "show_work_type_subtotals",
-    "show_summary_building","show_summary_work_type","show_summary_quantities","show_detail_quantities"]) {
+    "show_summary_building","show_summary_work_type","show_summary_quantities","show_detail_quantities","show_summary_rate","show_summary_progress"]) {
     if (Object.hasOwn(input, key)) settings[key] = input[key] === true;
   }
   if (["none","building","unit","work_type"].includes(input.group_by)) settings.group_by = input.group_by;

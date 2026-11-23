@@ -1,6 +1,8 @@
 import {useEffect,useRef,useState} from "react";
 import {Dialog,localDate,newKey,queryString,useResource} from "../certificates/shared.jsx";
 import {DimensionPair,ErrorMessage,Page,Pick,Suggest,Table,SearchableTable,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
+import ShipmentEntry from './ShipmentEntry.jsx';
+import {PdfOutput} from './OperationsReports.jsx';
 import ProjectSignatures from "./ProjectSignatures.jsx";
 import ReportEditor from './ReportEditor.jsx';
 import SourceRefresh from './SourceRefresh.jsx';
@@ -170,7 +172,7 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
         onClick={()=>action.run(endpoint+"/refresh","POST",{})}>{t("تحديث المواصفات","Refresh draft specifications")}</button>}
       {can("release")&&order.status==="draft"&&<button type="button" className="primary" disabled={action.busy}
         onClick={()=>decide("released")}>{t("إفراج للتصنيع","Release for manufacturing")}</button>}
-      {can("release")&&order.status==="released"&&<button type="button" disabled={action.busy} onClick={()=>decide("shipped")}>
+      {can("release")&&can('load')&&order.status==="released"&&<button type="button" disabled={action.busy} onClick={()=>setDialog('shipment')}>
         {t("تأكيد الشحن","Confirm shipment")}</button>}
       {can("release")&&order.status!=="closed"&&<button type="button" onClick={()=>setDialog("close")}>{t("إغلاق الأمر","Close order")}</button>}
       {can("qc")&&order.status!=="closed"&&<button type="button" onClick={()=>setDialog("qc")}>{t("تسجيل فحص","Record inspection")}</button>}
@@ -220,10 +222,11 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
     <h3>{t("دفعات التحميل","Loading history")}</h3>
     <Table headers={[t("المرجع","Reference"),t("التاريخ","Date"),t("المسؤول","Responsible"),t("الكميات","Quantities"),t("الملاحظات","Notes")]}
       empty={t("لا يوجد تحميل مؤكد.","No confirmed loading.")}
-      rows={order.loads.map((batch)=>[batch.id,[batch.reference,<bdi>{batch.loading_date}</bdi>,batch.responsible.loading?.name,
-        <bdi>{batch.lines.map((row)=>[openingDescription(order.items.find(item=>item.id===row.order_item_id)?.specification),display(panelNames,row.kind,t),row.quantity].join(" · ")).join(", ")}</bdi>,batch.notes]])}/>
+      rows={order.loads.map((batch)=>[batch.id,[<button type="button" className="pc-name" disabled={!can('export')} onClick={()=>setDialog({shipmentReport:batch.id,reference:batch.reference})}>{batch.reference}</button>,<bdi>{batch.loading_date}</bdi>,batch.responsible.loading?.name,
+        <bdi>{batch.lines.map((row)=>[openingDescription(order.items.find(item=>item.id===row.order_item_id)?.specification),row.label||display(panelNames,row.kind,t),row.quantity].join(" · ")).join(", ")}</bdi>,batch.notes]])}/>
     {dialog==="qc"&&<Inspection {...{order,endpoint,request,can,t,reload}} close={()=>setDialog(null)}/>}
-    {dialog==="load"&&<Loading {...{order,endpoint,request,t,reload}} people={people.data||[]} close={()=>setDialog(null)}/>}
+    {['load','shipment'].includes(dialog)&&<ShipmentEntry {...{order,endpoint,request,t,reload,can,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport}} confirm={dialog==='shipment'} people={people.data||[]} close={()=>setDialog(null)}/>}
+    {dialog?.shipmentReport&&<Dialog t={t} title={dialog.reference} onClose={()=>setDialog(null)}><PdfOutput {...{t,can,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport}} kind="loading" filters={{}} endpoint={'/api/project-operations'+endpoint+'/shipments/'+dialog.shipmentReport+'/pdf'}/></Dialog>}
     {["manufacturing","loadingReport","approvalReport"].includes(dialog)&&<Report {...{endpoint,t,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}}
       reference={order.reference} loading={dialog==="loadingReport"} approvals={dialog==="approvalReport"}
       people={people.data||[]} close={()=>setDialog(null)}/>}
@@ -304,46 +307,6 @@ function Assignments({people,values,set,t,required=false}) {
     value={optionsForPeople.find(([id])=>String(id)===String(values[key]))?.[1]||values[key]}
     onChange={(value)=>set({...values,[key]:optionsForPeople.find(([,text])=>text===value)?.[0]||value})}
     required={required&&key==="loading"} items={optionsForPeople}/>)}</div>;
-}
-
-function Loading({order,endpoint,request,t,people,reload,close}) {
-  const defaults=Object.fromEntries(people.filter(({responsibility})=>responsibility).map((person)=>[person.responsibility,person.id]));
-  const [data,setData]=useState(()=>({responsible:defaults,reference:order.loading_reference||"",loading_date:localDate(),command_key:newKey()}));
-  const [amounts,setAmounts]=useState({});
-  const set=(key,value)=>setData({...data,[key]:value});
-  const action=useAction(request,()=>{close();reload();});
-  return <Dialog t={t} wide title={t("تسجيل دفعة تحميل","Record loading batch")} onClose={close}>
-    <form className="pc-stack" onSubmit={(event)=>{
-      event.preventDefault();
-      const lines=order.balances.filter((row)=>Number(amounts[row.order_item_id+":"+row.kind])>0).map((row)=>({
-        order_item_id:row.order_item_id,kind:row.kind,quantity:amounts[row.order_item_id+":"+row.kind]}));
-      action.run(endpoint+"/loading","POST",{...data,lines});
-    }}>
-      <div className="pc-form">
-        <Text type="date" label={t("تاريخ التحميل","Loading date")} value={data.loading_date} required onChange={(value)=>set("loading_date",value)}/>
-        <Text label={t("رقم أمر التحميل","Loading order no.")} value={data.reference} onChange={(value)=>set("reference",value)}/>
-        <Text label={t("ملاحظات","Notes")} value={data.notes} onChange={(value)=>set("notes",value)}/>
-      </div>
-      {defaults.loading?<details><summary>{t("المسؤولون عن التحميل","Loading team")} · {people.find(({id})=>id===Number(data.responsible.loading))?.name}</summary>
-        <Assignments people={people} values={data.responsible} set={(value)=>set("responsible",value)} t={t} required/></details>:
-        <Assignments people={people} values={data.responsible} set={(value)=>set("responsible",value)} t={t} required/>}
-      <SearchableTable t={t} records={order.balances.filter(row=>row.remaining>0).map(row=>({...row,_gridId:row.order_item_id+':'+row.kind,
-        size:`${row.width_mm??'—'} × ${row.height_mm??'—'}`,component:display(panelNames,row.kind,t),actual:amounts[row.order_item_id+':'+row.kind]??''}))}
-        columns={[{key:'description',label:t('الفتحة','Opening')},{key:'size',label:t('المقاس مم','Size mm')},{key:'component',label:t('المكون','Component')},
-          {key:'remaining',label:t('المتبقي','Remaining')},{key:'actual',label:t('التحميل الفعلي','Actual loading'),editable:true,type:'number',min:0,integer:true,max:row=>row.remaining}]}
-        onChanges={!action.busy?changes=>setAmounts(previous=>({...previous,...Object.fromEntries(changes.map(cell=>[cell.rowId,cell.value]))})):undefined}
-        headers={[t("الفتحة","Opening"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المتبقي","Remaining"),t("التحميل الفعلي","Actual loading")]}
-        empty={t("لا توجد كميات متبقية.","No remaining quantities.")}
-        rows={order.balances.filter((row)=>row.remaining>0).map((row)=>{
-          const key=row.order_item_id+":"+row.kind;
-          return [key,[row.description,<DimensionPair values={[row.width_mm,row.height_mm]} locale={t('ar','en')}/>,display(panelNames,row.kind,t),quantity(row.remaining),
-            <Text label={row.description+" · "+display(panelNames,row.kind,t)} type="number" min={0} max={row.remaining} step={1} value={amounts[key]}
-              onChange={(value)=>setAmounts({...amounts,[key]:value})}/>]];
-        })}/>
-      <ErrorMessage error={action.error}/>
-      <button type="submit" className="primary" disabled={action.busy||!Object.values(amounts).some((val)=>Number(val)>0)}>{t("حفظ التحميل","Save loading")}</button>
-    </form>
-  </Dialog>;
 }
 
 export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenance,approvals,people,close,apiBase,session,reference,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}) {

@@ -30,11 +30,13 @@ export function ReportGroupingChecks({ values, onChange, t }) {
     ['show_summary_building','المباني في الملخص','Buildings in summary'],
     ['show_summary_work_type','أنواع الأعمال في الملخص','Work types in summary'],
     ['show_summary_quantities','إجمالي الكميات في الملخص','Quantity totals in summary'],
+    ['show_summary_rate','سعر الوحدة في الملخص','Unit rate in summary'],
+    ['show_summary_progress','الإنجاز التراكمي في الملخص','Cumulative progress in summary'],
     ['show_detail_quantities','إجمالي الكميات في التفاصيل','Quantity totals in details'],
   ];
   return <div className="pc-report-checks pc-span" role="group" aria-label={t("تجميع التقرير", "Report grouping")}>
     {checks.map(([key,ar,en]) => <label className="pc-check" key={key}>
-      <input type="checkbox" checked={key.startsWith('show_summary_')||key==='show_detail_quantities'?values[key]!==false:Boolean(values[key])} disabled={key === "show_work_type_subtotals" && !values.group_work_types}
+      <input type="checkbox" checked={['show_summary_rate','show_summary_progress'].includes(key)?values[key]===true:key.startsWith('show_summary_')||key==='show_detail_quantities'?values[key]!==false:Boolean(values[key])} disabled={key === "show_work_type_subtotals" && !values.group_work_types}
         onChange={(event) => onChange(key,event.target.checked)} />{t(ar,en)}
     </label>)}
   </div>;

@@ -30,6 +30,7 @@ export const GRID_COLUMNS = [
   { key: "note", label: ["ملاحظة للعميل", "Customer note"], width: 155 },
   { key: "previous_progress", label: ["الإنجاز السابق %", "Previous progress %"], kind: "computedPercent" },
   { key: "current_progress", label: ["الإنجاز الحالي %", "Current progress %"], kind: "computedPercent" },
+  { key: "cumulative_progress", label: ["الإنجاز التراكمي %", "Cumulative progress %"], kind: "computedPercent" },
   { key: "previous", label: ["القيمة السابقة", "Previous value"], kind: "money" },
   { key: "current", label: ["القيمة الحالية", "Current value"], kind: "money" },
   { key: "cumulative", label: ["التراكمي", "Cumulative"], kind: "money" },
@@ -149,7 +150,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
   useEffect(()=>{if(Object.keys(widths).length)localStorage.setItem(storageKey,JSON.stringify(widths));},[widths,storageKey]);
   const compactColumns = useMemo(() => GRID_COLUMNS.filter((column) => {
     const {key,modes} = column;
-    if (["building_unit","floor_apartment","work_type","description","quantity","unit","rate","previous_progress","current_progress","previous","current","cumulative"].includes(key)) return true;
+    if (["building_unit","floor_apartment","work_type","description","quantity","unit","rate","previous_progress","current_progress","cumulative_progress","previous","current","cumulative"].includes(key)) return true;
     if (["mode","progress"].includes(key)) return !readOnly;
     if (key === "recognition") return !readOnly;
     return modes ? rows.some((row) => modes.includes(row.mode)) : rows.some((row) => row[key] != null && row[key] !== "");

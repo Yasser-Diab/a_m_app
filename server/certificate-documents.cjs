@@ -142,13 +142,18 @@ async function writeCertificateXlsx(model) {
     ...(model.showGroupSubtotals && group.name ? [{description:`${model.labels.subtotal} · ${group.name}`,...group.totals}] : []),
   ]) ?? model.lines;
   addWorksheet(workbook, model, model.labels.detail, [type, ...model.columns], [...detail,subtotal(model.labels.total,model.workTotals)]);
-  for (const section of model.summarySections || []) {
+  const summaries = model.summarySections?.length ? model.summarySections : model.showSummaryRate || model.showSummaryProgress ?
+    [{title:model.labels.cover,textColumns:model.coverTextColumns,rows:model.coverRows}] : [];
+  for (const section of summaries) {
     const columns = [...section.textColumns,
+      ...(model.showSummaryRate ? [{key:'rate',label:model.labels.rate,weight:14,kind:'money'}] : []),
       ...(model.showSummaryQuantities !== false && model.workTotals.count != null ? [{key:'count',label:model.labels.count,weight:8,kind:'number'}] : []),
       ...(model.showSummaryQuantities !== false && model.workTotals.quantities?.length ? [{key:'billed_quantity',label:model.labels.billed_quantity,weight:26,kind:'quantity'}] : []),
+      ...(model.showSummaryProgress ? [{key:'cumulative_progress',label:model.labels.cumulative_progress,weight:14,kind:'percent'}] : []),
       ...model.moneyKeys.map(key => ({key,label:model.labels[key],weight:18,kind:'money'})),
     ];
-    const rows = [...section.rows,{name:model.labels.total,...model.workTotals,subtotal:true}].map(row => ({...row,
+    const rows = [...section.rows,{name:model.labels.total,...model.workTotals,rates:[],subtotal:true}].map(row => ({...row,
+      rate:row.rates?.length===1 ? row.rates[0].rate : row.rates?.map(entry=>`${entry.rate} / ${entry.unit}`).join('\n'),
       billed_quantity:row.quantities?.map(({value,unit}) => `${value} ${unit}`).join('\n'),
     }));
     const sheet = addWorksheet(workbook,model,section.title,columns,rows);

@@ -98,7 +98,7 @@ async function main() {
     assert.equal(initial.commercial.quantity,100);
     const originalRecord=db.get("SELECT * FROM work_items WHERE id=?",[sourceId]);
     const cat=await api(ops+"/catalogue");
-    assert.equal(cat.categories.reduce((sum,row)=>sum+row.systems.length,0),172);
+    assert.equal(cat.categories.reduce((sum,row)=>sum+row.systems.length,0),180);
     const feature=(category,system,key)=>fieldsFor(category,configuration(db,category,system),{}).some((field)=>field.key===key);
     assert.ok(feature("windows","windows-8","tracks"));
     assert.equal(feature("windows","windows-8","hinge"),false);
@@ -208,7 +208,7 @@ async function main() {
     const batch=(reference,amount)=>{
       return {reference,loading_date:"2026-11-16",responsible:{loading:team[0].id},
         lines:[{order_item_id:orderItemId,kind:"sliding",quantity:amount},{order_item_id:orderItemId,kind:"frames",quantity:amount},
-          {order_item_id:orderItemId,kind:"screens",quantity:amount}]};
+          {order_item_id:orderItemId,kind:"screens",quantity:amount},{order_item_id:orderItemId,kind:"sliding_blades",quantity:amount}]};
     };
     await api(orderPath+"/loading","POST",batch("LOAD-1",40),409);
     await api(orderPath+"/inspections","POST",{order_item_id:orderItemId,stage:"pre_shipment",checklist,result:"passed",
@@ -484,7 +484,7 @@ async function main() {
     await api(compactEndpoint+"/approvals","POST",{stage:"pre_shipment",approved:false});
     const withFrames={command_key:crypto.randomUUID(),loading_date:"2026-01-10",responsible:{loading:manualCompany.id},
       lines:[{order_item_id:firstOrderItem.id,kind:"sliding",quantity:2},{order_item_id:firstOrderItem.id,kind:"frames",quantity:1},
-        {order_item_id:firstOrderItem.id,kind:"screens",quantity:1}]};
+        {order_item_id:firstOrderItem.id,kind:"screens",quantity:1},{order_item_id:firstOrderItem.id,kind:"sliding_blades",quantity:2}]};
     await api(compactEndpoint+"/loading","POST",withFrames,409);
     await api(compactEndpoint+"/approvals","POST",{stage:"pre_shipment",approved:true});
     const dispatch=await api(compactEndpoint+"/loading","POST",withFrames);
@@ -535,7 +535,7 @@ async function main() {
     const partial=await api(ops+"/reports/quantities?mode=loading&project_id="+compactProject.id+"&from=2026-02-01&to=2026-02-28");
     assert.equal(partial.totals.count,0);assert.equal(partial.totals.components.frames,1);assert.equal(partial.totals.components.sliding,2);
     await api(compactEndpoint+"/loading","POST",{command_key:crypto.randomUUID(),loading_date:"2026-03-01",responsible:{loading:manualCompany.id},
-      lines:[{order_item_id:nextOpening.id,kind:"screens",quantity:1}]});
+      lines:[{order_item_id:nextOpening.id,kind:"screens",quantity:1},{order_item_id:nextOpening.id,kind:"sliding_blades",quantity:2}]});
     const completedLater=await api(ops+"/reports/quantities?mode=loading&project_id="+compactProject.id+"&from=2026-03-01&to=2026-03-01");
     assert.equal(completedLater.totals.count,1);assert.equal(completedLater.totals.components.screens,1);
     const entireLoading=await api(ops+"/reports/quantities?mode=loading&project_id="+compactProject.id+"&from=2026-01-01&to=2026-03-01");

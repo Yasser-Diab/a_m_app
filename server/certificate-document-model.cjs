@@ -123,7 +123,13 @@ function asCents(value) {
 function workRollup(rows, keys) {
   const values = Object.fromEntries(keys.map((key) => [key, rows.reduce((sum, row) => sum + asCents(row[key]), 0) / 100]));
   const count = rows.reduce((sum, row) => row.count == null ? sum : (sum ?? 0) + row.count, null);
-  return { ...values, count, quantities: quantitySummary(rows) };
+  const rates = [...new Map(rows.filter(row=>row.rate!=null).map(row=>[JSON.stringify([row.rate,row.unit]),{rate:row.rate,unit:row.unit}])).values()];
+  let full = 0, earned = 0;
+  for (const row of rows) {
+    const basis = row.mode === 'lump' ? row.agreed_amount : row.billed_quantity != null && row.rate != null ? row.billed_quantity * row.rate : null;
+    if (basis > 0 && row.cumulative_progress != null) { full += basis; earned += basis * row.cumulative_progress; }
+  }
+  return { ...values, count, quantities: quantitySummary(rows), rates, cumulative_progress:full ? earned / full : null };
 }
 
 function column(key, weight, kind = 'text') {
@@ -148,6 +154,7 @@ function detailColumns(lines, moneyKeys, translations, dimensionLabel) {
     populated('agreed_amount') && column('agreed_amount', 14, 'money'),
     populated('previous_progress') && column('previous_progress', 10, 'percent'),
     populated('current_progress') && column('current_progress', 10, 'percent'),
+    populated('cumulative_progress') && column('cumulative_progress', 10, 'percent'),
     ...moneyKeys.map((key) => column(key, 15, 'money')),
     populated('note') && column('note', 18),
   ];
@@ -189,6 +196,8 @@ function certificateReportOptions(header = {}, settings = {}) {
     show_building_subtotals:header.show_building_subtotals ?? settings.show_building_subtotals ?? (subtotal === true && groupBy === 'building'),
     show_unit_subtotals:header.show_unit_subtotals ?? settings.show_unit_subtotals ?? (subtotal === true && groupBy === 'unit'),
     show_work_type_subtotals:header.show_work_type_subtotals ?? settings.show_work_type_subtotals ?? (subtotal === true && groupBy === 'work_type'),
+    show_summary_rate:header.show_summary_rate ?? settings.show_summary_rate ?? false,
+    show_summary_progress:header.show_summary_progress ?? settings.show_summary_progress ?? false,
     ...Object.fromEntries(['show_summary_building','show_summary_work_type','show_summary_quantities','show_detail_quantities']
       .map(key=>[key,header[key]??settings[key]??true])),
   };
@@ -255,6 +264,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     stamp: locale === 'ar' ? 'ختم الشركة' : 'Company stamp', prepared: 'By',
     previous_progress: locale === 'ar' ? 'الإنجاز السابق' : 'Previous progress',
     current_progress: locale === 'ar' ? 'الإنجاز الحالي' : 'Current progress',
+    cumulative_progress: locale === 'ar' ? 'الإنجاز التراكمي %' : 'Cumulative progress %',
     total_quantity: locale === 'ar' ? 'إجمالي الكمية' : 'Total quantity',
     recorded_basis: locale === 'ar' ? 'الأعمال والدفعات المسجلة' : 'Recorded work and payments',
     building_unit: locale === 'ar' ? 'المبنى' : 'Building',
@@ -302,6 +312,7 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
         (line.previous ? progressAtAmount(line,money(line.previous)) : 0),
       current_progress: Object.hasOwn(line,'current_progress') ? number(line.current_progress) :
         line.carried_forward ? 0 : (line.recognition === 'cumulative' ? progressAtAmount(line,money(line.current)) : number(line.progress) ?? 100),
+      cumulative_progress: Object.hasOwn(line,'cumulative_progress') ? number(line.cumulative_progress) : progressAtAmount(line,money(line.cumulative)),
       note: text(line.note), last_current: comparable ? money(line.last_current) : null,
       previous: money(line.previous), current: money(line.current), cumulative: money(line.cumulative),
     };
@@ -508,7 +519,8 @@ function buildCertificateDocument(input, { variant = 'customer' } = {}) {
     identities: { customer:customerName, project:projectName },
     fieldGroups, columns, moneyKeys, lines, receipts, receiptColumns,
     detailGroups, detailBands:bands, coverRows,coverTextColumns,summarySections,
-    workTotals, financeRows,showSummaryQuantities:grouping.show_summary_quantities!==false,showDetailQuantities:grouping.show_detail_quantities!==false,
+    workTotals, financeRows,showSummaryRate:grouping.show_summary_rate===true,showSummaryProgress:grouping.show_summary_progress===true,
+    showSummaryQuantities:grouping.show_summary_quantities!==false,showDetailQuantities:grouping.show_detail_quantities!==false,
     holds:variant==='internal'?(totals.holds||[]).filter(hold=>Number(hold.balance)>0).map(hold=>({
       label:text(hold.label||t[hold.category]||t.other_rule),collection_date:text(hold.collection_date),balance:money(hold.balance)})):[],
   };

@@ -4045,6 +4045,7 @@ function resetLocalCompanyAccount(database, { dataDir, dbPath, chatUploadDir } =
     DELETE FROM ops_loading_sequences;
     DELETE FROM ops_audit;
     DELETE FROM ops_confirmations;
+    DELETE FROM ops_load_parts;
     DELETE FROM ops_load_lines;
     DELETE FROM ops_loads;
     DELETE FROM ops_loading_orders;

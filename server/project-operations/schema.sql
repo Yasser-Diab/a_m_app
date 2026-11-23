@@ -248,6 +248,15 @@ CREATE TABLE IF NOT EXISTS ops_load_lines (
   PRIMARY KEY(load_id,order_item_id,kind)
 );
 CREATE INDEX IF NOT EXISTS ops_load_lines_item ON ops_load_lines(order_item_id,kind);
+CREATE TABLE IF NOT EXISTS ops_load_parts (
+  load_id INTEGER NOT NULL REFERENCES ops_loads(id) ON DELETE CASCADE,
+  part_id TEXT NOT NULL,
+  order_item_id INTEGER REFERENCES ops_order_items(id),
+  label TEXT NOT NULL,
+  unit TEXT NOT NULL,
+  quantity REAL NOT NULL CHECK(quantity>0),
+  PRIMARY KEY(load_id,part_id)
+);
 
 CREATE TABLE IF NOT EXISTS ops_confirmations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

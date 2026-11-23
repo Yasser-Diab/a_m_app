@@ -31,7 +31,7 @@ function get(db,access,id){
   const result=db.get('SELECT * FROM ops_manual_loading_orders WHERE id=?',[id]);
   if(!result||!inScope(access,result.project_id))fail(404,'Loading order not found');
   return {...result,items:parse(result.items,[]),signatures:parse(result.signatures,[]),project:getProject(db,result.project_id),
-    customer:getCustomer(db,getProject(db,result.project_id).customer_id),people:require('./core.cjs').people(db,result.project_id)};
+    customer:getCustomer(db,getProject(db,result.project_id).customer_id),project_details:parse(db.get('SELECT details FROM ops_projects WHERE project_id=?',[result.project_id])?.details,{}),people:require('./core.cjs').people(db,result.project_id)};
 }
 function values(body){
   if(!Array.isArray(body.items)||!body.items.length)fail(400,'Add at least one loading item');
@@ -78,7 +78,7 @@ function manualReport(order,options,branding){
   const personnel=(order.people||[]).map(person=>'<span class="project-person"><bdi>'+escape(person.name)+'</bdi>'+(person.name&&person.position?' : ':'')+'<bdi>'+escape(person.position)+'</bdi></span>').join('');
   const body='<section class="project-info">'+grid([[t('العميل','Customer'),order.customer.display_name],[t('كود العميل','Customer code'),order.customer.code],
     [t('المشروع','Project'),order.project.name],[t('رقم المشروع','Project code'),order.project.code],[t('عنوان الموقع','Site address'),order.project.address],
-    [t('تاريخ التحميل','Loading date'),order.loading_date]])+(personnel?'<div class="project-people">'+personnel+'</div>':'')+'</section><section class="loading"><table><thead>'+row([t('البيان','Description'),t('الوحدة','Unit'),t('الكمية المطلوبة','Required quantity'),t('التحميل الفعلي','Actual loading'),t('ملاحظات','Remarks')],'th')+
+    [t('المبنى / القطاع','Building / sector'),order.project_details?.building],[t('تاريخ التحميل','Loading date'),order.loading_date]])+(personnel?'<div class="project-people">'+personnel+'</div>':'')+'</section><section class="loading"><table><thead>'+row([t('البيان','Description'),t('الوحدة','Unit'),t('الكمية المطلوبة','Required quantity'),t('التحميل الفعلي','Actual loading'),t('ملاحظات','Remarks')],'th')+
     '</thead><tbody>'+order.items.map(item=>row([item.label,unitName(unitKey(item.unit),locale),new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(item.quantity),'',''])).join('')+'</tbody></table></section>'+
     (order.notes?'<section>'+grid([[t('ملاحظات','Notes'),order.notes]])+'</section>':'')+
     '<section class="order-summary">'+grid([...totals].map(([unit,amount])=>[t('إجمالي ','Total ')+unitName(unit,locale),new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(amount)]))+'</section>'+

@@ -45,12 +45,24 @@ async function main() {
   };
   const simple = buildCertificateDocument(fixture('en', [lump], { ...lump, current_payable: 25_000, cumulative_payable: 55_000 }));
   assert.equal(simple.landscape, false);
-  assert.deepEqual(simple.columns.map((column) => column.key), ['work_item', 'description', 'agreed_amount', 'previous_progress', 'current_progress', 'previous', 'current', 'cumulative']);
+  assert.deepEqual(simple.columns.map((column) => column.key), ['work_item', 'description', 'agreed_amount', 'previous_progress', 'current_progress', 'cumulative_progress', 'previous', 'current', 'cumulative']);
   assert.equal(simple.lines[0].previous_progress,30);
   assert.equal(simple.lines[0].current_progress,25);
   assert.equal(simple.watermark,'UNAPPROVED');
   assert.match(simple.qr,/^data:image\/svg\+xml;base64,/);
   assert.equal(simple.fieldGroups.flat().some((field) => field.key === 'tax_no'), false);
+  const progressModel=buildCertificateDocument(fixture('en',[
+    {id:'p1',mode:'direct',work_type:'Windows',quantity:10,unit:'Pcs',rate:100,cumulative:500,current:200,previous:300,cumulative_progress:50},
+    {id:'p2',mode:'direct',work_type:'Windows',quantity:20,unit:'Pcs',rate:200,cumulative:1000,current:600,previous:400,cumulative_progress:25},
+  ],{},{header:{locale:'en',output_mode:'multi',show_summary_rate:true,show_summary_progress:true}}));
+  assert.equal(progressModel.summarySections[0].rows[0].cumulative_progress,30);
+  assert.deepEqual(progressModel.summarySections[0].rows[0].rates,[{rate:100,unit:'Pcs'},{rate:200,unit:'Pcs'}]);
+  assert.deepEqual(progressModel.lines.map(row=>row.cumulative_progress),[50,25]);
+  assert.ok(progressModel.columns.some(column=>column.key==='cumulative_progress'));
+  assert.ok(buildCertificateHtml(progressModel).includes('30%'));
+  const progressWorkbook=new ExcelJS.Workbook();await progressWorkbook.xlsx.load(await writeCertificateXlsx(progressModel));
+  const summarySheet=progressWorkbook.getWorksheet(progressModel.summarySections[0].title),progressColumn=summarySheet.getRow(1).values.indexOf('Cumulative progress %');
+  assert.equal(summarySheet.getRow(2).getCell(progressColumn).value,30);
   const historical = buildCertificateDocument(fixture('en', [lump], { ...lump, current_payable: 25_000 },
     { status: 'historical', legacy_number: '2017-24', source_name: 'Workbook.xlsb' }));
   assert.equal(historical.watermark, 'UNAPPROVED');

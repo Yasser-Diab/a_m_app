@@ -31,7 +31,7 @@ function normalizeHeader(input = {}, project, profile, originalType) {
   if (["none","building","unit","work_type"].includes(input.group_by ?? profile.settings.group_by))
     header.group_by = input.group_by ?? profile.settings.group_by;
   for (const key of ["show_building_subtotals", "show_unit_subtotals", "show_work_type_subtotals",
-    "show_summary_building","show_summary_work_type","show_summary_quantities","show_detail_quantities"]) {
+    "show_summary_building","show_summary_work_type","show_summary_quantities","show_detail_quantities","show_summary_rate","show_summary_progress"]) {
     const flag = input[key] ?? profile.settings[key];
     if (typeof flag === "boolean") header[key] = flag;
   }

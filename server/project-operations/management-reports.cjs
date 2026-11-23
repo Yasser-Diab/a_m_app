@@ -6,7 +6,7 @@ const {unitKey,unitName}=require('./order-quantities.cjs');
 const stages={specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],
   materials:["اعتماد الخامات","Materials"],manufacturing:["التصنيع","Manufacturing"],qc:["فحص ما قبل الشحن","Pre-shipment QC"],
   loading:["التحميل","Loading"],maintenance:["الصيانة","Maintenance"],completed:["مكتمل","Completed"],review:["مراجعة التعديلات","Changes to review"],rejected:["مرفوض","Rejected"]};
-const components={frames:["حلوق","Frames"],screens:["ضلف سلك","Flyscreen leaves"],sliding:["ضلف جرار","Sliding leaves"],
+const components={sliding_blades:["سكينة جرار","Sliding blades"],frames:["حلوق","Frames"],screens:["ضلف سلك","Flyscreen leaves"],sliding:["ضلف جرار","Sliding leaves"],
   hinged:["ضلف مفصلي","Hinged leaves"],fixed:["ثوابت","Fixed panels"],other:["ضلف أخرى","Other leaves"],items:["وحدات","Items"]};
 const round=value=>Math.round((value+Number.EPSILON)*1e6)/1e6;
 const format=value=>value==null?"—":new Intl.NumberFormat("en-US",{maximumFractionDigits:4}).format(value);
@@ -35,6 +35,7 @@ function sourceData(db,projects){
     WHERE o.project_id ${inside}`,[ids]).map(item=>{
       const quantities=parse(item.quantities,{}),specification=parse(item.specification,{}),technical=specification.technical||{};
       if(Object.keys(quantities).length){
+        if(['draft','released'].includes(item.status)&&quantities.sliding>0&&!Object.hasOwn(quantities,'sliding_blades'))quantities.sliding_blades=quantities.sliding;
         if(!Object.hasOwn(quantities,"frames")){const n=frameQuantity(specification.category,configuration(db,specification.category,specification.system),technical,item.quantity);if(n)quantities.frames=n;}
         if(["draft","released"].includes(item.status)&&!Object.hasOwn(quantities,"screens")){
           const n=Object.hasOwn(technical.panel_counts||{},"screens")?technical.panel_counts.screens*item.quantity:screenQuantity(specification.category,technical,item.quantity);

@@ -77,7 +77,7 @@ export function TableSearchPanel({initialQuery,results,currentIndex,columnLabel,
   </section>,ownerRef?.current?.closest('dialog[open]')||document.body);
 }
 
-export function ColumnFilter({column,values,selected,onApply,onClose,t,position,zIndex}){
+export function ColumnFilter({column,values,selected,onApply,onClose,t,position,zIndex,portalRoot}){
   const [query,setQuery]=useState(''),[checked,setChecked]=useState(()=>new Set(selected||values.map(value=>value.value)));
   const root=useRef(null),visible=values.filter(value=>String(value.label).toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   useEffect(()=>{const close=event=>{if(!root.current?.contains(event.target))onClose();};document.addEventListener('pointerdown',close);return()=>document.removeEventListener('pointerdown',close);},[onClose]);
@@ -90,5 +90,5 @@ export function ColumnFilter({column,values,selected,onApply,onClose,t,position,
       <input type="checkbox" checked={checked.has(value)} onChange={event=>setChecked(previous=>{const next=new Set(previous);event.target.checked?next.add(value):next.delete(value);return next;})}/><bdi>{label||t('(فارغ)','(Blank)')}</bdi></label>)}</div>
     <div className="pc-toolbar"><button type="button" className="primary" onClick={()=>onApply(checked.size===values.length?null:[...checked])}>{t('تطبيق','Apply')}</button>
       <button type="button" onClick={()=>onApply(null)}>{t('إزالة التصفية','Clear filter')}</button><button type="button" onClick={onClose}>{t('إلغاء','Cancel')}</button></div>
-  </section>,document.body);
+  </section>,portalRoot||document.body);
 }

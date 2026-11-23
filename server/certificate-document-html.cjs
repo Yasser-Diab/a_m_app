@@ -38,15 +38,17 @@ function rollupCells(values, columns, moneyKeys) {
       const extra = columns[index + 1]?.key === 'unit' ? 'unit' : '';
       cells.push(`<td class="quantity-total" data-quantity-total="${key}" data-quantity-extra="${extra}"${extra ? ' colspan="2"' : ''}>${quantityList(values.quantities)}</td>`);
       if (extra) index++;
-    } else if (key === 'count' || moneyKeys.includes(key)) {
-      cells.push(`<td class="number" data-number="${key}">${amount(values[key],key === 'count' ? 'number' : 'money')}</td>`);
+    } else if (key === 'rate') {
+      cells.push('<td class="number">'+(values.rates||[]).map(entry=>'<span dir="ltr"><span data-number="rate">'+amount(entry.rate)+'</span>'+(values.rates.length>1?' / '+escapeHtml(entry.unit):'')+'</span>').join('<br>')+'</td>');
+    } else if (key === 'count' || key === 'cumulative_progress' || moneyKeys.includes(key)) {
+      cells.push(`<td class="number" data-number="${key}">${amount(values[key],key === 'count' ? 'number' : key === 'cumulative_progress' ? 'percent' : 'money')}</td>`);
     } else cells.push('<td></td>');
   }
   return cells.join('');
 }
 
 function subtotalRow(values, columns, moneyKeys, title, attributes = '') {
-  const firstNumeric = columns.findIndex(({key}) => moneyKeys.includes(key) ||
+  const firstNumeric = columns.findIndex(({key}) => ['rate','cumulative_progress'].includes(key) || moneyKeys.includes(key) ||
     (key === 'count' && values.count != null) || (key === 'billed_quantity' && values.quantities?.length));
   const caption = Array.isArray(title) ? title.map((part) => `<bdi dir="auto">${escapeHtml(part)}</bdi>`).join(' ') : escapeHtml(title);
   return `<tr ${attributes} class="subtotal"><th scope="row" colspan="${firstNumeric}">${caption}</th>${rollupCells(values,columns.slice(firstNumeric),moneyKeys)}</tr>`;
@@ -188,8 +190,10 @@ function buildCertificateHtml(model) {
   const { labels, locale, direction, columns, coverRows, moneyKeys, workTotals, receiptColumns, landscape, paper } = model;
   const coverTextColumns=model.coverTextColumns||[{key:'name',label:model.groupLabel||labels.work_type,weight:34,kind:'text'}];
   const summaryColumns = (textColumns) => [...textColumns,
+    ...(model.showSummaryRate ? [{key:'rate',label:labels.rate,weight:14,kind:'money'}] : []),
     ...(model.showSummaryQuantities!==false&&workTotals.count != null ? [{key:'count',label:labels.count,weight:8,kind:'number'}] : []),
     ...(model.showSummaryQuantities!==false&&workTotals.quantities?.length ? [{key:'billed_quantity',label:labels.billed_quantity,weight:26,kind:'quantity'}] : []),
+    ...(model.showSummaryProgress ? [{key:'cumulative_progress',label:labels.cumulative_progress,weight:14,kind:'percent'}] : []),
     ...moneyKeys.map((key) => ({ key, label: labels[key], weight: 18, kind: 'money' }))];
   const size = paper === 'Letter' ? [215.9, 279.4] : [210, 297];
   const [width, height] = landscape ? size.toReversed() : size;
@@ -199,7 +203,7 @@ function buildCertificateHtml(model) {
   ]).map(section => {
     const tableColumns = summaryColumns(section.textColumns);
     const rows = section.rows.map(row => `<tr>${rowCells(row,section.textColumns)}${rollupCells(row,tableColumns.slice(section.textColumns.length),moneyKeys)}</tr>`);
-    rows.push(subtotalRow(workTotals,tableColumns,moneyKeys,labels.total));
+    rows.push(subtotalRow({...workTotals,rates:[]},tableColumns,moneyKeys,labels.total));
     return {...section,tableColumns,rows};
   });
   const receiptRows = model.receipts.map((row) => `<tr>${rowCells(row, receiptColumns)}</tr>`);

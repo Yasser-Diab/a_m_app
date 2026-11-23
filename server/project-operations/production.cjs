@@ -58,6 +58,7 @@ function orderItems(db,id) {
       const specification=parse(item.specification,{});
       specification.technical=require('./customer-defaults.cjs').normalizeLocks(specification.technical);
       const quantities=parse(item.quantities,{});
+      if(open&&quantities.sliding>0&&!Object.hasOwn(quantities,'sliding_blades'))quantities.sliding_blades=quantities.sliding;
       if (!Object.hasOwn(quantities,"frames")&&Object.keys(quantities).length) {
         const frames=frameQuantity(specification.category,configuration(db,specification.category,specification.system),
           specification.technical,item.quantity);
@@ -282,7 +283,7 @@ function updateOrderStatus(db,current,body,user) {
       db.run("UPDATE ops_order_items SET specification=? WHERE id=?",[encode({...row.specification,drawing_ids}),row.id]);
     }
   } else if (status==="shipped" && current.status==="released") {
-    const balances=loadingBalances(db,current.id);
+    const balances=loadingParts(db,current);
     if (balances.some(({remaining})=>remaining>0)) fail(409,"Confirm the remaining loading quantities before shipment");
     verifyShipment(db,current.id,rows.map(({id})=>id));
   } else if (status==="closed" && !["draft","released","shipped"].includes(current.status)) {
@@ -367,6 +368,29 @@ function loadingBalances(db,orderId,cutoff=null) {
   }));
 }
 
+function loadingParts(db,current,cutoff=null){
+  return [...loadingBalances(db,current.id,cutoff).map(row=>({...row,part_id:row.order_item_id+':'+row.kind,unit:'Pcs'})),
+    ...require('./loading-parts.cjs').extraBalances(db,current,orderItems(db,current.id),cutoff)];
+}
+
+function shipmentPreparation(db,current,user){
+  if(current.kind==='maintenance'||current.status!=='released')fail(409,'Release the manufacturing order before confirming a shipment');
+  const loading=loadingOrder(db,current,user);
+  return {...orderDetails(db,current),loading_reference:loading.reference,loading_transport:loading};
+}
+function confirmShipment(db,current,body,access){
+  if(!access.capabilities.includes('ops_load'))fail(403,'Loading permission is required to confirm shipped quantities');
+  let result;
+  if((body.parts||[]).length)result=loadBatch(db,current,body,access.user);
+  else {
+    if(loadingParts(db,current).some(part=>part.remaining>0))fail(400,'Select the parts loaded on this vehicle');
+    result=db.get('SELECT id,reference FROM ops_loads WHERE order_id=? ORDER BY id DESC LIMIT 1',[current.id]);
+    if(!result)fail(400,'Record actual loading quantities first');
+  }
+  if(loadingParts(db,current).every(part=>part.remaining<=0)&&current.status==='released')updateOrderStatus(db,current,{status:'shipped'},access.user);
+  return {...result,status:order(db,current.project_id,current.id).status};
+}
+
 function verifyShipment(db,orderId,items) {
   const qc=inspections(db,orderId);
   for (const item of orderItems(db,orderId).filter(({id})=>items.includes(id))) {
@@ -394,12 +418,13 @@ function loadBatch(db,current,input,user) {
   const alias=requested&&db.get('SELECT reference,previous_reference FROM ops_loading_orders WHERE order_id=? AND (reference=? COLLATE NOCASE OR previous_reference=? COLLATE NOCASE)',[current.id,requested,requested]);
   const reference=alias?.reference||requested||loadingOrder(db,current,user).reference;
   const loadedOn=date(input.loading_date,true)||today();
-  if (!Array.isArray(input.lines) || !input.lines.length) fail(400,"Enter actual loading quantities");
+  const supplied=Array.isArray(input.parts)?input.parts.map(part=>({part_id:str(part.part_id),quantity:part.quantity})):input.lines;
+  if (!Array.isArray(supplied) || !supplied.length) fail(400,"Enter actual loading quantities");
   const previousReference=alias?.previous_reference||db.get('SELECT previous_reference FROM ops_loading_orders WHERE order_id=? AND reference=?',[current.id,reference])?.previous_reference;
   const existing=db.get("SELECT id FROM ops_loads WHERE order_id=? AND (reference=? COLLATE NOCASE OR reference=? COLLATE NOCASE)",[current.id,reference,previousReference||reference]);
   if (existing) fail(409,"This loading reference was already recorded");
   if (current.status!=="released") fail(409,"Release the order for manufacturing before recording loading");
-  const balances=new Map(loadingBalances(db,current.id).map((row)=>[row.order_item_id+":"+row.kind,row]));
+  const balances=new Map(loadingParts(db,current).map(row=>[row.part_id,row]));
   const assignments=people(db,current.project_id);
   const responsible={};
   for (const key of responsibilityKeys) {
@@ -414,18 +439,29 @@ function loadBatch(db,current,input,user) {
   }
   if (!responsible.loading) fail(400,"Select the person responsible for loading");
   const seen=new Set();
-  const lines=input.lines.map((line)=>{
-    const key=idOf(line.order_item_id)+":"+str(line.kind);
+  const lines=supplied.map((line)=>{
+    const key=line.part_id||idOf(line.order_item_id)+":"+str(line.kind);
     const balance=balances.get(key);
-    const quantity=number(line.quantity,"loading quantity",{integer:true,positive:true});
-    if (!balance || seen.has(key) || !quantity || quantity>balance.remaining) fail(409,"Confirm only the remaining quantities for each panel category");
+    const quantity=number(line.quantity,"loading quantity",{integer:!balance?.custom,positive:true});
+    if (!balance || seen.has(key) || !quantity || quantity>balance.remaining+1e-8) fail(409,"Confirm only the remaining quantities for each panel category");
     seen.add(key);
     return {...balance,quantity};
   });
-  verifyShipment(db,current.id,[...new Set(lines.map(({order_item_id})=>order_item_id))]);
+  const affected=[...new Set(lines.map(row=>row.order_item_id).filter(Boolean))];
+  verifyShipment(db,current.id,affected);
   const id=db.run(`INSERT INTO ops_loads(order_id,reference,loading_date,responsible,notes,recorded_by,command_key) VALUES(?,?,?,?,?,?,?)`,
     [current.id,reference,loadedOn,encode(responsible),str(input.notes,2000),user.id,commandKey]).lastInsertRowid;
-  for (const row of lines) db.run("INSERT INTO ops_load_lines VALUES (?,?,?,?)",[id,row.order_item_id,row.kind,row.quantity]);
+  for (const row of lines) {
+    if(row.custom)db.run('INSERT INTO ops_load_parts VALUES(?,?,?,?,?,?)',[id,row.part_id,row.order_item_id,row.label,row.unit,row.quantity]);
+    else db.run("INSERT INTO ops_load_lines VALUES (?,?,?,?)",[id,row.order_item_id,row.kind,row.quantity]);
+  }
+  const items=orderItems(db,current.id).filter(row=>affected.includes(row.id));
+  for(const item of items)db.run('UPDATE ops_order_items SET quantities=? WHERE id=?',[encode(item.quantities),item.id]);
+  const savedTransport=db.get('SELECT * FROM ops_loading_orders WHERE order_id=? AND reference=?',[current.id,reference])||{};
+  const transport={vehicle_plate:str(input.vehicle_plate??savedTransport.vehicle_plate,100),driver_name:str(input.driver_name??savedTransport.driver_name,200)};
+  const snapshot={items,parts:[...balances.values()].filter(row=>affected.includes(row.order_item_id)||lines.some(line=>line.part_id===row.part_id)),lines,transport};
+  db.run('UPDATE ops_loads SET shipment_data=? WHERE id=?',[encode(snapshot),id]);
+  db.run('UPDATE ops_loading_orders SET vehicle_plate=?,driver_name=?,version=version+1 WHERE order_id=? AND reference=?',[transport.vehicle_plate,transport.driver_name,current.id,reference]);
   record(db,user,current.project_id,"loading_confirmed",id,{order_id:current.id,reference});
   return {id,reference,balances:loadingBalances(db,current.id)};
 }
@@ -436,6 +472,7 @@ function orderDetails(db,current) {
   for (const row of db.all(`SELECT l.*,i.code FROM ops_load_lines l JOIN ops_loads b ON b.id=l.load_id
     JOIN ops_order_items oi ON oi.id=l.order_item_id JOIN ops_items i ON i.id=oi.item_id WHERE b.order_id=? ORDER BY l.load_id`,[current.id]))
     byBatch.get(row.load_id).lines.push(row);
+  for(const row of db.all('SELECT p.*,p.part_id AS kind FROM ops_load_parts p JOIN ops_loads b ON b.id=p.load_id WHERE b.order_id=?',[current.id]))byBatch.get(row.load_id).lines.push(row);
   const transport=db.get("SELECT reference,vehicle_plate,driver_name,version FROM ops_loading_orders WHERE order_id=? AND after_load_id=?",
     [current.id,loads[0]?.id||0]);
   const loadingReference=transport?.reference;
@@ -443,18 +480,15 @@ function orderDetails(db,current) {
   const source=current.source_document_id?db.get('SELECT id,operation_no,document_type,title,status FROM documents WHERE id=?',[current.source_document_id]):null;
   return {...current,source,coverage:orderCoverage(db,current,items),loading_settings:parse(current.loading_settings,{enabled:false,rows:[]}),loading_reference:loadingReference||null,
     loading_transport:transport||{reference:null,vehicle_plate:'',driver_name:'',version:0},service:parse(current.service_data,{}),items,inspections:inspections(db,current.id),
-    balances:loadingBalances(db,current.id),loads:[...byBatch.values()],stage_approvals:current.kind==="maintenance"?[]:stageApprovals(db,current)};
+    balances:loadingBalances(db,current.id),parts:loadingParts(db,current),loads:[...byBatch.values()],stage_approvals:current.kind==="maintenance"?[]:stageApprovals(db,current)};
 }
 
 function saveLoadingSettings(db,current,body,user){
   if(Number(body.version)!==current.loading_settings_version)fail(409,'The loading settings changed. Reopen this work order before saving');
   if(current.kind==='maintenance')fail(400,'Loading applies to manufacturing orders');
-  if(typeof body.enabled!=='boolean'||!Array.isArray(body.rows)||body.rows.length>1000)fail(400,'Enter loading rows with a label, unit and quantity');
-  const rows=body.rows.map(row=>{
-    const label=str(row.label,500),unit=str(row.unit,60),quantity=number(row.quantity,'custom loading quantity',{positive:true});
-    if(!label||!unit||!quantity)fail(400,'Each loading row needs a label, unit and positive quantity');
-    return {label,unit,quantity};
-  });
+  if(typeof body.enabled!=='boolean'||!Array.isArray(body.rows))fail(400,'Enter loading rows with a label, unit and quantity');
+  const rows=require('./loading-parts.cjs').cleanExtraRows(db,current,body.rows,orderItems(db,current.id));
+  if(!body.enabled&&require('./loading-parts.cjs').extraBalances(db,current,orderItems(db,current.id)).some(row=>row.loaded>0))fail(409,'Keep confirmed additional loading parts visible');
   const settings={enabled:body.enabled,rows},version=current.loading_settings_version+1;
   db.run('UPDATE ops_orders SET loading_settings=?,loading_settings_version=? WHERE id=?',[encode(settings),version,current.id]);
   record(db,user,current.project_id,'loading_settings_updated',current.id,{reference:current.reference,before:parse(current.loading_settings),after:settings,version});
@@ -523,4 +557,4 @@ function confirmQuantity(db,item,body,access) {
 }
 
 module.exports = {qcStages,qcChecks,qcResults,checks,order,orderPage,orderDetails,addOrder,updateOrderStatus,refreshDraftOrder,prepareOutput,loadingOrder,
-  inspect,loadBatch,loadingBalances,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages,saveLoadingSettings,availableItems,orderCoverage,includeRemaining,loadingTransport,saveLoadingTransport};
+  inspect,loadBatch,loadingBalances,loadingParts,shipmentPreparation,confirmShipment,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages,saveLoadingSettings,availableItems,orderCoverage,includeRemaining,loadingTransport,saveLoadingTransport};

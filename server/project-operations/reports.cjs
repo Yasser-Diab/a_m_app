@@ -26,6 +26,7 @@ const row = (cells,tag="td")=>`<tr>${cells.map((value)=>`<${tag}>${valueHtml(val
 const grid = (pairs) => `<dl>${pairs.filter(([,value])=>value!=="" && value!=null).map(([key,value,scope])=>
   `<div><dt>${escape(key)}</dt><dd>${valueHtml(value)}${scope?`<small class="field-scope"><bdi>${escape(scope)}</bdi></small>`:""}</dd></div>`).join("")}</dl>`;
 const panelLabels={frames:["حلوق","Frames"],sliding:["ضلف جرار","Sliding leaves"],hinged:["ضلف مفصلي","Hinged leaves"],
+  sliding_blades:["سكينة جرار","Sliding blades"],
   fixed:["ثوابت","Fixed panels"],other:["ضلف أخرى","Other leaves"],screens:["ضلف سلك","Flyscreen leaves"],items:["وحدات","Items"]};
 const inspectionLabels={survey:["رفع المقاسات","Measurement survey"],receipt:["استلام الخامات","Material receipt"],
   cutting:["قص وتجهيز","Cutting and preparation"],assembly:["تجميع","Assembly"],glazing:["تركيب الزجاج","Glass installation"],
@@ -58,7 +59,7 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   font-size:28pt;font-weight:800;transform:rotate(-29deg);opacity:.20;color:${watermarkColor||color};pointer-events:none}
   header,h1,section,.signoffs{position:relative;z-index:1}
   section{border:1px solid ${color};border-radius:3px;padding:7px;margin-block:7px;break-inside:avoid}
-  section h2{margin-top:0}section.loading{break-inside:auto}
+  section h2{margin-top:0}section.loading{break-inside:auto}.group-subtotal{background:#e5eef1;padding:5px 7px;margin-top:6px;break-inside:avoid}.group-subtotal dl{margin:0}
   .dimension-pair{display:inline-flex;align-items:baseline;gap:.28em;unicode-bidi:isolate;white-space:nowrap}
   .order-summary table{margin:0}.order-summary th,.order-summary td{border:0;background:#e5eef1;padding:7px}
   .order-unit-total{display:inline-flex;align-items:baseline;gap:.25em;white-space:nowrap;margin-inline-end:.65em;font-variant-numeric:tabular-nums}
@@ -72,6 +73,7 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   .loading-sheet tbody.opening-band-0{background:#f1f6f8}.loading-sheet tbody.opening-band-1{background:#fff}
   .loading-sheet td:nth-child(2),.loading-sheet td:nth-child(n+4):nth-child(-n+8){white-space:nowrap}
   .loading-sheet td:first-child,.loading-sheet td:nth-child(3){white-space:normal;overflow-wrap:anywhere}
+  .loading-sheet.delivery-sheet td:nth-child(1),.loading-sheet.delivery-sheet td:nth-child(2),.loading-sheet.delivery-sheet td:nth-child(4){white-space:normal;overflow-wrap:anywhere}.loading-sheet.delivery-sheet td:nth-child(3){white-space:nowrap}
   .loading-sheet th{font-size:8pt;overflow-wrap:normal;hyphens:none}.measurements td:first-child{overflow-wrap:anywhere}
   .drawings{display:flex;flex-wrap:wrap;gap:8px}
   figure{max-width:47%;margin:6px 0 0;break-inside:avoid}figure img{max-width:100%;max-height:66mm;object-fit:contain}
@@ -92,6 +94,7 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
 function projectBlock(db,project,customer,state,order,locale,branding) {
   const t=(ar,en)=>label(ar,en,locale);
   const info=state.details;
+  const buildings=[...new Set(order.items.map(item=>String(item.specification.technical.building||'').trim()).filter(Boolean))];
   const representatives=people(db,project.id).map(person=>'<span class="project-person"><bdi>'+escape(person.name)+'</bdi>'+
     (person.name&&person.position?' : ':'')+'<bdi>'+escape(person.position)+'</bdi></span>');
   const sources=new Set(order.items.map(({specification})=>specification.source_document_id||state.boq_id));
@@ -102,7 +105,7 @@ function projectBlock(db,project,customer,state,order,locale,branding) {
     [t("المشروع","Project"),project.name],[t("رمز المشروع","Project code"),project.code],
     [t("كود المشروع لدى العميل","Customer project code"),project.customer_project_code],
     [t("العميل","Customer"),customer.display_name],[t("الموقع","Site"),info.location],
-    [t("عنوان الموقع","Site address"),info.address||project.address],[t("المبنى / القطاع","Building / sector"),info.building],
+    [t("عنوان الموقع","Site address"),info.address||project.address],[t("المبنى / القطاع","Building / sector"),buildings.length?buildings.join(" / "):info.building],
     [t("رقم الإسناد","Award no."),state.award_reference],
     [t("رقم عقد العميل أو أمر الشراء","Client contract or PO no."),info.contract_ref||project.contract_ref],
     ...projectBoqs.map((source)=>[
@@ -125,10 +128,11 @@ function stable(value) {
   return value && typeof value==="object" ? Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stable(value[key])])) : value;
 }
 
-function groupedWork(db,items,locale,drawingSets) {
+const populated=(value,key)=>value!=null&&(typeof value!=="string"||value.trim()!=="")&&(!Array.isArray(value)||value.length>0||key==="perimeter");
+
+function specificationGroups(items) {
   const buckets=new Map();
   const groups=[];
-  const populated=(value,key)=>value!=null&&(typeof value!=="string"||value.trim()!=="")&&(!Array.isArray(value)||value.length>0||key==="perimeter");
   const prepared=[];
   for (const [index,item] of items.entries()) {
     const source=item.specification;
@@ -147,17 +151,37 @@ function groupedWork(db,items,locale,drawingSets) {
     const exact=matches.find((group)=>JSON.stringify(stable(group.shared))===JSON.stringify(stable(shared)));
     let group=exact||(matches.length===1?matches[0]:null);
     if (!group) {
-      group={spec,shared:{...shared},items:[],drawings:[],index};
+      group={spec,shared:{...shared},items:[],index};
       bucket.push(group);buckets.set(key,bucket);groups.push(group);
     }
     Object.assign(group.shared,shared);
     group.spec.technical={...group.spec.technical,...shared};
     group.index=Math.min(group.index,index);
     group.items.push({...item,reportTechnical:spec.technical,index});
-    for (const drawing of drawingSets[index]||[])
-      if (!group.drawings.some((stored)=>stored.name===drawing.name&&Buffer.from(stored.content).equals(Buffer.from(drawing.content))))
-        group.drawings.push(drawing);
   }
+  return groups.sort((a,b)=>a.index-b.index).map(group=>({...group,items:group.items.sort((a,b)=>a.index-b.index)}));
+}
+
+function groupSubtotal(items,locale,{partial=0,shipment=false}={}) {
+  const t=(ar,en)=>label(ar,en,locale),format=value=>new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(value);
+  const count=items.reduce((sum,item)=>sum+Number(item.quantity||0),0);
+  const measured=items.filter(item=>Number(item.specification.technical.width_mm)>0&&Number(item.specification.technical.height_mm)>0);
+  const area=measured.reduce((sum,item)=>sum+Number(item.quantity)*Number(item.specification.technical.width_mm)*Number(item.specification.technical.height_mm)/1e6,0);
+  const totals=orderQuantities({items});
+  const pairs=[[shipment?t('الفتحات المحملة كاملة','Complete openings loaded'):t('إجمالي عدد الفتحات','Opening count'),format(count)]];
+  if(measured.length) pairs.push([shipment?t('مساحة الفتحات المحملة كاملة م²','Complete opening area m²'):t('المساحة التقديرية م²','Estimated area m²'),format(area)]);
+  for(const amount of totals.quantities.filter(amount=>!['Pcs','m²'].includes(amount.unit)))pairs.push([t('كمية الأعمال ','Work quantity ')+unitName(amount.unit,locale),format(amount.quantity)]);
+  if(partial)pairs.push([t('فتحات محملة جزئيًا','Partially loaded openings'),format(partial)]);
+  return '<div class="group-subtotal">'+grid(pairs)+'</div>';
+}
+
+function groupedWork(db,items,locale,drawingSets) {
+  const groups=specificationGroups(items).map(group=>{
+    const drawings=[];
+    for(const item of group.items)for(const drawing of drawingSets[item.index]||[])
+      if(!drawings.some(stored=>stored.name===drawing.name&&Buffer.from(stored.content).equals(Buffer.from(drawing.content))))drawings.push(drawing);
+    return {...group,drawings};
+  });
   const t=(ar,en)=>label(ar,en,locale);
   const directionNames={right:"Right",left:"Left",top:"Top",bottom:"Bottom"};
   const text=(value)=>Array.isArray(value)?value.map((side)=>technicalText(directionNames[side]||side,locale)).join(t("، ",", ")):
@@ -238,7 +262,7 @@ function groupedWork(db,items,locale,drawingSets) {
       row([t("وصف الفتحة","Opening description"),...(hasTag?[t('رقم الفتحة','Opening tag')]:[]),...(hasLocation?[t("الموقع","Location")]:[]),t("العدد","Count"),...(hasWidth?[t("العرض مم","Width mm")]:[]),...(hasHeight?[t("الارتفاع مم","Height mm")]:[]),
         ...(hasDepth?[t("العمق مم","Depth mm")]:[]),...measuredParts.map(key=>fieldsFor(spec.category,system,{...tech,panel_measurement_basis:key.startsWith('leaf_')?'Operable leaf':'Fixed panel'},true).find(field=>field.key===key)?.[locale]||key),...(hasDrawing?[t("مرجع الرسم","Drawing reference")]:[]),
         ...(hasDeductions?[t("مقاس التصنيع بعد التخصيم مم","Manufacturing after deduction mm")]:[])],"th")+
-      "</thead><tbody>"+measures+'</tbody></table><div class="shared-specifications">'+grid(pairs)+"</div>"+imageHtml+"</section>";
+      "</thead><tbody>"+measures+'</tbody></table>'+groupSubtotal(items,locale)+'<div class="shared-specifications">'+grid(pairs)+"</div>"+imageHtml+"</section>";
   }).join("");
 }
 
@@ -292,8 +316,10 @@ function maintenanceBlock(order,locale) {
 function loadingBlock(order,locale) {
   const t=(ar,en)=>label(ar,en,locale);
   const details=new Map(order.items.map((item)=>[item.id,item.specification]));
-  const priority={frames:0,sliding:1,hinged:2,fixed:3,other:4,items:5,screens:6};
-  const ordered=order.items.flatMap(item=>order.balances.filter(entry=>entry.order_item_id===item.id).sort((a,b)=>(priority[a.kind]??5)-(priority[b.kind]??5)));
+  const priority={frames:0,sliding:1,hinged:2,fixed:3,other:4,items:5,screens:6,sliding_blades:7};
+  const groups=specificationGroups(order.items);
+  const tables=groups.map((group,groupIndex)=>{
+  const ordered=group.items.flatMap(item=>order.balances.filter(entry=>entry.order_item_id===item.id).sort((a,b)=>(priority[a.kind]??5)-(priority[b.kind]??5)));
   let last=null,band=-1;
   const rows=ordered.map((entry)=>{
     const begin=last!==entry.order_item_id;if(begin){last=entry.order_item_id;band++;}
@@ -304,15 +330,18 @@ function loadingBlock(order,locale) {
     return (begin?(band?'</tbody>':'')+`<tbody class="opening-band-${band%2}" data-opening="${entry.order_item_id}">`:'')+
       "<tr>"+values.map((value,index)=>'<td'+(index>2&&index<8?' class="number"':"")+'>'+valueHtml(value)+"</td>").join("")+"</tr>";
   }).join("");
+  return '<h3>'+escape(t(`المجموعة ${groupIndex+1} من ${groups.length}`,`Group ${groupIndex+1} of ${groups.length}`))+'</h3>'+
+    '<table class="loading-sheet"><colgroup>'+[22,14,15,8,9,8,8,9,7].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row([t("وصف الفتحة","Opening description"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),
+      t("المحمل سابقًا","Previous"),t("الحالي","This load"),t("التراكمي","To date"),t("المتبقي","Remaining"),t("ملاحظات / تاريخ","Notes / date")],"th")+
+    "</thead>"+rows+(ordered.length?'</tbody>':'')+"</table>"+groupSubtotal(group.items,locale);
+  }).join('');
   const frames=order.balances.filter(({kind})=>kind==="frames").reduce((sum,entry)=>sum+entry.required,0);
   const leaves=order.balances.filter(({kind})=>["sliding","hinged","other"].includes(kind)).reduce((sum,entry)=>sum+entry.required,0);
   const screens=order.balances.filter(({kind})=>kind==="screens").reduce((sum,entry)=>sum+entry.required,0);
   return '<section class="loading">'+
     '<p>'+escape(t("إجمالي الحلوق","Total frames"))+' '+frames+' · '+escape(t("إجمالي الضلف","Total leaves"))+' '+leaves+
     (screens?' · '+escape(t("إجمالي ضلف السلك","Total flyscreen leaves"))+' '+screens:'')+'</p>'+
-    '<table class="loading-sheet"><colgroup>'+[22,14,15,8,9,8,8,9,7].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row([t("وصف الفتحة","Opening description"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),
-      t("المحمل سابقًا","Previous"),t("الحالي","This load"),t("التراكمي","To date"),t("المتبقي","Remaining"),t("ملاحظات / تاريخ","Notes / date")],"th")+
-    "</thead>"+rows+(ordered.length?'</tbody>':'')+"</table></section>"+loadingExtras(order,locale);
+    tables+"</section>"+loadingExtras(order,locale);
 }
 
 function loadingExtras(order,locale){
@@ -320,8 +349,10 @@ function loadingExtras(order,locale){
   if(!settings?.enabled||!settings.rows?.length)return '';
   const t=(ar,en)=>label(ar,en,locale);
   return '<section class="loading-extras"><h3>'+escape(t('بنود تحميل إضافية','Additional loading items'))+'</h3><table><thead>'+row([
-    t('البيان','Description'),t('الوحدة','Unit'),t('الكمية','Quantity')],'th')+'</thead><tbody>'+settings.rows.map(entry=>row([
-      entry.label,unitName(unitKey(entry.unit),locale),entry.quantity])).join('')+'</tbody></table></section>';
+    t('الفتحة','Opening'),t('البيان','Description'),t('الوحدة','Unit'),t('الكمية','Quantity')],'th')+'</thead><tbody>'+settings.rows.map(entry=>{
+      const item=order.items.find(item=>item.id===Number(entry.order_item_id));
+      return row([item?openingDescription(item.specification):t('عام للأمر','General'),entry.label,unitName(unitKey(entry.unit),locale),entry.quantity*(entry.per_opening&&item?item.quantity:1)]);
+    }).join('')+'</tbody></table></section>';
 }
 
 function loadingTransportBlock(order,locale){
@@ -365,9 +396,9 @@ function approvalReport(db,order,locale) {
 function reportFilename(customer,order,options) {
   const ar=options.locale==="ar";
   const stage=order.kind==="maintenance"?(ar?"صيانة":"Maintenance"):options.kind==="approvals"?(ar?"حالة الاعتمادات":"Approval Status"):
-    options.kind==="loading"?(ar?"تحميل":"Loading"):options.classification==="manufacturing"?(ar?"تصنيع":"Manufacturing"):(ar?"طلب خامات":"Material Requisition");
+    options.kind==="delivery"?(ar?"إذن تسليم":"Delivery Note"):options.kind==="loading"?(ar?"تحميل":"Loading"):options.classification==="manufacturing"?(ar?"تصنيع":"Manufacturing"):(ar?"طلب خامات":"Material Requisition");
   const safe=(value)=>String(value||"").replace(/[\\/:*?"<>|\u0000-\u001f]/g,"_").replace(/[. ]+$/g,"").slice(0,90);
-  return safe(customer.display_name||customer.name)+" - "+safe(options.kind==="loading"?order.loading_reference||order.reference:order.reference)+" - "+stage+".pdf";
+  return safe(customer.display_name||customer.name)+" - "+safe(["loading","delivery"].includes(options.kind)?order.loading_reference||order.reference:order.reference)+" - "+stage+".pdf";
 }
 
 function report(db,state,rawOrder,options,branding) {
@@ -427,4 +458,4 @@ async function appendDrawings(buffer,drawings) {
   return Buffer.from(await output.save());
 }
 
-module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair,orderSummary,loadingTransportBlock};
+module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair,orderSummary,loadingTransportBlock,projectBlock,signatures,panelLabels,specificationGroups,groupSubtotal};

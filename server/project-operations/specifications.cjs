@@ -243,12 +243,13 @@ function perimeterDescription(value,locale) {
 }
 
 function loadingQuantities(category, system, technical, quantity) {
+  const blades=counts=>({...counts,...(counts.sliding>0?{sliding_blades:counts.sliding}:{})});
   const perOpening = technical.panel_counts;
   const frames=frameQuantity(category,system,technical,quantity);
   const screens=Object.hasOwn(perOpening||{},"screens")?null:screenQuantity(category,technical,quantity);
   if (perOpening && Object.values(perOpening).some((value)=>value>0))
-    return {...Object.fromEntries(Object.entries(perOpening).filter(([,value])=>value>0).map(([kind,value])=>[kind,value*quantity])),
-      ...(frames?{frames}:{}),...(screens?{screens}:{})};
+    return blades({...Object.fromEntries(Object.entries(perOpening).filter(([,value])=>value>0).map(([kind,value])=>[kind,value*quantity])),
+      ...(frames?{frames}:{}),...(screens?{screens}:{})});
   if (!openings.has(category)) return {items:quantity};
   const tags = new Set(system?.tags || []);
   const moving = ["sliding","hinged","other_panels"].filter((tag)=>tags.has(tag));
@@ -260,7 +261,7 @@ function loadingQuantities(category, system, technical, quantity) {
   const counts = {};
   if (moving.length) counts[moving[0]==="other_panels"?"other":moving[0]]=technical.leaves*quantity;
   if (technical.fixed_panels>0) counts.fixed=technical.fixed_panels*quantity;
-  return {...counts,...(frames?{frames}:{}),...(screens?{screens}:{})};
+  return blades({...counts,...(frames?{frames}:{}),...(screens?{screens}:{})});
 }
 
 function extensionFields(input) {

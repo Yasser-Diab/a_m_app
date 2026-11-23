@@ -555,7 +555,7 @@
       "systems": [
         {
           "id": "doors-1",
-          "ar": "مفصلي ضلفة واحدة",
+          "ar": "باب مفصلي ضلفة واحدة",
           "en": "Single-leaf hinged",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -564,7 +564,7 @@
         },
         {
           "id": "doors-2",
-          "ar": "مفصلي ضلفتين",
+          "ar": "باب مفصلي ضلفتين",
           "en": "Double-leaf hinged",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -573,7 +573,7 @@
         },
         {
           "id": "doors-3",
-          "ar": "مفصلي مع ثابت جانبي",
+          "ar": "باب مفصلي مع ثابت جانبي",
           "en": "Hinged with fixed sidelight",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -582,7 +582,7 @@
         },
         {
           "id": "doors-4",
-          "ar": "مفصلي مع ثابت علوي",
+          "ar": "باب مفصلي مع ثابت علوي",
           "en": "Hinged with fixed fanlight",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -600,7 +600,7 @@
         },
         {
           "id": "doors-6",
-          "ar": "جرار ضلفة واحدة",
+          "ar": "باب جرار ضلفة واحدة",
           "en": "Single-panel sliding",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -609,7 +609,7 @@
         },
         {
           "id": "doors-7",
-          "ar": "جرار ضلفتين",
+          "ar": "باب جرار ضلفتين",
           "en": "Double-panel sliding",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -618,7 +618,7 @@
         },
         {
           "id": "doors-8",
-          "ar": "جرار داخل الحائط",
+          "ar": "باب جرار داخل الحائط",
           "en": "Pocket sliding",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -627,7 +627,7 @@
         },
         {
           "id": "doors-9",
-          "ar": "رفع وجرار",
+          "ar": "باب رفع وجرار",
           "en": "Lift & Slide",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -636,7 +636,7 @@
         },
         {
           "id": "doors-10",
-          "ar": "تلسكوبي منزلق",
+          "ar": "باب تلسكوبي منزلق",
           "en": "Telescopic sliding",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -645,7 +645,7 @@
         },
         {
           "id": "doors-11",
-          "ar": "أكورديون",
+          "ar": "باب أكورديون",
           "en": "Folding / Bi-fold",
           "source": "https://www.schueco.com/de-en/home-owners/products/windows",
           "definition": "خيار هندسي / تشغيلي ضمن فئة الأبواب",
@@ -744,7 +744,7 @@
         },
         {
           "id": "doors-22",
-          "ar": "مفصلي ضلفة واحدة للداخل",
+          "ar": "باب مفصلي ضلفة واحدة للداخل",
           "en": "Single-leaf inward hinged",
           "tags": [
             "hinged"
@@ -756,7 +756,7 @@
         },
         {
           "id": "doors-23",
-          "ar": "مفصلي ضلفة واحدة للخارج",
+          "ar": "باب مفصلي ضلفة واحدة للخارج",
           "en": "Single-leaf outward hinged",
           "tags": [
             "hinged"
@@ -768,7 +768,7 @@
         },
         {
           "id": "doors-24",
-          "ar": "مفصلي ضلفتين للداخل",
+          "ar": "باب مفصلي ضلفتين للداخل",
           "en": "Double-leaf inward hinged",
           "tags": [
             "hinged"
@@ -780,7 +780,7 @@
         },
         {
           "id": "doors-25",
-          "ar": "مفصلي ضلفتين للخارج",
+          "ar": "باب مفصلي ضلفتين للخارج",
           "en": "Double-leaf outward hinged",
           "tags": [
             "hinged"
@@ -789,6 +789,76 @@
           "definition": "تكوين مفصلي للأبواب والنوافذ",
           "decision": "جهة المفصلات / اتجاه الفتح / الضلف والثوابت",
           "note": "تحدد الصلاحية وفق التصميم المعتمد"
+        },
+        {
+          "id": "doors-26",
+          "ar": "باب جرار",
+          "en": "Sliding door",
+          "tags": [
+            "sliding"
+          ]
+        },
+        {
+          "id": "doors-27",
+          "ar": "باب مفصلي",
+          "en": "Hinged door",
+          "tags": [
+            "hinged"
+          ]
+        },
+        {
+          "id": "doors-28",
+          "ar": "باب جرار مع ثابت علوي",
+          "en": "Sliding door with top fixed panel",
+          "tags": [
+            "sliding",
+            "fixed_panel"
+          ]
+        },
+        {
+          "id": "doors-29",
+          "ar": "باب جرار مع ثابت جانبي",
+          "en": "Sliding door with side fixed panel",
+          "tags": [
+            "sliding",
+            "fixed_panel"
+          ]
+        },
+        {
+          "id": "doors-30",
+          "ar": "باب جرار مع ثابت سفلي",
+          "en": "Sliding door with bottom fixed panel",
+          "tags": [
+            "sliding",
+            "fixed_panel"
+          ]
+        },
+        {
+          "id": "doors-31",
+          "ar": "باب مفصلي مع ثابت سفلي",
+          "en": "Hinged door with bottom fixed panel",
+          "tags": [
+            "hinged",
+            "fixed_panel"
+          ]
+        },
+        {
+          "id": "doors-32",
+          "ar": "باب مفصلي مع ثابت علوي وجانبي",
+          "en": "Hinged door with top and side fixed panels",
+          "tags": [
+            "hinged",
+            "fixed_panel"
+          ]
+        },
+        {
+          "id": "doors-33",
+          "ar": "باب جرار مع ثابت علوي وجانبي",
+          "en": "Sliding door with top and side fixed panels",
+          "tags": [
+            "sliding",
+            "fixed_panel"
+          ]
         }
       ],
       "fields": [

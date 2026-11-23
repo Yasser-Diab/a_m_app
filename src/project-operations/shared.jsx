@@ -51,6 +51,8 @@ export function SystemPick({t,items,...props}){
   useEffect(()=>setSearch(''),[items[0]?.[0]]);
   const normalized=text=>String(text).normalize('NFKD').replace(/[\u064b-\u065f]/g,'').replace(/[أإآ]/g,'ا').toLocaleLowerCase();
   const filtered=items.filter(([id,title])=>String(id)===String(props.value)||normalized(title).includes(normalized(search)));
+  const choiceKey=items.map(([id])=>id).join('|');
+  useEffect(()=>setSearch(''),[choiceKey]);
   return <div className="ops-system-pick"><Text label={t('بحث في طرق الفتح','Search operating types')} value={search} onChange={setSearch}/>
     <Pick {...props} items={filtered}/><small>{t(`${filtered.length} طريقة متاحة`,`${filtered.length} operating types available`)}</small></div>;
 }
@@ -120,6 +122,7 @@ export function SearchableTable({records,columns,onChanges,t,...table}) {
 }
 
 export const panelNames = {frames:["حلوق","Frames"],screens:["ضلف سلك","Flyscreen leaves"],sliding:["ضلف جرار","Sliding leaves"],hinged:["ضلف مفصلي","Hinged leaves"],
+  sliding_blades:["سكينة جرار","Sliding blades"],
   fixed:["ثوابت","Fixed panels"],other:["ضلف أخرى","Other leaves"],items:["وحدات","Items"]};
 export const stages={survey:["رفع المقاسات","Measurement survey"],receipt:["استلام الخامات","Material receipt"],
   cutting:["قص وتجهيز","Cutting and preparation"],assembly:["تجميع","Assembly"],glazing:["تركيب الزجاج","Glass installation"],

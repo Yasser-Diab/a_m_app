@@ -117,10 +117,10 @@ function reconcile(db,projectId,{lines=[],revisionId=null,cutoff=null}={}) {
   if (!db.get("SELECT 1 FROM ops_projects WHERE project_id=?",[projectId])) return [];
   const items=db.all("SELECT id,code,commercial FROM ops_items WHERE active=1 AND project_id=? ORDER BY id",[projectId]);
   const loaded=new Map(db.all(`SELECT oi.item_id,SUM(ll.quantity) AS amount,
-    SUM(CASE WHEN oi.quantity=(SELECT SUM(value) FROM json_each(oi.quantities) WHERE key NOT IN ('frames','screens')) THEN ll.quantity ELSE 0 END) AS comparable_amount
+    SUM(CASE WHEN oi.quantity=(SELECT SUM(value) FROM json_each(oi.quantities) WHERE key NOT IN ('frames','screens','sliding_blades')) THEN ll.quantity ELSE 0 END) AS comparable_amount
     FROM ops_load_lines ll
     JOIN ops_order_items oi ON oi.id=ll.order_item_id JOIN ops_orders o ON o.id=oi.order_id JOIN ops_loads b ON b.id=ll.load_id
-    WHERE o.project_id=? AND ll.kind NOT IN ('frames','screens') AND (? IS NULL OR b.loading_date<=?) GROUP BY oi.item_id`,[projectId,cutoff,cutoff])
+    WHERE o.project_id=? AND ll.kind NOT IN ('frames','screens','sliding_blades') AND (? IS NULL OR b.loading_date<=?) GROUP BY oi.item_id`,[projectId,cutoff,cutoff])
     .map((row)=>[row.item_id,row]));
   const confirmations=db.all(`SELECT c.item_id,c.stage,c.unit,SUM(c.quantity) AS amount FROM ops_confirmations c
     JOIN ops_items i ON i.id=c.item_id WHERE i.project_id=? AND (? IS NULL OR c.confirmed_on<=?)
