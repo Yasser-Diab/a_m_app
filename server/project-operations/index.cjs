@@ -293,7 +293,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   endpoint('post',base+'/orders/:orderId/shipments/:loadId/pdf','ops_export',async(req,access,id,res)=>{
     const output=require('./shipment-report.cjs').shipmentReport(db,core.operation(db,id),order(req,id),idOf(req.params.loadId),req.body.locale,branding());
     const pdf=await renderPdf(output.html,{report_language:req.body.locale==='en'?'en':'ar',prepared_by:access.user.display_name||access.user.username});
-    const name=reportFilename(output.customer,{reference:output.reference,loading_reference:output.reference},{kind:'loading',locale:req.body.locale});
+    const name=reportFilename(output.customer,{reference:output.reference,loading_reference:output.reference},{kind:'delivery',locale:req.body.locale});
     res.set('Cache-Control','no-store').set('Access-Control-Expose-Headers','Content-Disposition').attachment(name).type('application/pdf').send(pdf);
   });
   const prepareReport=(req,access,id)=>db.transaction(()=>{
