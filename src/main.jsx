@@ -1,3 +1,4 @@
+import SignatureSettings from './signature-directory.jsx';
 import React, {
   lazy,
   Suspense,
@@ -1129,7 +1130,7 @@ function uniqueValues(values) {
     ...new Set(
       values.map((value) => String(value || "").trim()).filter(Boolean),
     ),
-  ].slice(0, 120);
+  ];
 }
 
 function naturalTextCompare(left, right) {
@@ -11305,7 +11306,7 @@ function SmartEntryEditor({
   const searchCellClass=(index,key)=>!searchOpen?'':
     (searchCellKeys.has(rows[index]?._gridId+':'+key)?' table-search-hit':'')+
     (currentSearchMatch?.rowId===rows[index]?._gridId&&currentSearchMatch?.columnKey===key?' table-search-current':'');
-  const [, setSuggestionDraftVersion] = useState(0);
+  const [suggestionDraftVersion, setSuggestionDraftVersion] = useState(0);
   const [fillPreview, setFillPreview] = useState(null);
   const [certificateInfo, setCertificateInfo] = useState(null);
   const [confirmationDialog, setConfirmationDialog] = useState(null);
@@ -11469,21 +11470,13 @@ function SmartEntryEditor({
     resolve?.(result);
     restoreInputInteractivity();
   }
-  const partyOptions =
-    scopeRole === "contractor"
-      ? lookups.contractors
-      : lookups.customers;
-  const sourceCustomerOptions = uniqueValues(
-    (lookups.customers || []).map(
-      (party) => party.base_name || party.display_name,
-    ),
-  );
-  const filteredParties = (partyOptions || []).filter(
-    (party) =>
-      entryForm.party_category === "unselected" ||
-      !entryForm.party_category ||
-      party.category === entryForm.party_category,
-  );
+  const [matchedParties,setMatchedParties]=useState([]);
+  useEffect(()=>{let cancelled=false;const timer=setTimeout(()=>{
+    api.request('/api/parties?'+new URLSearchParams({role:scopeRole==='contractor'?'contractor':'customer',q:entryForm.base_party_name||'',direct:'1'})).then(data=>{if(!cancelled)setMatchedParties(Array.isArray(data)?data:[]);}).catch(()=>{});
+  },180);return()=>{cancelled=true;clearTimeout(timer);};},[api,scopeRole,entryForm.base_party_name]);
+  const partyOptions=[...new Map([...(scopeRole==='contractor'?lookups.contractors||[]:lookups.customers||[]),...matchedParties].map(party=>[party.id,party])).values()];
+  const filteredParties=partyOptions;
+  const sourceCustomerOptions=uniqueValues((lookups.customers||[]).map(party=>party.base_name||party.display_name));
   function rowsWithSmartReadyCounterDrafts(list = rows) {
     const drafts = cellDraftsRef.current;
     if (!drafts.size) return list;
@@ -11509,6 +11502,8 @@ function SmartEntryEditor({
     return nextRows;
   }
 
+  const [remoteSuggestions,setRemoteSuggestions]=useState({});
+  useEffect(()=>{const [index,key]=String(editingCell||activeCell||'').split(':');if(!['description','glass_spec','profile_spec','color','building_unit','floor_apartment','work_type'].includes(key))return;let cancelled=false;const timer=setTimeout(()=>{const value=String(smartCellDraftValue(Number(index),key)||'');api.request('/api/entry-suggestions?'+new URLSearchParams({field:key,q:value,party_id:entryForm.party_id||''})).then(data=>{if(!cancelled)setRemoteSuggestions(old=>({...old,[key]:data.values||[]}));}).catch(()=>{});},180);return()=>{cancelled=true;clearTimeout(timer);};},[api,editingCell,activeCell,suggestionDraftVersion,entryForm.party_id]);
   const readyCounterRows = rowsWithSmartReadyCounterDrafts(rows);
   const rowData = rows
     .filter(rowHasData)
@@ -14307,7 +14302,7 @@ function SmartEntryEditor({
   }
 
   function optionsForCell(key) {
-    return (
+    return uniqueValues([...(remoteSuggestions[key]||[]),...(
       {
         work_type: selectedWorkTypes.length ? selectedWorkTypes : workTypeOptions,
         building_unit: buildingOptions,
@@ -14317,7 +14312,7 @@ function SmartEntryEditor({
         profile_spec: profileOptions,
         color: colorOptions,
       }[key] || []
-    );
+    )]);
   }
 
   async function deleteSmartSelection(fallbackIndex = null) {
@@ -18589,6 +18584,7 @@ function SettingsView({
         onAction={onManagerEventAction}
         uiLanguage={uiLanguage}
       />
+      {!subscriptionOnly&&canEditCompanySettings&&<SignatureSettings api={api} user={currentUser} uiLanguage={uiLanguage}/>}
       <section className="panel application-version-panel">
         <div className="panel-head">
           <h2>

@@ -117,7 +117,7 @@ function projectDetails(input) {
 }
 
 function cleanReportSignatures(input={}) {
-  return Object.fromEntries(["manufacturing","loading","maintenance"].filter(kind=>Array.isArray(input?.[kind])).map(kind=>[kind,
+  return Object.fromEntries(["manufacturing","loading","delivery","installation","quotation","invoice","maintenance"].filter(kind=>Array.isArray(input?.[kind])).map(kind=>[kind,
     input[kind].map(value=>{const person=value&&typeof value==="object"?value:{};return {name:str(person.name,200),title:str(person.title,200),company:str(person.company,200),
       side:person.side==="client"?"client":"company"};}).filter(person=>person.name||person.title)]));
 }
@@ -125,7 +125,7 @@ function cleanReportSignatures(input={}) {
 function saveReportSignatures(db,state,body,user) {
   if(Number(body.version)!==state.version) fail(409,"Reload the project before saving signatures");
   const kind=str(body.kind);
-  if(!["manufacturing","loading","maintenance"].includes(kind)||!Array.isArray(body.signatures)) fail(400,"Choose a report and its signatures");
+  if(!["manufacturing","loading","delivery","installation","quotation","invoice","maintenance"].includes(kind)||!Array.isArray(body.signatures)) fail(400,"Choose a report and its signatures");
   const report_signatures={...state.details.report_signatures,...cleanReportSignatures({[kind]:body.signatures})};
   const details={...state.details,report_signatures};
   db.run("UPDATE ops_projects SET details=?,version=version+1 WHERE project_id=?",[encode(details),state.project_id]);

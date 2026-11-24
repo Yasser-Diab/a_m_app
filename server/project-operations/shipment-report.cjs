@@ -12,7 +12,7 @@ function shipmentData(db,current,id){
     const order=require('./production.cjs').orderDetails(db,current);
     data={items:order.items,parts:order.parts,lines:db.all('SELECT *,order_item_id||\':\'||kind AS part_id FROM ops_load_lines WHERE load_id=?',[id]),transport:{}};
   }
-  return {...batch,...data};
+  return {...batch,...data,reference:data.document_reference||batch.reference};
 }
 function shipmentRows(data){
   const actual=new Map(data.lines.map(line=>[line.part_id,Number(line.quantity)])),rows=[];
@@ -36,9 +36,9 @@ function shipmentRows(data){
     return {...part,tag:hasTags?String(part.item?.specification.technical.tag||'').trim():serials.get(key)};
   });
 }
-function shipmentReport(db,state,current,id,locale,branding){
+function shipmentReport(db,state,current,id,locale,branding,overrideData){
   locale=locale==='en'?'en':'ar';const t=(ar,en)=>locale==='ar'?ar:en;
-  const data=shipmentData(db,current,id),rows=shipmentRows(data),project=getProject(db,current.project_id),customer=getCustomer(db,project.customer_id);
+  const data=overrideData||shipmentData(db,current,id),rows=shipmentRows(data),project=getProject(db,current.project_id),customer=getCustomer(db,project.customer_id);
   const order={...current,items:data.items,loading_reference:data.reference,loading_transport:data.transport,loads:[{responsible:parse(data.responsible,{})}]};
   const format=value=>new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(value);
   const groups=specificationGroups(data.items).map(group=>({items:group.items,rows:rows.filter(part=>group.items.some(item=>item.id===part.item?.id))})).filter(group=>group.rows.length);
@@ -62,14 +62,15 @@ function shipmentReport(db,state,current,id,locale,branding){
     const partial=new Set(group.rows.filter(part=>part.item&&!part.complete).map(part=>part.item.id)).size;
     return '<h3>'+t(`المجموعة ${groupIndex+1} من ${groups.length}`,`Group ${groupIndex+1} of ${groups.length}`)+'</h3><table class="loading-sheet delivery-sheet"><colgroup>'+[10,29,16,15,11,8,11].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row(['Tag',t('وصف الفتحة','Opening description'),t('المقاس مم','Size mm'),t('المكون','Component'),
       t('الكمية المحملة','Loaded quantity'),t('الوحدة','Unit'),t('نسبة التحميل','Loading progress')],'th')+'</thead>'+body+'</tbody></table>'+
-      (group.items.length?groupSubtotal(complete,locale,{partial,shipment:true}):'');
+      (groups.filter(group=>group.items.length).length>1&&group.items.length?groupSubtotal(complete,locale,{partial,shipment:true}):'');
   }).join('');
   const totals=new Map();for(const part of rows){const unit=unitKey(part.unit);totals.set(unit,(totals.get(unit)||0)+part.quantity);}
+  const completeArea=rows.filter(part=>part.complete).reduce((sum,part)=>{const tech=part.item.specification.technical;return sum+(tech.width_mm>0&&tech.height_mm>0?part.quantity*tech.width_mm*tech.height_mm/1e6:0);},0);
   const html=projectBlock(db,project,customer,state,order,locale,branding)+'<section class="loading">'+grid([
     [t('تاريخ الشحنة','Shipment date'),data.loading_date],[t('البيان','Contents'),t('المحمّل على هذه السيارة فقط','Only the load on this vehicle')],
   ])+tables+'</section>'+
-    '<section>'+grid([...totals].map(([unit,amount])=>[t('إجمالي المحمّل ','Total loaded ')+(unit==='openings'?t('فتحات','openings'):unitName(unit,locale)),format(amount)]))+'</section>'+
-    loadingTransportBlock(order,locale)+signatures(db,project.id,order,'loading',locale);
+    '<section>'+grid([...(completeArea?[[t('مساحة الفتحات المحملة كاملة م²','Complete opening area m²'),format(completeArea)]]:[]),...[...totals].map(([unit,amount])=>[t('إجمالي المحمّل ','Total loaded ')+(unit==='openings'?t('فتحات','openings'):unitName(unit,locale)),format(amount)])])+'</section>'+
+    loadingTransportBlock(order,locale)+signatures(db,project.id,order,'delivery',locale);
   return {html:wrap({locale,branding,title:t('إذن تسليم ','Delivery Note ')+data.reference,color:'#7992a3',body:html}),reference:data.reference,customer};
 }
 module.exports={shipmentData,shipmentRows,shipmentReport};

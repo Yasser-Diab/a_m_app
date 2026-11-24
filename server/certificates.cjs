@@ -28,6 +28,7 @@ const {reconcile:reconcileOperations} = require("./project-operations/finance.cj
 function initializeCertificates(database) {
   database.transaction(() => {
     database.exec(fs.readFileSync(path.join(__dirname, "certificate-schema.sql"), "utf8"));
+    require('./document-edit-window.cjs').initialize(database);
     initializeCertificateNumbers(database);
     if (!database.all("PRAGMA table_info(cert_receipt_allocations)").some(({name}) => name === "allocated_at"))
       database.run("ALTER TABLE cert_receipt_allocations ADD COLUMN allocated_at TEXT");
@@ -253,6 +254,8 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     return {project:getProject(database,projectId),access};
   };
   const admin = (req) => adminAccess(database,req);
+  router.get('/signature-directory',(req,res)=>{checked(req,'view');res.json(require('./signature-directory.cjs').directory(database));});
+  router.put('/signature-directory',(req,res)=>{const access=checked(req,'manage_settings');if(!hasMasterPermission(access))fail(403,'Company settings permission is required');res.json(database.transaction(()=>require('./signature-directory.cjs').save(database,req.body,access.user)));});
   router.get('/retentions',(req,res)=>res.json(retentionReport(database,checked(req,'view_collections'),req.query)));
   router.get('/retentions/notices',(req,res)=>res.json({events:retentionNotices(database,checked(req,'view_collections'),req.query.locale)}));
   router.post('/retentions/pdf',async(req,res,next)=>{try{
@@ -526,6 +529,9 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     issueAccess:(req,projectId) => checked(req,"issue",projectId),
   });
 
+  router.post('/:id/versions/:changeId/pdf',async(req,res)=>{const {row}=revision(req,'export'),history=database.get("SELECT before_json FROM document_edit_history WHERE kind='certificate' AND document_id=? AND id=?",[row.id,idOf(req.params.changeId)]);if(!history)fail(404,'Previous certificate version not found');const renderer=require('./certificate-documents.cjs'),model=renderer.buildCertificateDocument(JSON.parse(history.before_json),{variant:'customer'}),pdf=await renderer.renderCertificatePdf(model);res.attachment('Certificate '+certificateNumber(database,row)+' - previous.pdf').type('application/pdf').send(pdf.buffer);});
+  router.get('/:id/edit-artifacts',(req,res)=>{const {row,access}=revision(req,'view');res.json(database.all('SELECT id,variant,created_at,checksum FROM certificate_edit_artifacts WHERE certificate_id=? ORDER BY id DESC',[row.id]).filter(item=>item.variant!=='internal'||access.capabilities.includes('view_collections')));});
+  router.get('/:id/edit-artifacts/:artifactId/pdf',(req,res)=>{const {row,access}=revision(req,'export');const artifact=database.get('SELECT pdf,variant FROM certificate_edit_artifacts WHERE certificate_id=? AND id=?',[row.id,idOf(req.params.artifactId)]);if(!artifact?.pdf)fail(404,'Archived version not found');if(artifact.variant==='internal'&&!access.capabilities.includes('view_collections'))fail(403,'Collection permission is required');res.type('application/pdf').send(Buffer.from(artifact.pdf));});
   router.get("/:id",(req,res) => {
     const {row,access} = revision(req,"view");
     res.json(detail(row,access));
@@ -539,7 +545,9 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
   }
   router.put("/:id",(req,res) => {
     const {row,access} = revision(req,"edit_draft");
-    res.json(detail(database.transaction(() => saveDraft(database,row,req.body,access.user,access)),access));
+    const updated=database.transaction(() => saveDraft(database,row,req.body,access.user,access));
+    res.json(detail(updated,access));
+    if(updated.status==='issued'&&updated.pdf_status==='pending')void processCertificateRender(database,updated.id,dataDir).catch(error=>console.warn(error.message));
   });
   router.post("/:id/action",(req,res) => {
     const action = str(req.body.action);

@@ -66,6 +66,7 @@ function editedReport(db,current,options,html){
     edit_version:row?.version||0,document_ref:key.document_ref,report_key:key.report_kind+':'+key.locale,customized:row?.body_html!=null};
 }
 function saveReportEdit(db,current,options,user){
+  require("../document-edit-window.cjs").check(db,"order",current.id,["closed","shipped"].includes(current.status)?current.created_at:null);
   const {key,row}=saved(db,current,options);
   if(str(options.document_ref)!==key.document_ref)fail(409,'The loading order changed. Reopen its report before saving');
   if(Number(options.version)!==(row?.version||0))fail(409,'The report was edited elsewhere. Reopen it before saving');

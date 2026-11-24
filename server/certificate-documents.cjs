@@ -237,14 +237,14 @@ function processCertificateRender(database, certificateId) {
       if (!database.db) return;
       database.transaction(() => {
         const changed = database.run(`UPDATE cert_pdf_artifacts SET status = ?, pdf = ?, checksum = ?, pagination_json = ?, failure = ?,
-          updated_at = CURRENT_TIMESTAMP WHERE certificate_id = ? AND variant = ? AND status = 'pending'`,
-        [status, buffer, checksum, pagination, failure, certificateId, job.variant]);
+          updated_at = CURRENT_TIMESTAMP WHERE certificate_id = ? AND variant = ? AND status = 'pending' AND document_json = ?`,
+        [status, buffer, checksum, pagination, failure, certificateId, job.variant,job.document_json]);
         if (job.variant === 'customer' && changed.modified) database.run('UPDATE cert_revisions SET pdf_status = ? WHERE id = ?', [status, certificateId]);
       });
     }
   })().catch((error) => {
     console.error('Could not persist certificate PDF render state', certificateId, error);
-  }).finally(() => pending.delete(certificateId));
+  }).finally(() => {pending.delete(certificateId);if(database.db&&database.get("SELECT 1 FROM cert_pdf_artifacts WHERE certificate_id=? AND status='pending'",[certificateId]))void processCertificateRender(database,certificateId);});
   pending.set(certificateId, task);
   return task;
 }

@@ -1,3 +1,4 @@
+import {SignatureInput,useSignatureDirectory} from '../signature-directory.jsx';
 import { useMemo, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, ProjectDetailsFields, queryString, ReportGroupingChecks, Status, useDebounce, useResource } from "./shared.jsx";
@@ -83,6 +84,7 @@ function ProjectDetailsForm({ project, request, canManage, t, onSaved }) {
 }
 
 function SettingsForm({ project, request, canManage, t, onSaved }) {
+  const signatureDirectory=useSignatureDirectory(request);
   const profile = project.settings || {};
   const settings = profile.settings || {};
   const [draft, setDraft] = useState(() => {
@@ -154,18 +156,9 @@ function SettingsForm({ project, request, canManage, t, onSaved }) {
     </fieldset>
     <fieldset disabled={!canManage || busy}>
       <legend>{t("توقيعات المستخلص", "Certificate signatures")}</legend>
-      {signatures.map((person) => <div className="pc-toolbar" key={person.key}>
-        <Field label={t("اسم الموقّع", "Signatory name")}><input dir="auto" value={person.name ?? ""} onChange={(event) => {
-          const name = event.target.value;
-          setSignatures((rows) => rows.map((row) => row.key === person.key ? {...row,name} : row));
-        }} /></Field>
-        <Field label={t("المنصب", "Position")}><input dir="auto" value={person.title ?? ""} onChange={(event) => {
-          const title = event.target.value;
-          setSignatures((rows) => rows.map((row) => row.key === person.key ? {...row,title} : row));
-        }} /></Field>
-        {canManage && <button type="button" onClick={() => setSignatures((rows) => rows.filter((row) => row.key !== person.key))}>{t("إزالة", "Remove")}</button>}
-      </div>)}
-      {canManage && signatures.length < 6 && <button type="button" onClick={() => setSignatures((rows) => [...rows, { key: newKey(), name: "", title: "" }])}>{t("إضافة موقّع", "Add signatory")}</button>}
+      {signatures.map(person=><div className="pc-toolbar" key={person.key}><SignatureInput t={t} label={t('اسم الموقّع','Signatory name')} value={person.name||''} options={signatureDirectory?.people||[]} onChange={(name,chosen)=>setSignatures(rows=>rows.map(row=>row.key===person.key?{...row,name,title:chosen?.title||row.title}:row))}/><SignatureInput t={t} title label={t('المنصب','Position')} value={person.title||''} options={signatureDirectory?.titles||[]} onChange={title=>setSignatures(rows=>rows.map(row=>row.key===person.key?{...row,title}:row))}/>{canManage&&<button type="button" onClick={()=>setSignatures(rows=>rows.filter(row=>row.key!==person.key))}>{t('إزالة','Remove')}</button>}</div>)}
+      {canManage&&<button type="button" onClick={()=>setSignatures((signatureDirectory?.defaults.certificate||[]).map(id=>({...signatureDirectory.people.find(person=>person.id===id),key:newKey()})))}>{t('تطبيق التوقيعات العامة','Apply global signatures')}</button>}
+      {canManage && <button type="button" onClick={() => setSignatures((rows) => [...rows, { key: newKey(), name: "", title: "" }])}>{t("إضافة موقّع", "Add signatory")}</button>}
     </fieldset>
     <fieldset disabled={!canManage || busy}>
       <legend>{t("الضرائب والاستقطاعات", "Taxes and deductions")}</legend>

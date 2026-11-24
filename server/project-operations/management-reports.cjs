@@ -3,7 +3,7 @@ const {approvalParts,frameQuantity,screenQuantity,configuration}=require("./spec
 const {wrap,escape,row,grid,dimensionPair}=require("./reports.cjs");
 const {pageOptions}=require("./core.cjs");
 const {unitKey,unitName}=require('./order-quantities.cjs');
-const stages={specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],
+const stages={installation:["التركيب","Installation"],specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],
   materials:["اعتماد الخامات","Materials"],manufacturing:["التصنيع","Manufacturing"],qc:["فحص ما قبل الشحن","Pre-shipment QC"],
   loading:["التحميل","Loading"],maintenance:["الصيانة","Maintenance"],completed:["مكتمل","Completed"],review:["مراجعة التعديلات","Changes to review"],rejected:["مرفوض","Rejected"]};
 const components={sliding_blades:["سكينة جرار","Sliding blades"],frames:["حلوق","Frames"],screens:["ضلف سلك","Flyscreen leaves"],sliding:["ضلف جرار","Sliding leaves"],
@@ -57,6 +57,9 @@ function runningProjects(db,access,query={},all=false){
     WHERE o.project_id IN (SELECT value FROM json_each(?)) ORDER BY q.id DESC`,[data.ids]);
   const reviews=db.all(`SELECT r.* FROM ops_order_reviews r JOIN ops_order_items oi ON oi.id=r.order_item_id JOIN ops_orders o ON o.id=oi.order_id
     WHERE o.project_id IN (SELECT value FROM json_each(?))`,[data.ids]);
+  const installations=db.all(`SELECT x.*,oi.order_id FROM ops_installations x JOIN ops_order_items oi ON oi.id=x.order_item_id JOIN ops_orders o ON o.id=oi.order_id WHERE o.project_id IN (SELECT value FROM json_each(?))`,[data.ids]);
+  const assigned=db.all(`SELECT a.*,o.project_id,o.reference FROM ops_stage_assignments a JOIN ops_orders o ON o.id=a.order_id WHERE o.project_id IN (SELECT value FROM json_each(?))`,[data.ids]);
+  const actors=db.all(`SELECT a.project_id,a.entity_id,a.action,a.details,u.display_name,u.username FROM ops_audit a LEFT JOIN users u ON u.id=a.actor_id WHERE a.project_id IN (SELECT value FROM json_each(?)) ORDER BY a.id DESC`,[data.ids]);
   const parts=new Map(),qc=new Map(),decisions=new Map(),byId=new Map(data.items.map(item=>[item.id,item]));
   approvals.forEach(item=>{const set=parts.get(item.item_id)||new Set();set.add(item.part);parts.set(item.item_id,set);});
   inspections.forEach(item=>{const record=parse(item.record,{}),key=item.order_item_id+":"+record.item_version+":"+item.stage;
@@ -100,17 +103,29 @@ function runningProjects(db,access,query={},all=false){
         decisions.get(opening.id+":"+version+":manufacturing")!==0)counts.manufacturing+=opening.quantity;
       if(qc.get(opening.id+":"+version+":pre_shipment"))counts.qc+=opening.quantity;
     }
+    counts.delivered=openings.reduce((sum,opening)=>{const loaded={};for(const line of data.loadsByOpening.get(opening.id)||[])loaded[line.kind]=(loaded[line.kind]||0)+line.quantity;return sum+completedOpenings(opening.quantities,loaded,opening.quantity);},0);
     counts.loaded=(data.loadsByProject.get(project.id)||[]).filter(load=>orderIds.has(load.order_id)).reduce((sum,load)=>sum+load.quantity,0);
+    counts.installed=installations.filter(entry=>orderIds.has(entry.order_id)).reduce((sum,entry)=>sum+entry.quantity,0);
     const fullyOrdered=items.length>0&&items.every(item=>item.technical.quantity>0&&projectOpenings.filter(opening=>opening.item_id===item.id)
       .reduce((sum,opening)=>sum+opening.quantity,0)>=item.technical.quantity);
-    const completed=/^(مكتمل|مغلق|ملغي|completed|closed|cancelled)$/i.test(project.details.status||"")||fullyOrdered&&orders.length>0&&orders.every(order=>order.status==="closed");
+    const completed=/^(مكتمل|مغلق|ملغي|completed|closed|cancelled)$/i.test(project.details.status||"")||fullyOrdered&&counts.ordered>0&&counts.installed===counts.ordered;
     const stage=rejected?'rejected':completed?"completed":counts.stale?"review":counts.maintenance&&!openings.length?"maintenance":
       !counts.items||counts.specifications<counts.items?"specifications":counts.measurement<counts.items?"measurement":counts.materials<counts.items?"materials":
-      !counts.ordered||counts.manufacturing<counts.ordered?"manufacturing":counts.qc<counts.ordered?"qc":"loading";
-    return {...project,counts,stage,completed,has_rejected:rejected||orders.some(order=>orderStates.get(order.id)?.rejected),orders:orders.map(order=>({id:order.id,reference:order.reference,rejected:orderStates.get(order.id)?.rejected})),loading_percent:counts.required?round(Math.min(100,counts.loaded/counts.required*100)):0};
-  }).filter(item=>item&&(item.has_rejected||query.include_completed==="1"||!item.completed));
+      !counts.ordered||counts.manufacturing<counts.ordered?"manufacturing":counts.qc<counts.ordered?"qc":counts.required>0&&counts.loaded>=counts.required?"installation":"loading";
+    const active_stages=[stage];if(counts.delivered>counts.installed&&!active_stages.includes('installation'))active_stages.push('installation');
+    const responsibilities=Object.fromEntries(['specifications','measurement','materials','manufacturing','qc','loading','installation','maintenance'].map(key=>{
+      const explicit=assigned.filter(row=>row.project_id===project.id&&orderIds.has(row.order_id)&&row.stage===key).flatMap(row=>(parse(row.data,{}).assignees||[]).map(person=>({...person,order:row.reference})));
+      if(explicit.length)return [key,explicit];
+      if(key==='loading'){const latest=db.get('SELECT responsible FROM ops_loads WHERE order_id IN (SELECT value FROM json_each(?)) ORDER BY id DESC LIMIT 1',[JSON.stringify([...orderIds])]);const loading=parse(latest?.responsible,{}).loading;return [key,loading?.name?[{name:loading.name,title:loading.position||''}]:[]];}
+      if(['qc','measurement'].includes(key)){const inspection=inspections.find(row=>orderIds.has(data.openings.find(item=>item.id===row.order_item_id)?.order_id)&&row.stage===(key==='qc'?'pre_shipment':'survey'));return [key,inspection?.inspector_name?[{name:inspection.inspector_name,title:''}]:[]];}
+      return [key,[]];
+    }));
+    return {...project,counts,stage,active_stages,responsibilities,completed,has_rejected:rejected||orders.some(order=>orderStates.get(order.id)?.rejected),orders:orders.map(order=>({id:order.id,reference:order.reference,rejected:orderStates.get(order.id)?.rejected})),loading_percent:counts.required?round(Math.min(100,counts.loaded/counts.required*100)):0};
+  }).filter(item=>item&&(item.has_rejected||query.include_completed===true||query.include_completed==="1"||!item.completed));
+  const selected=String(query.stages||'').split(',').filter(stage=>Object.hasOwn(stages,stage));
+  const filtered=selected.length?records.filter(item=>item.active_stages.some(stage=>selected.includes(stage))):records;
   const paging=pageOptions(query);
-  return {items:all?records:records.slice(paging.offset,paging.offset+paging.limit),total:records.length,page:paging.page,limit:paging.limit};
+  return {items:all?filtered:filtered.slice(paging.offset,paging.offset+paging.limit),total:filtered.length,page:paging.page,limit:paging.limit};
 }
 function completedOpenings(required,counts,quantity){
   const parts=Object.entries(required).filter(([,value])=>Number(value)>0);
@@ -161,12 +176,13 @@ function managementReport(kind,data,options,branding){
   if(kind==="progress"){
     title=t("موقف أعمال التشغيل","Current Work Summary");
     const ratio=(value,total)=>total?value+'/'+total:'—';
-    body='<section>'+grid([[t("تاريخ التقرير","Report date"),today()],[t("المشروعات","Projects"),data.total]])+'</section>'+
-      '<section class="loading"><table><thead>'+row([t("المشروع / العميل","Project / customer"),t("المرحلة الحالية","Current stage"),t("المواصفات","Specifications"),
-        t("المقاسات","Measurements"),t("الخامات","Materials"),t("التصنيع","Manufacturing"),t("الفحص","QC"),t("التحميل","Loading")],"th")+'</thead><tbody>'+
-      data.items.map(item=>row([item.code+' · '+item.name+' / '+item.customer+(item.orders?.length?' · '+item.orders.map(order=>order.reference+(order.rejected?' ('+t(...stages.rejected)+')':'')).join(' / '):''),[t(...stages[item.stage]),item.details.status].filter(Boolean).join(' · '),ratio(item.counts.specifications,item.counts.items),
-        ratio(item.counts.measurement,item.counts.items),ratio(item.counts.materials,item.counts.items),ratio(item.counts.manufacturing,item.counts.ordered),
-        ratio(item.counts.qc,item.counts.ordered),item.counts.required?format(item.loading_percent)+'%':'—'])).join('')+'</tbody></table></section>';
+    const owners=String(options.responsibles||'').split(',').filter(stage=>Object.hasOwn(stages,stage));
+    const ownerText=(item,key)=>owners.includes(key)?(item.responsibilities[key]||[]).map(person=>[person.name,person.title,person.order].filter(Boolean).join(' · ')).join(' / '):'';
+    const selected=String(options.stages||'').split(',').filter(key=>Object.hasOwn(stages,key));
+    body='<section>'+grid([[t('تاريخ التقرير','Report date'),today()],[t('المشروعات','Projects'),data.total],[t('المراحل','Stages'),selected.length?selected.map(key=>t(...stages[key])).join(' / '):t('تقرير عام — كل المراحل','General report — all stages')]])+'</section>'+
+      '<section class="loading"><table class="progress-table" style="table-layout:fixed"><colgroup><col style="width:22%"><col style="width:15%">'+Array.from({length:7},()=>'<col style="width:9%">').join('')+'</colgroup><thead>'+row([t('المشروع / العميل','Project / customer'),t('المرحلة الحالية','Current stage'),t('المواصفات','Specifications'),t('المقاسات','Measurements'),t('الخامات','Materials'),t('التصنيع','Manufacturing'),t('الفحص','QC'),t('التحميل','Loading'),t('التركيب','Installation')],'th')+'</thead><tbody>'+
+      data.items.map(item=>row([item.code+' · '+item.name+' / '+item.customer+(item.orders?.length?'\n'+item.orders.map(order=>order.reference+(order.rejected?' ('+t(...stages.rejected)+')':'')).join(' / '):''),[t(...stages[item.stage]),item.details.status,ownerText(item,'maintenance')].filter(Boolean).join('\n'),
+        ...[['specifications',ratio(item.counts.specifications,item.counts.items)],['measurement',ratio(item.counts.measurement,item.counts.items)],['materials',ratio(item.counts.materials,item.counts.items)],['manufacturing',ratio(item.counts.manufacturing,item.counts.ordered)],['qc',ratio(item.counts.qc,item.counts.ordered)],['loading',item.counts.required?format(item.loading_percent)+'%':'—'],['installation',ratio(item.counts.installed,item.counts.ordered)]].map(([key,value])=>[value,ownerText(item,key)].filter(Boolean).join('\n'))])).join('').replaceAll('\n','<br>')+'</tbody></table></section><style>.progress-table td,.progress-table th{overflow-wrap:anywhere;vertical-align:top}.progress-table td{font-size:8pt}</style>';
   }else{
     title=t("حصر كميات الأعمال","Work Quantity Takeoff");const loaded=data.mode==="loading";
     body='<section>'+grid([[t("النطاق","Scope"),loaded?t("التحميل المؤكد","Confirmed loading"):data.mode==="customer"?t("العميل","Customer"):t("المشروع بالكامل","Whole project")],

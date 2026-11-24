@@ -6,14 +6,15 @@ import ShipmentGrid from './ShipmentGrid.jsx';
 import {technicalText,openingDescription} from './terminology.js';
 
 export default function ShipmentEntry(props){
-  const {order,endpoint,request,t,people,reload,close,confirm,can}=props;
+  const {order,endpoint,request,t,people=[],reload,close,confirm,can,noteId,correction=false}=props;
+  const [reason,setReason]=useState('');
   const [prepared,setPrepared]=useState(null),[error,setError]=useState(null),[amounts,setAmounts]=useState({}),[result,setResult]=useState(null);
   const [extra,setExtra]=useState(null),[extraBusy,setExtraBusy]=useState(false);
   const [data,setData]=useState(()=>({loading_date:localDate(),notes:'',driver_name:'',vehicle_plate:'',command_key:newKey(),responsible:{}}));
-  useEffect(()=>{const controller=new AbortController();request(endpoint+'/shipment-preparation',{method:'POST',body:{},signal:controller.signal}).then(value=>{
-    setPrepared(value);setData(old=>({...old,reference:value.loading_reference,...value.loading_transport,
-      responsible:Object.fromEntries(people.filter(person=>person.responsibility).map(person=>[person.responsibility,person.id]))}));
-  }).catch(cause=>{if(!controller.signal.aborted)setError(cause);});return()=>controller.abort();},[endpoint,request]);
+  useEffect(()=>{const controller=new AbortController();request(noteId?'/delivery-notes/'+noteId:endpoint+'/shipment-preparation',{method:noteId?'GET':'POST',...(noteId?{}:{body:{}}),signal:controller.signal}).then(value=>{
+    setPrepared(value);if(noteId)setAmounts(value.amounts||{});setData(old=>({...old,...(noteId?{loading_date:value.loading_date,notes:value.notes,version:value.version}:{}),reference:value.loading_reference,...value.loading_transport,
+      responsible:noteId?Object.fromEntries(Object.entries(value.responsible||{}).map(([key,person])=>[key,typeof person==='object'?person.name:person])):Object.fromEntries(people.filter(person=>person.responsibility).map(person=>[person.responsibility,person.id]))}));
+  }).catch(cause=>{if(!controller.signal.aborted)setError(cause);});return()=>controller.abort();},[endpoint,request,noteId]);
   const action=useAction(request,value=>{setResult(value);reload();});
   const parts=(prepared?.parts||[]).map(part=>({...part,component:part.label||display(panelNames,part.kind,t),
     size:part.order_item_id?(t('ar','en')==='ar'?`${part.height_mm??'—'} × ${part.width_mm??'—'}`:`${part.width_mm??'—'} × ${part.height_mm??'—'}`):'',
@@ -25,7 +26,7 @@ export default function ShipmentEntry(props){
     if(!result&&Object.values(amounts).some(value=>Number(value)>0)&&!window.confirm(t('إغلاق جدول الشحنة دون تأكيد التحميل؟','Close the shipment table without confirming the loading?')))return;close();
   }}>
     {!prepared&&!error&&<p role="status">{t('جارٍ تحميل مكونات الأمر…','Loading order parts…')}</p>}<ErrorMessage error={error||action.error}/>
-    {prepared&&<form className="pc-stack" onSubmit={event=>{event.preventDefault();action.run(endpoint+(confirm?'/shipment':'/loading'),'POST',{
+    {prepared&&<form className="pc-stack" onSubmit={event=>{event.preventDefault();action.run(noteId?'/delivery-notes/'+noteId:endpoint+(confirm?'/shipment':'/loading'),noteId?'PATCH':'POST',{correction,reason,
       ...data,parts:parts.filter(part=>Number(amounts[part.part_id])>0).map(part=>({part_id:part.part_id,quantity:amounts[part.part_id]})),
     });}}>
       <fieldset disabled={action.busy||Boolean(result)} className="pc-stack"><div className="pc-form">
@@ -38,12 +39,13 @@ export default function ShipmentEntry(props){
       </div>
       <p className="pc-caption">{t('حدد الفتحة لتحميل كل مكوناتها المتبقية، أو حدد أجزاءها واكتب كمية التحميل. إذن التسليم يضم محتويات هذه السيارة فقط.',
         'Select an opening to load all its remaining parts, or select individual parts and enter quantities. The Delivery Note contains only this vehicle’s load.')}</p>
-      <ShipmentGrid {...{parts,amounts,t}} onChange={setAmounts} disabled={action.busy||Boolean(result)} onInsert={can('edit')?opening=>setExtra({id:newKey(),label:'',unit:'Pcs',quantity:'',order_item_id:opening,per_opening:Boolean(opening)}):undefined}/>
+      {correction&&<Text label={t('سبب التصحيح','Correction reason')} required value={reason} onChange={setReason}/>}
+      <ShipmentGrid {...{parts,amounts,t}} onChange={setAmounts} disabled={action.busy||Boolean(result)} onInsert={can('edit')&&!noteId?opening=>setExtra({id:newKey(),label:'',unit:'Pcs',quantity:'',order_item_id:opening,per_opening:Boolean(opening)}):undefined}/>
       <button className="primary" type="submit" disabled={!Object.values(amounts).some(value=>Number(value)>0)&&(!confirm||parts.some(part=>part.remaining>0))}>
-        {confirm?t('تأكيد الشحنة','Confirm shipment'):t('حفظ التحميل','Save loading')}</button></fieldset>
+        {noteId?(correction?t('حفظ مستند التصحيح','Save correction document'):t('حفظ إذن التسليم','Save Delivery Note')):confirm?t('تأكيد الشحنة','Confirm shipment'):t('حفظ التحميل','Save loading')}</button></fieldset>
     </form>}
     {result&&<div className="pc-stack"><p role="status">{t('تم حفظ الشحنة. إذن التسليم التالي يحتوي على الأجزاء المحملة على هذه السيارة فقط.','Shipment saved. The Delivery Note below contains only the parts loaded on this vehicle.')}</p>
-      {can('export')&&<PdfOutput {...props} kind="loading" filters={{}} endpoint={'/api/project-operations'+endpoint+'/shipments/'+result.id+'/pdf'}/>}
+      {can('export')&&<PdfOutput {...props} kind="loading" filters={{}} endpoint={noteId?'/api/project-operations/delivery-notes/'+result.id+'/pdf':'/api/project-operations'+endpoint+'/shipments/'+result.id+'/pdf'}/>}
       <button type="button" onClick={close}>{t('إغلاق','Close')}</button></div>}
     {extra&&<Dialog t={t} title={t('إضافة جزء للفتحة','Add opening part')} onClose={()=>!extraBusy&&setExtra(null)}><form className="pc-stack" onSubmit={async event=>{
       event.preventDefault();setExtraBusy(true);setError(null);try{

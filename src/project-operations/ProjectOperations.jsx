@@ -1,3 +1,5 @@
+import {SignatureInput,useSignatureDirectory} from '../signature-directory.jsx';
+import DeliveryNotes from './DeliveryNotes.jsx';
 import {useEffect,useState} from "react";
 import {ClipboardList,Factory,History,Layers3,Truck,Users} from "lucide-react";
 import {queryString,useDebounce,useResource} from "../certificates/shared.jsx";
@@ -74,7 +76,7 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
   const documentLabel=(doc)=>doc.document_type==="invoice"?t("فاتورة","Invoice"):t("عرض سعر","Quotation");
   return <div className="pc-workspace ops-workspace" dir={uiLanguage==="ar"?"rtl":"ltr"}>
     <nav className="pc-tabs" aria-label={t("أقسام إدارة التشغيل","Operations management sections")}>
-      {[["projects","المشروعات","Projects"],["loading","أوامر التحميل","Loading Orders"],["progress","متابعة التشغيل","Work progress"],["quantities","حصر الكميات","Quantity takeoff"]].map(([id,ar,en])=>
+      {[["projects","المشروعات","Projects"],["loading","أوامر التحميل","Loading Orders"],["delivery","أذون التسليم","Delivery Notes"],["progress","متابعة التشغيل","Work progress"],["quantities","حصر الكميات","Quantity takeoff"]].map(([id,ar,en])=>
         <button type="button" key={id} aria-pressed={view===id} onClick={()=>setView(id)}>{t(ar,en)}</button>)}
     </nav>
     <div className="pc-stack" hidden={view!=="projects"}>
@@ -120,6 +122,7 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
       </section>}
     </>}
     </div>
+    <div hidden={view!=='delivery'}><DeliveryNotes {...controls} active={view==='delivery'}/></div>
     <div hidden={view!=='loading'}><LoadingOrders {...controls} active={view==='loading'}/></div>
     <div hidden={view!=="progress"}><RunningProjects {...controls} active={view==="progress"} onOpenProject={row=>{setView("projects");openProject(row);}}/></div>
     <div hidden={view!=="quantities"}><QuantityTakeoff {...controls} active={view==="quantities"}/></div>
@@ -214,6 +217,7 @@ function PersonRoles({form,update,t}) {
 }
 
 function People({request,path,t,can,revision,reload,ctx}) {
+  const directory=useSignatureDirectory(request);
   const people=useResource(request,path+"/people",revision);
   const staff=useResource(request,can("edit")?"/employees":null);
   const [kind,setKind]=useState("staff");
@@ -241,7 +245,7 @@ function People({request,path,t,can,revision,reload,ctx}) {
     <ErrorMessage error={people.error||staff.error||contacts.error||action.error}/>
     {can("edit")&&edit!=null&&<form className="pc-stack" onSubmit={(event)=>{event.preventDefault();action.run(path+"/people/"+edit,"PATCH",form);}}>
       <div className="pc-form">
-        <Text label={t("الصفة","Title")} value={form.position} onChange={(value)=>update("position",value)}/>
+        <SignatureInput t={t} title label={t("الصفة","Title")} value={form.position} options={directory?.titles||[]} onChange={value=>update("position",value)}/>
         <Pick label={t("الطرف","Side")} value={form.side} onChange={(value)=>update("side",value)}
           items={[["company",t("الشركة","Company")],["client",t("العميل / الاستشاري","Client / consultant")]]}/>
         <PersonRoles {...{form,update,t}}/>
@@ -265,11 +269,11 @@ function People({request,path,t,can,revision,reload,ctx}) {
           <Pick label={t("الممثل","Representative")} value={form.contact_id} onChange={(value)=>update("contact_id",value)} required
             items={(contacts.data||[]).map(({id,name,company})=>[id,[name,company].filter(Boolean).join(" · ")])}/>
         </>}
-        <Text label={t("الصفة","Title")} value={form.position} onChange={(value)=>update("position",value)}/>
+        <SignatureInput t={t} title label={t("الصفة","Title")} value={form.position} options={directory?.titles||[]} onChange={value=>update("position",value)}/>
         <PersonRoles {...{form,update,t}}/>
         {["new","company"].includes(kind)&&[["name","الاسم","Name"],["company","الجهة","Organization"],["mobile","الهاتف","Phone"],
           ["email","البريد الإلكتروني","Email"],["details","بيانات إضافية","Additional contact details"]].map(([key,ar,en])=>
-          <Text key={key} label={t(ar,en)} value={form[key]} required={key==="name"} onChange={(value)=>update(key,value)}/>)}
+          key==='name'?<SignatureInput key={key} t={t} label={t(ar,en)} value={form[key]} options={directory?.people||[]} onChange={(name,person)=>setForm(old=>({...old,name,position:person?.title||old.position,company:person?.company||old.company}))}/>:<Text key={key} label={t(ar,en)} value={form[key]} onChange={value=>update(key,value)}/>)}
       </div>
       <div><button type="submit" className="primary" disabled={action.busy}>{t("إضافة إلى المشروع","Add to project")}</button></div>
     </form>}

@@ -281,7 +281,7 @@ function getProfile(database, projectId, at = today(), version = null) {
   const chosen = parse(row?.settings_json, {});
   return {version: row?.version || null, effective_at: row?.effective_at || null,
     rules: parse(row?.rules_json, client.rules ?? company.rules ?? []),
-    settings: {...DEFAULT_SETTINGS, ...company.settings, ...client.settings, ...chosen},
+    settings: {...DEFAULT_SETTINGS,...company.settings,...(Object.hasOwn(require('./signature-directory.cjs').directory(database).defaults,'certificate')?{signatures:require('./signature-directory.cjs').defaults(database,'certificate')}:{}),...client.settings,...chosen},
     origins: {company: Boolean(company.settings || company.rules), customer: Boolean(customer?.settings_json), project: Boolean(row)}};
 }
 
@@ -336,7 +336,7 @@ function cleanSettings(input = {}, base = {}) {
     else settings[key] = input[key];
   }
   if (Array.isArray(input.work_types)) settings.work_types = [...new Set(input.work_types.map((value) => str(value)).filter(Boolean))].slice(0, 150);
-  if (Array.isArray(input.signatures)) settings.signatures = input.signatures.slice(0, 6)
+  if (Array.isArray(input.signatures)) settings.signatures = input.signatures
     .map((person) => ({name: str(person?.name, 100), title: str(person?.title, 100)})).filter(({name,title}) => name || title);
   for (const key of ["group_work_types", "show_group_subtotals", "show_building_subtotals", "show_unit_subtotals", "show_work_type_subtotals",
     "show_summary_building","show_summary_work_type","show_summary_quantities","show_detail_quantities","show_summary_rate","show_summary_progress"]) {

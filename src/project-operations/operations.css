@@ -76,3 +76,7 @@
 .ops-order-picker input[type=number]{width:100px;max-width:100%;padding:7px}
 .ops-order-picker input[type=checkbox]{inline-size:18px;block-size:18px;min-height:0;padding:0}
 .ops-coverage{border:1px solid #a58038;border-radius:8px;padding:12px;background:#d8aa3c0b}
+
+.signature-suggestion{position:relative;min-width:180px}.signature-suggestion:focus-within{z-index:100}.signature-options{position:absolute;top:100%;inset-inline:0;max-height:240px;overflow:auto;background:var(--surface,#fff);border:1px solid var(--line,#aaa);box-shadow:0 8px 25px #0003;z-index:200}.signature-options button{display:flex;flex-direction:column;width:100%;text-align:start;align-items:start}.signature-options small{opacity:.7}
+
+.ops-matrix-cell{display:flex;align-items:center;gap:8px}.ops-matrix-cell input[type=checkbox]{width:20px;height:20px}.ops-matrix-cell small{opacity:.6}.ops-part-editor{position:fixed;inset:20% 20%;z-index:270050;background:var(--surface);border:1px solid var(--line);padding:24px;max-height:65vh;overflow:auto;box-shadow:0 0 0 100vmax #0007}.ops-part-editor label{display:flex;align-items:center;gap:12px;margin:12px}.ops-part-editor input[type=number]{width:120px}

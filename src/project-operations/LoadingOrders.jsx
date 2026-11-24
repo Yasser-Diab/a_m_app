@@ -1,3 +1,4 @@
+import {SignatureInput,useSignatureDirectory} from '../signature-directory.jsx';
 import {useState} from 'react';
 import {Combobox,Dialog,Problem,localDate,newKey,queryString,useCertificateApi,useDebounce,useResource} from '../certificates/shared.jsx';
 import {ErrorMessage,Page,Pick,SearchableTable,Table,Text,useAction,usePaged} from './shared.jsx';
@@ -32,6 +33,7 @@ function LinkedReport(props){
 }
 function ManualEditor(props){
   const {initial,api,session,request,t,can,close,saved,access}=props;
+  const directory=useSignatureDirectory(request),[correctionReason,setCorrectionReason]=useState(''),[previousVersion,setPreviousVersion]=useState(null);
   const master=useCertificateApi(api,session);
   const [draft,setDraft]=useState(()=>initial||{items:[{label:'',unit:'Pcs',quantity:''}],loading_date:localDate(),status:'draft',vehicle_plate:'',driver_name:'',notes:'',signatures:[],command_key:newKey()});
   const [customer,setCustomer]=useState(initial?.customer||null),[customerSearch,setCustomerSearch]=useState(''),q=useDebounce(customerSearch);
@@ -42,7 +44,7 @@ function ManualEditor(props){
   function rows(changes){change({...draft,items:draft.items.map((row,index)=>({...row,...Object.fromEntries(changes.filter(cell=>cell.rowId===String(index)).map(cell=>[cell.key,cell.value]))}))});}
   return <Dialog t={t} wide title={initial?.reference||t('أمر تحميل يدوي جديد','New manual loading order')} onClose={close}>
     <form className="pc-stack" onSubmit={event=>{event.preventDefault();action.run(initial?'/loading-orders/'+initial.id:'/loading-orders',initial?'PATCH':'POST',{
-      ...draft,project_id:Number(project),customer_id:customer?.id,version:initial?.version});}}>
+      ...draft,correction:initial?.edit_window?.correction_required===true,reason:correctionReason,project_id:Number(project),customer_id:customer?.id,version:initial?.version});}}>
       <fieldset className="pc-stack" disabled={!can('edit')||action.busy}>
         {initial?<p><bdi>{customer?.display_name} · {initial.project.name} · {initial.project.code}</bdi></p>:<div className="pc-form">
           <Combobox label={t('العميل','Customer')} selected={customer} options={choices.data?.customers||[]} onSearch={setCustomerSearch} onSelect={value=>{setCustomer(value);setProject('');setDirty(true);}} onClear={()=>{setCustomer(null);setProject('');}} t={t}/>
@@ -66,15 +68,18 @@ function ManualEditor(props){
             change({...draft,items:[...draft.items.filter(item=>item.label||item.quantity),...added]});setPaste('');}}>{t('إضافة البنود الملصقة','Add pasted items')}</button></details>
         <div className="pc-form">{[['vehicle_plate',t('رقم السيارة','Vehicle license plate')],['driver_name',t('اسم السائق','Driver name')],['notes',t('ملاحظات','Notes')]].map(([key,label])=>
           <Text key={key} label={label} value={draft[key]} onChange={value=>change({...draft,[key]:value})}/>)}</div>
-        <details><summary>{t('التوقيعات','Signatures')}</summary>{draft.signatures.map((person,index)=><div className="pc-form" key={index}>
-          {['name','title'].map(key=><Text key={key} label={key==='name'?t('الاسم','Name'):t('الوظيفة','Position')} value={person[key]} onChange={value=>change({...draft,signatures:draft.signatures.map((row,i)=>i===index?{...row,[key]:value}:row)})}/>)}
+        <details><summary>{t('التوقيعات','Signatures')}</summary><button type="button" onClick={()=>change({...draft,signatures:(directory?.defaults.loading||[]).map(id=>directory.people.find(person=>person.id===id)).filter(Boolean)})}>{t('تطبيق التوقيعات العامة','Apply global signatures')}</button>{draft.signatures.map((person,index)=><div className="pc-form" key={index}>
+          {['name','title'].map(key=><SignatureInput key={key} t={t} title={key==='title'} options={key==='name'?directory?.people||[]:directory?.titles||[]} label={key==='name'?t('الاسم','Name'):t('الوظيفة','Position')} value={person[key]} onChange={value=>change({...draft,signatures:draft.signatures.map((row,i)=>i===index?{...row,[key]:value}:row)})}/>)}
           <Pick label={t('الطرف','Side')} value={person.side} placeholder="" items={[["company",t('الشركة','Company')],["client",t('العميل','Customer')]]} onChange={value=>change({...draft,signatures:draft.signatures.map((row,i)=>i===index?{...row,side:value}:row)})}/>
           <button type="button" onClick={()=>change({...draft,signatures:draft.signatures.filter((_,i)=>i!==index)})}>{t('حذف','Remove')}</button></div>)}
           <button type="button" onClick={()=>change({...draft,signatures:[...draft.signatures,{name:'',title:'',side:'company'}]})}>{t('إضافة توقيع','Add signature')}</button></details>
+        {initial?.edit_window?.correction_required&&<Text label={t('سبب مستند التصحيح','Correction document reason')} required value={correctionReason} onChange={setCorrectionReason}/>}
         <button type="submit" className="primary" disabled={!project||!customer||!draft.items.length}>{t('حفظ أمر التحميل','Save loading order')}</button>
       </fieldset><ErrorMessage error={action.error||choices.error}/>
     </form>
     {initial&&<PdfOutput {...props} kind="loading" filters={{}} endpoint={'/api/project-operations/loading-orders/'+initial.id+'/pdf'} disabled={dirty||action.busy}/>}
+    {initial?.document_history?.length>0&&<details><summary>{t('النسخ السابقة','Previous versions')}</summary>{initial.document_history.map(version=><button key={version.id} type="button" onClick={()=>setPreviousVersion(version)}><bdi>{version.reference} · {version.created_at}</bdi></button>)}</details>}
+    {previousVersion&&<Dialog t={t} title={t('نسخة سابقة','Previous version')} onClose={()=>setPreviousVersion(null)}><PdfOutput {...props} kind="loading" filters={{history_id:previousVersion.id}} endpoint={'/api/project-operations/loading-orders/'+initial.id+'/pdf'}/></Dialog>}
     {create&&<NewMaster kind={create} customer={customer} request={master} t={t} close={()=>setCreate('')} saved={value=>{if(create==='customer'){setCustomer(value);setProject('');}else setProject(String(value.id));setCreate('');refreshMasters(value=>value+1);setDirty(true);}}/>}
   </Dialog>;
 }

@@ -303,3 +303,8 @@ CREATE TABLE IF NOT EXISTS ops_report_edit_history (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(report_edit_id,version)
 );
+
+CREATE TABLE IF NOT EXISTS ops_stage_assignments (
+ order_id INTEGER NOT NULL REFERENCES ops_orders(id) ON DELETE CASCADE,stage TEXT NOT NULL,data TEXT NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 1,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(order_id,stage));
+CREATE TABLE IF NOT EXISTS ops_installations (
+ order_item_id INTEGER PRIMARY KEY REFERENCES ops_order_items(id) ON DELETE CASCADE,quantity INTEGER NOT NULL CHECK(quantity>=0),installation_date TEXT,notes TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);

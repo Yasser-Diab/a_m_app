@@ -1,3 +1,4 @@
+import {PdfOutput} from '../project-operations/OperationsReports.jsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClipboardList, Eye, Plus, RefreshCw, Save, Settings2, Trash2, X } from "lucide-react";
 import CertificateGrid, { hydrateLines, stripGridFields } from "./CertificateGrid.jsx";
@@ -39,6 +40,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showReview, setShowReview] = useState(Boolean(initial && initial.status !== "draft"));
   const [preview, setPreview] = useState(null);
+  const [savedVersion,setSavedVersion]=useState(null);
   const [importDraft, setImportDraft] = useState(null);
   const [action, setAction] = useState(null);
   const [deleteDialog, setDeleteDialog] = useState(false);
@@ -51,7 +53,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const customerQuery = useDebounce(customerSearch);
   const projectQuery = useDebounce(projectSearch);
   const can = (key) => access?.capabilities?.includes(key);
-  const isDraft = !record || ["draft", "in_review", "unapproved"].includes(record.status);
+  const isDraft = !record || ["draft", "in_review", "unapproved"].includes(record.status) || record.edit_window?.locked&&record.edit_window.editable&&can("approve");
   const canEdit = isDraft && Boolean(record ? can("edit_draft") : can("create"));
   const canWrite = canEdit && editing;
   const canMaster = canWrite && can("create_master");
@@ -159,7 +161,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       ? { method: "PUT", body: { ...body, version:record.version, ...(refreshRules.current||refreshProjectRules ? {refresh_rules:true} : {}) } }
       : { method: "POST", body: { ...body, project_id: project.id } });
     const saved = applySaved(result);
-    if (announce) setStatusText(t("تم حفظ المسودة وحساب القيم.", "Draft saved and amounts calculated."));
+    if (announce) setStatusText(saved.edit_window?.locked?t("تم حفظ التعديلات وحساب القيم.","Changes saved and amounts calculated."):t("تم حفظ المسودة وحساب القيم.", "Draft saved and amounts calculated."));
     return saved;
   }
 
@@ -286,7 +288,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
         ||record?.operational_quantities||operationItems.data} t={t}
         onReview={canWrite&&dirty?()=>run(reviewClaims):null} busy={busy}/>}
     <div className="pc-toolbar">
-      {canWrite && <button type="button" className="primary" onClick={() => run(() => save())} disabled={busy || !project || record && !dirty}><Save size={17} />{t("حفظ المسودة", "Save draft")}</button>}
+      {canWrite && <button type="button" className="primary" onClick={() => run(() => save())} disabled={busy || !project || record && !dirty}><Save size={17} />{record?.edit_window?.locked?t("حفظ التعديلات","Save changes"):t("حفظ المسودة", "Save draft")}</button>}
       {canWrite && !historical && record?.status !== "in_review" && can("edit_draft") && can("import") && <button type="button" onClick={openImport} disabled={!project || busy}><ClipboardList size={17} />{t("استخراج / استيراد", "Extract / import")}</button>}
       {record && <button type="button" onClick={() => setShowReview((current) => !current)} aria-expanded={showReview}>{t("مراجعة الحساب", "Calculation review")}</button>}
       {record?.pdf_status === "failed" && can("issue") && <button type="button" onClick={() => run(async () => {
@@ -313,6 +315,8 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
         </fieldset>
       </div>
     </details>}
+    {record?.saved_versions?.length>0&&<details><summary>{t('إصدارات المستخلص السابقة','Previous certificate versions')}</summary>{record.saved_versions.map(version=><button type="button" key={version.id} onClick={()=>setSavedVersion(version)}>{version.reference} · {version.created_at}</button>)}</details>}
+    {savedVersion&&<Dialog t={t} wide title={savedVersion.reference} onClose={()=>setSavedVersion(null)}><PdfOutput {...{t,apiBase,session,can,saveNativeReport,shareNativeReport}} uiLanguage={locale} kind="certificate" filters={{}} endpoint={'/api/certificates/'+record.id+'/versions/'+savedVersion.id+'/pdf'}/></Dialog>}
     {record?.history?.length > 0 && <details><summary>{t("سجل التدقيق", "Audit history")}</summary><div className="pc-table-scroll"><table className="pc-table"><thead><tr><th>{t("التاريخ", "Date")}</th><th>{t("المستخدم", "Actor")}</th><th>{t("الإجراء", "Action")}</th><th>{t("السبب", "Reason")}</th></tr></thead><tbody>{record.history.map((event) => <tr key={event.id}><td><bdi>{event.created_at}</bdi></td><td>{event.actor || event.actor_id || "—"}</td><td>{actionLabels[event.action] ? t(...actionLabels[event.action]) : event.action}</td><td>{event.reason}</td></tr>)}</tbody></table></div></details>}
     {master && <MasterEditor key={master.type} master={master} project={project} customer={customer} locations={locations} t={t} request={request} onClose={() => setMaster(null)} onSaved={(saved, continueToProject) => {
       refreshContext();
@@ -349,7 +353,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
     </Dialog>}
     {action && <Dialog title={t(...actionLabels[action])} onClose={() => { if (!busy) setAction(null); }} t={t}>
       <form className="pc-stack" onSubmit={(event) => { event.preventDefault(); workflow(action, actionReason); }}>
-        {action === "approve" && <p>{t("يؤدي الاعتماد إلى قفل هذا المستخلص. تُسجل التغييرات اللاحقة في مستخلص تصحيح.", "Approval locks this certificate. Later changes are recorded in a correction.")}</p>}
+        {action === "approve" && <p>{t("يسمح بالتعديل لمدة 24 ساعة من أول اعتماد، وبعدها يلزم مستند تصحيح.", "Approval starts a 24-hour editing window. Later changes require a correction.")}</p>}
         {action === "issue" && <p>{t("سيتم تخصيص رقم رسمي وحفظ البيانات المعتمدة وإعداد النسخة المؤرشفة.", "Issuance assigns an official number, freezes the approved data, and prepares the archived document.")}</p>}
         {action === "recover_advance" && <p>{t("يُنشئ هذا تصحيحًا لاسترداد الدفعة المقدمة مع الاحتفاظ بالكميات وتواريخ المستخلص المعتمد. راجع التصحيح ثم اعتمده.",
           "This creates an advance recovery correction using the approved quantities and dates. Review and approve the correction.")}</p>}

@@ -1,3 +1,4 @@
+import OrderLifecycle from './OrderLifecycle.jsx';
 import {useEffect,useRef,useState} from "react";
 import {Dialog,localDate,newKey,queryString,useResource} from "../certificates/shared.jsx";
 import {DimensionPair,ErrorMessage,Page,Pick,Suggest,Table,SearchableTable,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
@@ -130,6 +131,7 @@ function MaintenanceDetails({order,path,request,t,can,reload,...props}) {
         {t("إلغاء الأمر","Cancel order")}</button>}
       {can("export")&&<button type="button" onClick={()=>setDialog("report")}>{t("تقرير الصيانة","Maintenance report")}</button>}
     </div>
+    {!opened&&can('release')&&<button type="button" onClick={()=>{const correction=order.edit_window?.correction_required;const reason=window.prompt(correction?t('سبب مستند التصحيح','Correction document reason'):t('سبب إعادة الفتح','Reopening reason'));if(reason)action.run(endpoint+'/reopen','POST',{correction,reason});}}>{order.edit_window?.correction_required?t('إنشاء تصحيح وإعادة فتح','Create correction and reopen'):t('إعادة فتح للتعديل','Reopen for editing')}</button>}
     <dl className="ops-project-meta">
       {[[t("مسؤول الصيانة","Assigned to"),service.assignee?.name],[t("موعد التسليم","Required by"),order.required_date],
         [t("أعمال الصيانة المطلوبة","Instructions"),service.instructions],[t("تاريخ الإنهاء","Completed on"),service.completed_on],
@@ -174,13 +176,15 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
         onClick={()=>decide("released")}>{t("إفراج للتصنيع","Release for manufacturing")}</button>}
       {can("release")&&can('load')&&order.status==="released"&&<button type="button" disabled={action.busy} onClick={()=>setDialog('shipment')}>
         {t("تأكيد الشحن","Confirm shipment")}</button>}
-      {can("release")&&order.status!=="closed"&&<button type="button" onClick={()=>setDialog("close")}>{t("إغلاق الأمر","Close order")}</button>}
+      {can("release")&&!["closed","shipped"].includes(order.status)&&<button type="button" onClick={()=>setDialog("close")}>{t("إغلاق الأمر","Close order")}</button>}
       {can("qc")&&order.status!=="closed"&&<button type="button" onClick={()=>setDialog("qc")}>{t("تسجيل فحص","Record inspection")}</button>}
       {can("load")&&order.status==="released"&&<button type="button" onClick={()=>setDialog("load")}>{t("تسجيل التحميل","Record loading")}</button>}
       {can("export")&&<><button type="button" onClick={()=>setDialog("manufacturing")}>{t("أمر تصنيع / طلب خامات","Manufacturing order / materials")}</button>
         <button type="button" onClick={()=>setDialog("loadingReport")}>{t("أمر تحميل","Loading order")}</button>
         <button type="button" onClick={()=>setDialog("approvalReport")}>{t("تقرير الاعتمادات","Approval status report")}</button></>}
     </div>
+    {['closed','shipped'].includes(order.status)&&can('release')&&<div className="pc-toolbar"><span>{order.edit_window?.editable?t('التعديل متاح حتى ','Editable until ')+order.edit_window.editable_until:t('انتهت مهلة التعديل؛ يلزم مستند تصحيح','Editing window expired; a correction document is required')}</span><button type="button" onClick={()=>{const correction=order.edit_window?.correction_required;const reason=window.prompt(correction?t('سبب مستند التصحيح','Correction document reason'):t('سبب إعادة الفتح','Reason for reopening'));if(reason)action.run(endpoint+'/reopen','POST',{correction,reason});}}>{order.edit_window?.correction_required?t('إنشاء تصحيح وإعادة فتح','Create correction and reopen'):t('إعادة فتح للتعديل','Reopen for editing')}</button></div>}
+    <OrderLifecycle {...{order,endpoint,request,t,can,reload,revision}}/>
     {order.source_document_id&&<SourceRefresh {...{ctx,path,request,can,t,reload}} documentId={order.source_document_id}/>}
     <ErrorMessage error={action.error||people.error}/>
     {order.coverage&&<div className="pc-toolbar ops-coverage">
@@ -219,6 +223,7 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
             <dd>{display(checkResults,val,t)}</dd></div>)}</dl>
           {[row.record.defects,row.record.corrective_action,row.record.correction_owner,row.record.closed_on,row.record.delivery_ref].filter(Boolean).join(" · ")}
         </details>,display(states,row.record.release,t)]])}/>
+    {order.document_history?.length>0&&<details><summary>{t('إصدارات أمر التشغيل','Work order versions')}</summary>{order.document_history.map(row=><button type="button" key={row.id} onClick={()=>setDialog({historyReport:row.id,reference:row.reference})}>{row.reference} · {row.created_at}</button>)}</details>}
     <h3>{t("دفعات التحميل","Loading history")}</h3>
     <Table headers={[t("المرجع","Reference"),t("التاريخ","Date"),t("المسؤول","Responsible"),t("الكميات","Quantities"),t("الملاحظات","Notes")]}
       empty={t("لا يوجد تحميل مؤكد.","No confirmed loading.")}
@@ -226,6 +231,7 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
         <bdi>{batch.lines.map((row)=>[openingDescription(order.items.find(item=>item.id===row.order_item_id)?.specification),row.label||display(panelNames,row.kind,t),row.quantity].join(" · ")).join(", ")}</bdi>,batch.notes]])}/>
     {dialog==="qc"&&<Inspection {...{order,endpoint,request,can,t,reload}} close={()=>setDialog(null)}/>}
     {['load','shipment'].includes(dialog)&&<ShipmentEntry {...{order,endpoint,request,t,reload,can,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport}} confirm={dialog==='shipment'} people={people.data||[]} close={()=>setDialog(null)}/>}
+    {dialog?.historyReport&&<Dialog t={t} title={dialog.reference} onClose={()=>setDialog(null)}><PdfOutput {...{t,can,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport}} kind="manufacturing" filters={{}} endpoint={'/api/project-operations'+endpoint+'/history/'+dialog.historyReport+'/pdf'}/></Dialog>}
     {dialog?.shipmentReport&&<Dialog t={t} title={dialog.reference} onClose={()=>setDialog(null)}><PdfOutput {...{t,can,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport}} kind="loading" filters={{}} endpoint={'/api/project-operations'+endpoint+'/shipments/'+dialog.shipmentReport+'/pdf'}/></Dialog>}
     {["manufacturing","loadingReport","approvalReport"].includes(dialog)&&<Report {...{endpoint,t,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}}
       reference={order.reference} loading={dialog==="loadingReport"} approvals={dialog==="approvalReport"}

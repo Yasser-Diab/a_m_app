@@ -3,6 +3,7 @@ const {requireVersion,certificateNumber} = require("./certificate-revisions.cjs"
 
 function deleteArchivedFiles(database,row,user,version) {
   requireVersion(row,version);
+  database.run("DELETE FROM certificate_edit_artifacts WHERE certificate_id=?",[row.id]);
   const deleted = database.run("DELETE FROM cert_pdf_artifacts WHERE certificate_id=?",[row.id]).modified;
   if (deleted) {
     database.run("UPDATE cert_revisions SET pdf_status=NULL,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?",[row.id]);
@@ -44,6 +45,8 @@ function deleteCertificate(database,row,user,version) {
   database.run(`DELETE FROM cert_advance_recoveries WHERE certificate_id IN (${placeholders})`,links);
   database.run(`DELETE FROM cert_legacy_records WHERE revision_id IN (${placeholders})`,links);
   database.run(`UPDATE cert_revisions SET baseline_id=NULL,root_id=NULL,revises_id=NULL WHERE id IN (${placeholders})`,links);
+  database.run(`DELETE FROM document_edit_history WHERE kind='certificate' AND document_id IN (${placeholders})`,links);
+  database.run(`DELETE FROM document_edit_locks WHERE kind='certificate' AND document_id IN (${placeholders})`,links);
   database.run(`DELETE FROM cert_revisions WHERE id IN (${placeholders})`,links);
   const lastDecision = database.get(`SELECT id,type FROM cert_revisions WHERE project_id=? AND series_key=?
     AND status='issued' AND type IN ('final','reopen') ORDER BY issued_at DESC,id DESC LIMIT 1`,[row.project_id,row.series_key]);

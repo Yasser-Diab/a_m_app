@@ -285,7 +285,7 @@ async function main() {
     const legacyReceipt = (await api(legacyPaymentsPath,token)).receipts.find((entry) => entry.kind === "advance");
     assert.equal(legacyReceipt.amount,50);
     await api(legacyPaymentsPath + "/" + legacyReceipt.id,token,"DELETE",undefined,409);
-    await api(legacyRoute,token,"PUT",{version:approved.version,lines:[]},409);
+    await api(legacyRoute,token,"PUT",{version:approved.version,lines:[]},422);
     const correction = await api(legacyRoute + "/action",token,"POST",{action:"revise", reason:"Correct an item",version:approved.version});
     assert.equal(correction.totals.current,0);
     assert.equal(correction.totals.previous,120);

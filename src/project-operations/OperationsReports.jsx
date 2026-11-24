@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from "react";
 import {queryString,useDebounce,useResource,localDate} from "../certificates/shared.jsx";
 import {DimensionPair,ErrorMessage,Page,Pick,Table,Text,display,panelNames,quantity} from "./shared.jsx";
 
-const stageNames={specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],materials:["اعتماد الخامات","Materials"],
+const stageNames={installation:["التركيب","Installation"],specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],materials:["اعتماد الخامات","Materials"],
   manufacturing:["التصنيع","Manufacturing"],qc:["فحص ما قبل الشحن","Pre-shipment QC"],loading:["التحميل","Loading"],maintenance:["الصيانة","Maintenance"],
   completed:["مكتمل","Completed"],review:["مراجعة التعديلات","Changes to review"],rejected:["مرفوض","Rejected"]};
 const unit=(name,locale)=>locale==="ar"?({"m²":"م²","l.m":"م.ط",Pcs:"عدد",kg:"كجم","m³":"م³",ton:"طن","Lump sum":"مقطوعية"}[name]||name):name;
@@ -49,28 +49,20 @@ export function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNat
 }
 
 export function RunningProjects(props){
-  const {request,t,active,revision,reload,onOpenProject}=props;
-  const [search,setSearch]=useState(""),[completed,setCompleted]=useState(false),[excludeRejected,setExcludeRejected]=useState(false),[page,setPage]=useState(1),q=useDebounce(search);
-  const filters={q,include_completed:completed?"1":"0"};
-  const data=useResource(request,active?"/reports/progress"+queryString({...filters,page}):null,revision);
-  return <section className="pc-panel pc-stack"><h2>{t("متابعة التشغيل","Work progress")}</h2>
-    <div className="pc-form"><Text label={t("بحث بالمشروع أو العميل","Search by project or customer")} value={search} onChange={value=>{setSearch(value);setPage(1);}}/>
-      <label className="pc-check"><input type="checkbox" checked={completed} onChange={event=>{setCompleted(event.target.checked);setPage(1);}}/>{t("إظهار المشروعات المكتملة","Include completed projects")}</label></div>
-    <div className="pc-toolbar"><span>{t("المشروعات","Projects")}: <bdi>{data.data?.total??"—"}</bdi></span><button type="button" onClick={reload}>{t("تحديث","Refresh")}</button></div>
-    <ErrorMessage error={data.error}/>
-    <Table headers={[t("المشروع / العميل","Project / customer"),t("المرحلة الحالية","Current stage"),t("المواصفات","Specifications"),t("المقاسات","Measurements"),
-      t("الخامات","Materials"),t("التصنيع","Manufacturing"),t("الفحص","QC"),t("التحميل","Loading")]}
-      empty={data.pending?t("جارٍ التحميل…","Loading…"):t("لا توجد مشروعات مطابقة.","No matching projects.")}
-      rows={(data.data?.items||[]).map(item=>[item.id,[<><button type="button" className="pc-name" onClick={()=>onOpenProject(item)}>{item.name}</button>
-        <small className="pc-caption"> {item.code} · {item.customer}</small>{item.orders?.map(order=><small className="pc-caption" key={order.id}><bdi>{order.reference}</bdi>{order.rejected?' · '+t('مرفوض','Rejected'):''}</small>)}</>,<><span className="pc-chip">{display(stageNames,item.stage,t)}</span>
-        {item.details.status&&<small className="pc-caption"> {item.details.status}</small>}</>,
-        <bdi>{item.counts.items?`${item.counts.specifications}/${item.counts.items}`:"—"}</bdi>,<bdi>{item.counts.items?`${item.counts.measurement}/${item.counts.items}`:"—"}</bdi>,
-        <bdi>{item.counts.items?`${item.counts.materials}/${item.counts.items}`:"—"}</bdi>,<bdi>{item.counts.ordered?`${item.counts.manufacturing}/${item.counts.ordered}`:"—"}</bdi>,
-        <bdi>{item.counts.ordered?`${item.counts.qc}/${item.counts.ordered}`:"—"}</bdi>,<bdi>{item.counts.required?quantity(item.loading_percent)+"%":"—"}</bdi>]])}/>
-    <Page data={data.data} onPage={setPage} t={t}/>
-    <label className="pc-check"><input type="checkbox" checked={excludeRejected} onChange={event=>setExcludeRejected(event.target.checked)}/>{t('استبعاد الأوامر المرفوضة من PDF فقط','Exclude rejected orders from PDF only')}</label>
-    <PdfOutput key={queryString({...filters,exclude_rejected:excludeRejected?'1':'0'})} {...props} kind="progress" filters={{...filters,exclude_rejected:excludeRejected?'1':'0'}} disabled={data.pending||q!==search}/>
-  </section>;
+ const {request,t,active,revision,reload,onOpenProject}=props;
+ const [search,setSearch]=useState(''),[page,setPage]=useState(1),[preferences,setPreferences]=useState({stages:[],responsibles:[],include_completed:false}),[ready,setReady]=useState(false),[excludeRejected,setExcludeRejected]=useState(false),q=useDebounce(search);
+ useEffect(()=>{let live=true;request('/progress-preferences').then(value=>{if(live){setPreferences({stages:[],responsibles:[],include_completed:false,...value});setReady(true);}}).catch(()=>setReady(true));return()=>{live=false;};},[request]);
+ function change(next){setPreferences(next);setPage(1);request('/progress-preferences',{method:'PATCH',body:next}).catch(()=>{});}
+ const filters={q,stages:preferences.stages.join(','),responsibles:preferences.responsibles.join(','),include_completed:preferences.include_completed?'1':'0'};
+ const data=useResource(request,active&&ready?'/reports/progress'+queryString({...filters,page}):null,revision);
+ return <section className="pc-panel pc-stack"><h2>{t('متابعة التشغيل','Work progress')}</h2><div className="pc-form"><Text label={t('بحث بالمشروع أو العميل','Search by project or customer')} value={search} onChange={value=>{setSearch(value);setPage(1);}}/>
+ <details className="ops-stage-filter"><summary>{preferences.stages.length?preferences.stages.map(key=>display(stageNames,key,t)).join(' / '):t('تقرير عام — كل المراحل','General report — all stages')}</summary><button type="button" onClick={()=>change({...preferences,stages:[]})}>{t('تقرير عام','General report')}</button>{Object.entries(stageNames).map(([key,names])=><label className="pc-check" key={key}><input type="checkbox" checked={preferences.stages.includes(key)} onChange={e=>change({...preferences,stages:e.target.checked?[...preferences.stages,key]:preferences.stages.filter(id=>id!==key)})}/>{t(...names)}</label>)}</details>
+ <label><input type="checkbox" checked={preferences.include_completed} onChange={e=>change({...preferences,include_completed:e.target.checked})}/>{t('إظهار المشروعات المكتملة','Include completed projects')}</label></div>
+ <details><summary>{t('إظهار مسؤولي المراحل في التقرير','Show stage responsibilities in report')}</summary><div className="pc-toolbar">{Object.entries(stageNames).filter(([key])=>!['completed','review','rejected'].includes(key)).map(([key,names])=><label key={key}><input type="checkbox" checked={preferences.responsibles.includes(key)} onChange={e=>change({...preferences,responsibles:e.target.checked?[...preferences.responsibles,key]:preferences.responsibles.filter(id=>id!==key)})}/>{t(...names)}</label>)}</div></details>
+ <button type="button" onClick={reload}>{t('تحديث','Refresh')}</button><ErrorMessage error={data.error}/>
+ <Table headers={[t('المشروع / العميل','Project / customer'),t('المرحلة','Stage'),t('التحميل','Loading'),t('التركيب','Installation'),...preferences.responsibles.map(key=>t('مسؤول ','Responsible: ')+display(stageNames,key,t))]} rows={(data.data?.items||[]).map(item=>[item.id,[<><button type="button" className="pc-name" onClick={()=>onOpenProject(item)}>{item.name}</button><small>{item.code} · {item.customer}</small>{item.orders?.map(order=><small className="pc-caption" key={order.id}>{order.reference}{order.rejected?' · '+t('مرفوض','Rejected'):''}</small>)}</>,(item.active_stages||[item.stage]).map(key=>display(stageNames,key,t)).join(' / '),quantity(item.loading_percent)+'%',item.counts.installed+'/'+item.counts.ordered,...preferences.responsibles.map(key=>(item.responsibilities[key]||[]).map(person=>[person.name,person.title,person.order].filter(Boolean).join(' · ')).join(' / '))]])} empty={data.pending?t('جارٍ التحميل…','Loading…'):t('لا توجد مشروعات مطابقة','No matching projects')}/>
+ <Page data={data.data} onPage={setPage} t={t}/><label><input type="checkbox" checked={excludeRejected} onChange={e=>setExcludeRejected(e.target.checked)}/>{t('استبعاد الأوامر المرفوضة من PDF فقط','Exclude rejected orders from PDF only')}</label>
+ <PdfOutput key={queryString(filters)} {...props} kind="progress" filters={{...filters,exclude_rejected:excludeRejected?'1':'0'}} disabled={data.pending||!ready}/></section>;
 }
 
 export function QuantityTakeoff(props){

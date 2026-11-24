@@ -263,7 +263,20 @@ function requireVersion(row, expected) {
     fail(409, "Certificate changed. Reload the latest revision", {version: row.version});
 }
 
+function certificateEditWindow(db,row){const snapshot=row.status==='historical'?legacySnapshot(db,row,true):parse(row.snapshot_json,{});const approved=snapshot.approval_at||db.get("SELECT MIN(created_at) at FROM cert_audit WHERE revision_id=? AND action IN('approve','issue')",[row.id])?.at||row.issued_at||row.updated_at;return require('./document-edit-window.cjs').info(db,'certificate',row.id,(['approved','issued'].includes(row.status)||snapshot.approval_at)?approved:null);}
+function editApproved(db,row,body,user,grant){const window=require('./document-edit-window.cjs'),state=certificateEditWindow(db,row);window.check(db,'certificate',row.id,state.first_locked_at);window.lock(db,'certificate',row.id,state.first_locked_at);
+ if(db.get("SELECT 1 FROM cert_revisions WHERE baseline_id=? AND status IN('approved','issued')",[row.id]))fail(409,'A later approved certificate uses this baseline. Correct the latest certificate first');
+ const before=certificateDocumentInput(db,row),wasIssued=row.status==='issued';
+ if(wasIssued){db.run('INSERT INTO certificate_edit_artifacts(certificate_id,variant,document_json,pdf,checksum,pagination_json) SELECT certificate_id,variant,document_json,pdf,checksum,pagination_json FROM cert_pdf_artifacts WHERE certificate_id=?',[row.id]);db.run('DELETE FROM cert_pdf_artifacts WHERE certificate_id=?',[row.id]);}
+ if(row.status==='historical'){db.run('UPDATE cert_legacy_workflow SET approved_json=NULL,approved_at=NULL WHERE revision_id=?',[row.id]);saveLegacyDraft(db,row,body,user);}
+ else{db.run("UPDATE cert_revisions SET status='draft',snapshot_json=NULL,approved_json=NULL WHERE id=?",[row.id]);saveDraft(db,{...row,status:'draft',snapshot_json:null},body,user,grant);}
+ db.run('DELETE FROM cert_advance_recoveries WHERE certificate_id=?',[row.id]);
+ let updated=getRevision(db,row.id);updated=runAction(db,updated,{action:'approve',version:updated.version},user,()=>{});
+ if(wasIssued)updated=runAction(db,updated,{action:'issue',version:updated.version},user,(database,id,model)=>require('./certificate-documents.cjs').enqueueCertificateRender(database,id,model));
+ window.revision(db,'certificate',row.id,'Certificate '+certificateNumber(db,row),before,certificateDocumentInput(db,updated),user);return updated;
+}
 function saveDraft(database, row, body, user, grant) {
+  if((["approved","issued"].includes(row.status))||(row.status==="historical"&&legacySnapshot(database,row,true).approval_at)){if(!grant.capabilities.includes("approve"))fail(403,"Approval permission is required to edit a finalized certificate");return editApproved(database,row,body,user,grant);}
   if (row.status === "historical") return saveLegacyDraft(database,row,body,user);
   if (!["draft","in_review"].includes(row.status)) fail(409, "Approved certificates require a correction");
   requireVersion(row, body.version);
@@ -422,11 +435,13 @@ function runAction(database, row, body, user, enqueueRender) {
     if (row.status === "historical") {
       if (model.approval_at) fail(409,"This certificate is already approved");
       const approvedAt = now();
+      require("./document-edit-window.cjs").lock(database,"certificate",row.id,approvedAt);
       database.run(`INSERT INTO cert_legacy_workflow (revision_id,approved_json,approved_at,approved_by) VALUES (?,?,?,?)
         ON CONFLICT(revision_id) DO UPDATE SET approved_json=excluded.approved_json,approved_at=excluded.approved_at,approved_by=excluded.approved_by`,
       [row.id,encode({...model,status:"approved",approval_at:approvedAt}),approvedAt,user.id]);
       database.run("UPDATE cert_revisions SET version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?",[row.id]);
     } else if (action === "approve") {
+      require("./document-edit-window.cjs").lock(database,"certificate",row.id);
       database.run(`UPDATE cert_revisions SET status='approved',approved_json=?,baseline_id=?,snapshot_json=?,version=version+1,
         updated_at=CURRENT_TIMESTAMP WHERE id=?`,[approvalKey(model),model.baseline?.id ?? null,encode({...model,status:"approved"}),row.id]);
       for (const movement of model.recoveries) database.run("INSERT INTO cert_advance_recoveries VALUES (?,?,?,?)",
@@ -465,6 +480,8 @@ function forAccess(database, row, access) {
     report_options:certificateReportOptions(raw.header,getProfile(database,row.project_id).settings)};
   if (access.capabilities.includes("revise")) result.advance_recovery_correction=missingAdvanceRecovery(database,row,raw);
   if (row.status === "approved" && !row.snapshot_json) result.can_return_legacy_approval = true;
+  result.edit_window=certificateEditWindow(database,row);
+  result.saved_versions=require("./document-edit-window.cjs").history(database,"certificate",row.id).map(({id,reference,created_at})=>({id,reference,created_at}));
   const collectionAccess = access.capabilities.includes("view_collections");
   const auditAccess = access.capabilities.includes("view_audit");
   if (!collectionAccess) {

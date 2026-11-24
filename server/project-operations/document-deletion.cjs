@@ -29,6 +29,7 @@ function deleteDocumentEverywhere(db,document,user){
   db.run('DELETE FROM ops_load_lines WHERE order_item_id IN (SELECT value FROM json_each(?))',[rowIds]);
   db.run('DELETE FROM ops_load_parts WHERE order_item_id IN (SELECT value FROM json_each(?))',[rowIds]);
   db.run('DELETE FROM ops_order_items WHERE id IN (SELECT value FROM json_each(?))',[rowIds]);
+  const loadIds=orderIds.flatMap(orderId=>db.all('SELECT id FROM ops_loads WHERE order_id=?',[orderId]).map(row=>row.id));
   for(const orderId of orderIds){
     for(const batch of db.all('SELECT id,shipment_data FROM ops_loads WHERE order_id=?',[orderId])){
       const data=parse(batch.shipment_data,{}),removed=new Set(orderRows.map(row=>row.id));
@@ -38,6 +39,8 @@ function deleteDocumentEverywhere(db,document,user){
     db.run('DELETE FROM ops_loads WHERE order_id=? AND NOT EXISTS(SELECT 1 FROM ops_load_lines l WHERE l.load_id=ops_loads.id) AND NOT EXISTS(SELECT 1 FROM ops_load_parts p WHERE p.load_id=ops_loads.id)',[orderId]);
     db.run('DELETE FROM ops_orders WHERE id=? AND NOT EXISTS(SELECT 1 FROM ops_order_items i WHERE i.order_id=ops_orders.id)',[orderId]);
   }
+  for(const loadId of loadIds)if(!db.get('SELECT 1 FROM ops_loads WHERE id=?',[loadId])){db.run("DELETE FROM document_edit_history WHERE kind='delivery' AND document_id=?",[loadId]);db.run("DELETE FROM document_edit_locks WHERE kind='delivery' AND document_id=?",[loadId]);}
+  for(const orderId of orderIds)if(!db.get('SELECT 1 FROM ops_orders WHERE id=?',[orderId])){db.run("DELETE FROM document_edit_history WHERE kind IN('order','installation') AND document_id=?",[orderId]);db.run("DELETE FROM document_edit_locks WHERE kind IN('order','installation') AND document_id=?",[orderId]);}
   db.run('UPDATE ops_changes SET prior_change_id=NULL WHERE prior_change_id IN (SELECT value FROM json_each(?))',[encode(changes.map(change=>change.id))]);
   db.run('DELETE FROM ops_items WHERE id IN (SELECT value FROM json_each(?))',[ids]);
   db.run("UPDATE ops_changes SET adjustment_id=NULL,status='returned',review_note='Adjustment invoice deleted' WHERE adjustment_id=?",[document.id]);

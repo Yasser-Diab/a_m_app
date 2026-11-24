@@ -202,7 +202,7 @@ function stageApprovals(db,current) {
         const saved=db.get("SELECT approved FROM ops_order_reviews WHERE order_item_id=? AND item_version=? AND stage=?",
           [row.id,row.specification.version,stage]);
         const components=new Set(itemApprovals(db,item).map(({part})=>part));
-        approved=!stale&&["released","shipped"].includes(current.status)&&saved?.approved!==0&&
+        approved=!stale&&["released","shipped","closed"].includes(current.status)&&saved?.approved!==0&&
           approvalParts.every((part)=>components.has(part))&&latestInspection(inspectionsForOrder,row,"survey")?.release==="approved";
       }
       return {id:row.id,item_id:item.id,code:item.code,version:item.version,approved,stale};
@@ -211,7 +211,12 @@ function stageApprovals(db,current) {
   });
 }
 
+function orderEditWindow(db,current) {
+  const fallback=["shipped","closed"].includes(current.status)?db.get("SELECT MIN(created_at) at FROM ops_audit WHERE entity_id=? AND action IN('production_order_shipped','production_order_closed','maintenance_completed')",[current.id])?.at||current.created_at:null;
+  return require("../document-edit-window.cjs").info(db,"order",current.id,fallback);
+}
 function reviewStage(db,current,body,access) {
+  require("../document-edit-window.cjs").check(db,"order",current.id,orderEditWindow(db,current).first_locked_at);
   const stage=str(body.stage);
   if (!orderStages.includes(stage)||typeof body.approved!=="boolean"||current.kind==="maintenance")
     fail(400,"Choose a manufacturing approval stage");
@@ -289,9 +294,11 @@ function updateOrderStatus(db,current,body,user) {
   } else if (status==="closed" && !["draft","released","shipped"].includes(current.status)) {
     fail(409,"This order is already closed");
   } else if (status!=="closed") fail(409,"This production status transition is unavailable");
+  if(status==='closed'&&current.kind!=='maintenance'&&current.status==='shipped'&&!require('./lifecycle.cjs').installation(db,current).complete)fail(409,'Record completed installation before closing this delivered work order');
   const reason=str(body.reason,1000);
   if (status==="closed" && !reason) fail(400,"Enter the closing reason");
   db.run("UPDATE ops_orders SET status=? WHERE id=?",[status,current.id]);
+  if(["shipped","closed"].includes(status))require("../document-edit-window.cjs").lock(db,"order",current.id);
   record(db,user,current.project_id,"production_order_"+status,current.id,{previous:current.status,reason});
   return order(db,current.project_id,current.id);
 }
@@ -304,11 +311,13 @@ function completeService(db,current,body,user) {
   const completed={...service,completed_on:date(body.completed_on,true)||today(),
     completion_notes:str(body.completion_notes,3000),completed_by:user.display_name||user.username};
   db.run("UPDATE ops_orders SET status='closed',service_data=? WHERE id=?",[encode(completed),current.id]);
+  require("../document-edit-window.cjs").lock(db,"order",current.id);
   record(db,user,current.project_id,"maintenance_completed",current.id,{reference:current.reference,...completed});
   return orderDetails(db,order(db,current.project_id,current.id));
 }
 
 function refreshDraftOrder(db,current,user) {
+  require("../document-edit-window.cjs").check(db,"order",current.id,orderEditWindow(db,current).first_locked_at);
   if (!["draft","released"].includes(current.status)||current.kind==="maintenance"||
     db.get("SELECT 1 FROM ops_loads WHERE order_id=?",[current.id])) fail(409,"Refresh specifications before loading begins");
   const previous=orderItems(db,current.id);
@@ -478,8 +487,9 @@ function orderDetails(db,current) {
   const loadingReference=transport?.reference;
   const items=orderItems(db,current.id);
   const source=current.source_document_id?db.get('SELECT id,operation_no,document_type,title,status FROM documents WHERE id=?',[current.source_document_id]):null;
-  return {...current,source,coverage:orderCoverage(db,current,items),loading_settings:parse(current.loading_settings,{enabled:false,rows:[]}),loading_reference:loadingReference||null,
+  return {...current,reference:require("../document-edit-window.cjs").info(db,"order",current.id).active_reference||current.reference,source,coverage:orderCoverage(db,current,items),loading_settings:parse(current.loading_settings,{enabled:false,rows:[]}),loading_reference:loadingReference||null,
     loading_transport:transport||{reference:null,vehicle_plate:'',driver_name:'',version:0},service:parse(current.service_data,{}),items,inspections:inspections(db,current.id),
+    responsibilities:require("./lifecycle.cjs").assignments(db,current.id),edit_window:orderEditWindow(db,current),document_history:require("../document-edit-window.cjs").history(db,"order",current.id),
     balances:loadingBalances(db,current.id),parts:loadingParts(db,current),loads:[...byBatch.values()],stage_approvals:current.kind==="maintenance"?[]:stageApprovals(db,current)};
 }
 
@@ -557,4 +567,4 @@ function confirmQuantity(db,item,body,access) {
 }
 
 module.exports = {qcStages,qcChecks,qcResults,checks,order,orderPage,orderDetails,addOrder,updateOrderStatus,refreshDraftOrder,prepareOutput,loadingOrder,
-  inspect,loadBatch,loadingBalances,loadingParts,shipmentPreparation,confirmShipment,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages,saveLoadingSettings,availableItems,orderCoverage,includeRemaining,loadingTransport,saveLoadingTransport};
+  inspect,verifyShipment,loadBatch,loadingBalances,loadingParts,shipmentPreparation,confirmShipment,itemApprovals,recordApprovals,confirmQuantity,completeService,stageApprovals,reviewStage,orderStages,saveLoadingSettings,availableItems,orderCoverage,includeRemaining,loadingTransport,saveLoadingTransport};

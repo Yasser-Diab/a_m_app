@@ -4045,6 +4045,8 @@ function resetLocalCompanyAccount(database, { dataDir, dbPath, chatUploadDir } =
     DELETE FROM ops_loading_sequences;
     DELETE FROM ops_audit;
     DELETE FROM ops_confirmations;
+    DELETE FROM document_edit_history;
+    DELETE FROM document_edit_locks;
     DELETE FROM ops_load_parts;
     DELETE FROM ops_load_lines;
     DELETE FROM ops_loads;
@@ -7100,6 +7102,7 @@ function renderReportHtmlV2(data) {
     ${summaryHtml}${statementHtml}${detailHtml}${data.contractor_modern_certificate ? "" : contractorPaymentTableHtml(data)}
     ${totalsHtml(data)}
     ${termsHtml(data)}
+    ${require("./signature-directory.cjs").html(data.signatures||[],locale)}
     <footer class="footer footer-shared">${footerContents({...footerMetadata(data,branding,APP_VERSION),footerContact:footerCenterContact},true)}</footer>
   </div></body></html>`;
 }
@@ -7752,6 +7755,7 @@ function buildReportData(database, query, type, certificateAccess) {
     filters: query,
     selected_projects: selectedProjects,
     project_selection_count: selectedProjects.length,
+    signatures: (()=>{if(!['price_offer','invoice'].includes(type))return [];const kind=type==='invoice'?'invoice':'quotation';const projectSignatures=database.get("SELECT o.details FROM ops_projects o JOIN cert_projects p ON p.id=o.project_id WHERE p.customer_id=? AND p.name=?",[document?.party_id||first.party_id,document?.project||first.project]);return JSON.parse(projectSignatures?.details||'{}').report_signatures?.[kind]??require('./signature-directory.cjs').defaults(database,kind);})(),
     branding: reportBranding(database),
     show_dimensions: hasReportDimensions(rows),
     dimension_unit: dimensionUnit,
@@ -8974,6 +8978,7 @@ async function createServer(options = {}) {
     });
   });
 
+  app.get('/api/entry-suggestions',(req,res)=>{const field=String(req.query.field||'');if(!['project','description','glass_spec','profile_spec','color','building_unit','floor_apartment','work_type'].includes(field))return res.status(400).json({error:'Unknown suggestion field'});const q='%'+normalizeText(req.query.q)+'%',party=numberOrNull(req.query.party_id);let values=database.all(`SELECT ${field} value,MAX(id) last_id FROM active_work_items WHERE ${field} IS NOT NULL AND ${field}<>'' AND ${field} LIKE ? AND (? IS NULL OR party_id=?) GROUP BY ${field} ORDER BY last_id DESC LIMIT 100`,[q,party,party]);if(!values.length&&party)values=database.all(`SELECT ${field} value,MAX(id) last_id FROM active_work_items WHERE ${field} IS NOT NULL AND ${field}<>'' AND ${field} LIKE ? GROUP BY ${field} ORDER BY last_id DESC LIMIT 100`,[q]);res.json({values:values.map(row=>row.value)});});
   app.get("/api/lookups", (req, res) => {
     const lookup = (column, limit = 300) =>
       database.all(
@@ -8991,7 +8996,7 @@ async function createServer(options = {}) {
         "SELECT * FROM parties WHERE role = ? ORDER BY display_name LIMIT 500",
         ["contractor"],
       ),
-      projects: lookup("project"),
+      projects: [...new Map([...database.all("SELECT name AS value FROM cert_projects ORDER BY created_at DESC,id DESC"),...lookup("project")].map(row=>[row.value,row])).values()],
       statuses: [
         { value: STATUS.OFFER },
         { value: STATUS.INVOICE },
@@ -9519,7 +9524,7 @@ async function createServer(options = {}) {
     if (
       req.query.document_type ||
       req.query.document_status ||
-      (rawQ && /^\d+/.test(rawQ))
+      (rawQ && req.query.direct!=="1" && /^\d+/.test(rawQ))
     ) {
       const docClauses = [];
       if (req.query.document_type) {

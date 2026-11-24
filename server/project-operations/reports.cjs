@@ -262,25 +262,27 @@ function groupedWork(db,items,locale,drawingSets) {
       row([t("وصف الفتحة","Opening description"),...(hasTag?[t('رقم الفتحة','Opening tag')]:[]),...(hasLocation?[t("الموقع","Location")]:[]),t("العدد","Count"),...(hasWidth?[t("العرض مم","Width mm")]:[]),...(hasHeight?[t("الارتفاع مم","Height mm")]:[]),
         ...(hasDepth?[t("العمق مم","Depth mm")]:[]),...measuredParts.map(key=>fieldsFor(spec.category,system,{...tech,panel_measurement_basis:key.startsWith('leaf_')?'Operable leaf':'Fixed panel'},true).find(field=>field.key===key)?.[locale]||key),...(hasDrawing?[t("مرجع الرسم","Drawing reference")]:[]),
         ...(hasDeductions?[t("مقاس التصنيع بعد التخصيم مم","Manufacturing after deduction mm")]:[])],"th")+
-      "</thead><tbody>"+measures+'</tbody></table>'+groupSubtotal(items,locale)+'<div class="shared-specifications">'+grid(pairs)+"</div>"+imageHtml+"</section>";
+      "</thead><tbody>"+measures+'</tbody></table>'+(groups.length>1?groupSubtotal(items,locale):'')+'<div class="shared-specifications">'+grid(pairs)+"</div>"+imageHtml+"</section>";
   }).join("");
 }
 
 function signatures(db,projectId,order,kind,locale,selection) {
   const t=(ar,en)=>label(ar,en,locale);
   const assigned=people(db,projectId);
-  const allowed=kind==="maintenance"?[kind,"all"]:[kind,"both","all"];
+  const allowed=kind==="maintenance"?[kind,"all"]:[kind,"both","all",...(kind==="delivery"?["loading"]:[])];
   const signers=new Map(assigned.filter((person)=>allowed.includes(person.signature_usage)||
     person.signature_usage&&!["manufacturing","loading","maintenance","both","all"].includes(person.signature_usage))
     .map((person)=>[person.id,{person,title:person.signature_label||person.position}]));
   const roles={loading:["مسؤول التحميل","Loading lead"],engineer:["مهندس المشروع","Project engineer"],
     reviewer:["الاستلام","Receiver"],approver:["الاعتماد","Approval"]};
-  const saved=require("./core.cjs").operation(db,projectId).details.report_signatures?.[kind];
+  const projectSignatures=require("./core.cjs").operation(db,projectId).details.report_signatures?.[kind]??(kind==="delivery"?require("./core.cjs").operation(db,projectId).details.report_signatures?.loading:undefined);
+  const globalSignatures=require('../signature-directory.cjs').defaults(db,kind);
+  const saved=projectSignatures??(globalSignatures.length?globalSignatures:undefined);
   if(Array.isArray(saved)) {
     signers.clear();
     saved.forEach((person,index)=>signers.set("saved-"+index,{person,title:person.title}));
   }
-  if (kind==="loading"&&!Array.isArray(saved))
+  if (["loading","delivery"].includes(kind)&&!Array.isArray(saved))
     for (const [key,names] of Object.entries(roles)) {
       const custom=typeof selection?.[key]==="string"&&!idOf(selection[key])?selection[key].trim().slice(0,200):null;
       const person=assigned.find(({id})=>id===idOf(selection?.[key]))||
@@ -333,7 +335,7 @@ function loadingBlock(order,locale) {
   return '<h3>'+escape(t(`المجموعة ${groupIndex+1} من ${groups.length}`,`Group ${groupIndex+1} of ${groups.length}`))+'</h3>'+
     '<table class="loading-sheet"><colgroup>'+[22,14,15,8,9,8,8,9,7].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row([t("وصف الفتحة","Opening description"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),
       t("المحمل سابقًا","Previous"),t("الحالي","This load"),t("التراكمي","To date"),t("المتبقي","Remaining"),t("ملاحظات / تاريخ","Notes / date")],"th")+
-    "</thead>"+rows+(ordered.length?'</tbody>':'')+"</table>"+groupSubtotal(group.items,locale);
+    "</thead>"+rows+(ordered.length?'</tbody>':'')+"</table>"+(groups.length>1?groupSubtotal(group.items,locale):'');
   }).join('');
   const frames=order.balances.filter(({kind})=>kind==="frames").reduce((sum,entry)=>sum+entry.required,0);
   const leaves=order.balances.filter(({kind})=>["sliding","hinged","other"].includes(kind)).reduce((sum,entry)=>sum+entry.required,0);
@@ -366,9 +368,10 @@ function loadingTransportBlock(order,locale){
 function orderSummary(order,locale){
   const totals=orderQuantities(order),t=(ar,en)=>label(ar,en,locale);
   const format=value=>new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(value);
+  const area=order.items.reduce((sum,item)=>{const tech=item.specification.technical;return sum+(Number(tech.width_mm)>0&&Number(tech.height_mm)>0?item.quantity*tech.width_mm*tech.height_mm/1e6:0);},0);
   const quantities=totals.quantities.map(item=>'<span class="order-unit-total"><bdi dir="ltr">'+format(item.quantity)+'</bdi><bdi>'+escape(unitName(item.unit,locale))+'</bdi></span>').join('');
   return '<section class="order-summary"><table><tbody><tr><th>'+escape(t('إجمالي الأمر','Order total'))+'</th><td>'+escape(t('العدد','Count'))+
-    ' <bdi dir="ltr">'+format(totals.count)+'</bdi></td><td>'+escape(t('كمية الأعمال','Work quantity'))+' '+(quantities||'—')+'</td></tr></tbody></table></section>';
+    ' <bdi dir="ltr">'+format(totals.count)+'</bdi></td><td>'+escape(t('كمية الأعمال','Work quantity'))+' '+(quantities||'—')+'</td>'+(area?'<td>'+escape(t('المساحة التقديرية م²','Estimated area m²'))+' <bdi dir="ltr">'+format(area)+'</bdi></td>':'')+'</tr></tbody></table></section>';
 }
 
 function approvalReport(db,order,locale) {
@@ -440,6 +443,8 @@ function report(db,state,rawOrder,options,branding) {
     pdfDrawings:drawingSets.flat().filter(({mime})=>mime==="application/pdf")};
 }
 
+function snapshotReport(db,state,order,locale,branding){const t=(ar,en)=>locale==='ar'?ar:en,approved=order.stage_approvals?.find(stage=>stage.stage==='manufacturing')?.approved,project=getProject(db,state.project_id),customer=getCustomer(db,project.customer_id),drawingSets=order.items.map(item=>eligibleDrawings(db,item));const body=projectBlock(db,project,customer,state,order,locale,branding)+groupedWork(db,order.items,locale,drawingSets)+orderSummary(order,locale)+signatures(db,project.id,order,'manufacturing',locale);return {html:wrap({locale,branding,title:t('أمر تشغيل — إصدار سابق','Work Order — previous version')+' '+order.reference,color:approved?'#90bc94':'#d5a1a1',body}),pdfDrawings:drawingSets.flat().filter(drawing=>drawing.mime==='application/pdf')};}
+
 async function appendDrawings(buffer,drawings) {
   if (!drawings.length) return buffer;
   const output=await PDFDocument.load(buffer);
@@ -458,4 +463,4 @@ async function appendDrawings(buffer,drawings) {
   return Buffer.from(await output.save());
 }
 
-module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair,orderSummary,loadingTransportBlock,projectBlock,signatures,panelLabels,specificationGroups,groupSubtotal};
+module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair,orderSummary,loadingTransportBlock,projectBlock,signatures,panelLabels,specificationGroups,groupSubtotal,snapshotReport};
