@@ -7,7 +7,8 @@ const DATE_FLOOR = "0001-01-01";
 
 function allocationLedger(database, projectId, profile, cutoff, options = {}) {
   const {workCutoff = cutoff,previousCutoff = DATE_FLOOR,locationId = null,revisionId = null,seriesKey = null,
-    includeImported = () => true, includeReceipt = () => true} = options;
+    includeImported = () => true, includeReceipt = () => true,accountId} = options;
+  if(accountId!==undefined)require('./certificate-accounts.cjs').checked(database,projectId,accountId);
   const clearance = profile.settings.collections_basis === "cleared";
   const project = getProject(database,projectId);
   const {active, prior, imported} = customerReceipts(database, project);
@@ -16,9 +17,9 @@ function allocationLedger(database, projectId, profile, cutoff, options = {}) {
   const locationNames = new Set([lookup(location?.name), lookup(location?.code)].filter(Boolean));
   const external = [...prior, ...imported.filter(includeImported)].filter((row) => row.received_at && row.received_at <= cutoff &&
     (locationId === null || locationNames.has(lookup(row.location))));
-  const entries = [...active, ...external].filter((row) => row.received_at <= cutoff && includeReceipt(row))
+  const entries = [...active, ...external].filter((row) => (accountId===undefined||(row.account_id||null)===(accountId||null))&&row.received_at <= cutoff && includeReceipt(row))
     .sort((left, right) => left.received_at.localeCompare(right.received_at));
-  const ids = new Set(active.map(({id}) => id));
+  const ids = new Set(entries.filter(row=>typeof row.id==='number').map(({id}) => id));
   const allocations = database.all(`SELECT a.*,r.location_id AS certificate_location_id,r.series_key AS certificate_series
     FROM cert_receipt_allocations a LEFT JOIN cert_revisions r ON r.id=a.certificate_id
     WHERE a.project_id=? AND (a.allocated_at IS NULL OR a.allocated_at<=?) ORDER BY a.id`, [projectId,cutoff])
@@ -95,15 +96,15 @@ function publicReceipt(row) {
   return {...row, amount: money(row.amount_minor)};
 }
 
-function normalizeAllocations(database, projectId, entries, available) {
+function normalizeAllocations(database, projectId, entries, available,accountId=null) {
   if (!Array.isArray(entries) || entries.length > 200) fail(400, "Invalid receipt allocations");
   let allocated = 0;
   const allocations = entries.map((item) => {
     const locationId = checkedLocation(database, projectId, idOf(item.location_id));
     const certification = idOf(item.certificate_id);
     if (certification) {
-      const cert = database.get("SELECT status,location_id FROM cert_revisions WHERE project_id=? AND id=?", [projectId,certification]);
-      if (!cert || cert.status !== "issued" || (cert.location_id && locationId && cert.location_id !== locationId))
+      const cert = database.get("SELECT status,location_id,account_id FROM cert_revisions WHERE project_id=? AND id=?", [projectId,certification]);
+      if (!cert || cert.status !== "issued" || (cert.account_id||null)!==(accountId||null) || (cert.location_id && locationId && cert.location_id !== locationId))
         fail(400, "Allocation certificate must be issued in this location and project");
     }
     const part = toMinor(item.amount);
@@ -132,6 +133,7 @@ function addReceipt(database, project, input, user) {
   }
   const reversesId = idOf(input.reverses_id);
   const original = reversesId ? database.get("SELECT * FROM cert_receipts WHERE project_id=? AND id=?", [project.id,reversesId]) : null;
+  const accountId=original?(original.account_id||null):(require('./certificate-accounts.cjs').checked(database,project.id,input.account_id)?.id||null);
   if (kind === "reversal" && (!original || original.kind === "reversal")) fail(400, "Select a receipt or advance to reverse");
   if (kind !== "reversal" && reversesId) fail(400, "Only a reversal may reference an earlier receipt");
   if (original && database.get("SELECT 1 FROM cert_receipts WHERE reverses_id=?", [original.id])) fail(409, "This receipt was already reversed");
@@ -147,7 +149,7 @@ function addReceipt(database, project, input, user) {
   if (kind === "reversal" && status === "pending") fail(400, "Post a reversal as received or cleared");
   const supplied = input.allocations === undefined ? [] : input.allocations;
   if (kind === "reversal" && supplied?.length) fail(400, "A reversal inherits its original allocations");
-  const {allocations,allocated} = normalizeAllocations(database,project.id,supplied,amount);
+  const {allocations,allocated} = normalizeAllocations(database,project.id,supplied,amount,accountId);
   const last = database.get("SELECT MAX(id) AS id FROM cert_receipts").id || 0;
   const receiptId = Math.max(last, Number(setting(database,lastReceiptIdSetting,"0")) || 0) + 1;
   database.run(`INSERT INTO cert_receipts
@@ -156,6 +158,7 @@ function addReceipt(database, project, input, user) {
   [receiptId,project.id,kind,amount,received,cleared,due,project.currency,status,str(input.method),str(input.reference),
     str(input.evidence,2000),key || null,reversesId,user.id]);
   storeAllocations(database,project.id,receiptId,received,allocations);
+  database.run('UPDATE cert_receipts SET account_id=? WHERE id=?',[accountId,receiptId]);
   audit(database, user, kind + "_posted", {projectId:project.id, reason:input.reason,
     details:{receipt_id:receiptId, amount_minor:amount, allocated_minor:allocated, reverses_id:reversesId}});
   return publicReceipt(database.get("SELECT * FROM cert_receipts WHERE id=?", [receiptId]));
@@ -183,7 +186,7 @@ function updateReceipt(database, project, receiptId, input, user) {
     const at = date(input.allocated_at,true) || today();
     if (at < receipt.received_at) fail(400,"Allocation cannot precede receipt");
     const existing = database.get("SELECT COALESCE(SUM(amount_minor),0) AS total FROM cert_receipt_allocations WHERE receipt_id=?",[receiptId]).total;
-    const {allocations,allocated} = normalizeAllocations(database,project.id,input.allocations,receipt.amount_minor-existing);
+    const {allocations,allocated} = normalizeAllocations(database,project.id,input.allocations,receipt.amount_minor-existing,receipt.account_id);
     if (!allocations.length) fail(400,"Add at least one allocation");
     storeAllocations(database,project.id,receiptId,at,allocations);
     audit(database,user,"receipt_allocate",{projectId:project.id,details:{receipt_id:receiptId,allocated_at:at,
@@ -198,6 +201,7 @@ function changeReceipt(database, project, receiptId, input, user) {
     WHERE project_id=? AND record_type='receipt' AND rowid=?`, [project.id,idOf(importedId)]) : null;
   const receipt = imported ? workbookReceipt(imported) : database.get("SELECT * FROM cert_receipts WHERE project_id=? AND id=?",[project.id,idOf(receiptId)]);
   if (!receipt) fail(404,"Receipt not found");
+  if(input&&Object.hasOwn(input,'account_id')&&idOf(input.account_id)!==(receipt.account_id||null))fail(409,'A recorded payment must keep its project account');
   if (!imported && database.get("SELECT 1 FROM cert_receipts WHERE reverses_id=?",[receipt.id]))
     fail(409,"Remove the reversal before changing this payment");
   if (!imported && database.get("SELECT 1 FROM cert_advance_recoveries WHERE advance_id=?",[receipt.id]))

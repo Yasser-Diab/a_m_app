@@ -1,0 +1,34 @@
+const assert=require('node:assert/strict');
+module.exports=async context=>{
+ const {api,db,scope,endpoint,order,first}=context;
+ const catalogue=await api('/project-operations/catalogue'),stages=[...catalogue.approvalParts,'manufacturing','pre_shipment'];
+ await api(endpoint+'/approvals','POST',{stage:'measurement',approved:true,approver_name:'External Site Engineer',approver_title:'SE'});
+ let detail=await api(endpoint);assert.equal(detail.stage_approvals[0].people[0].name,'External Site Engineer');assert.equal(detail.inspections[0].inspector_name,'External Site Engineer');
+ const approval=await api(endpoint+'/report','POST',{kind:'approvals',locale:'en'});assert.ok(approval.html.includes('approval-matrix')&&approval.html.includes('✓')&&approval.html.includes('A4 landscape')&&approval.html.includes('External Site Engineer'));assert.ok(!approval.html.includes('Inspection history'));
+ const target=detail.items[0],itemId=target.item_id,update=async values=>{const item=(await api(scope+'/items?all=1')).items.find(item=>item.id===itemId);return api(scope+'/specifications','POST',{remember:false,rows:[{id:item.id,version:item.version,technical:values}]});};
+ await update({glass_type:'Laminated'});
+ let review=await api(endpoint+'/review-changes');assert.equal(review.rows.length,1);assert.equal(review.rows[0].metadata_only,false);
+ const note=await api('/project-operations/delivery-notes/'+first.id),noteBody={version:note.version,loading_date:note.loading_date,vehicle_plate:'ABC 123',driver_name:'Vehicle One Driver',responsible:{loading:'Dispatch lead'},parts:Object.entries(note.amounts).map(([part_id,quantity])=>({part_id,quantity}))};
+ await api('/project-operations/delivery-notes/'+first.id,'PATCH',noteBody,409);
+ const versions=review.rows.map(row=>({id:row.id,version:row.version}));await api(endpoint+'/review-changes','POST',{versions:versions.map(row=>({...row,version:0})),stages},409);
+ detail=await api(endpoint+'/review-changes','POST',{versions,stages,approver_name:'Design Reviewer',approver_title:'TOM'});
+ assert.equal(detail.loads.length,2);assert.ok(detail.stage_approvals.every(stage=>stage.approved));assert.equal(detail.status,'shipped');
+ assert.equal(detail.stage_approvals.find(stage=>stage.stage==='glass').people[0].name,'Design Reviewer');
+ await api('/project-operations/delivery-notes/'+first.id,'PATCH',noteBody);
+ await api(scope+'/specifications','POST',{remember:false,rows:[{id:itemId,version:review.rows[0].version,opening_description:'Revised opening label'}]});
+ review=await api(endpoint+'/review-changes');assert.equal(review.rows.length,1);assert.equal(review.rows[0].metadata_only,true);
+ detail=await api(endpoint+'/review-changes','POST',{versions:review.rows.map(row=>({id:row.id,version:row.version})),stages:[],approver_name:'Label editor'});
+ assert.ok(detail.stage_approvals.every(stage=>stage.approved));assert.equal(detail.items[0].specification.opening_description,'Revised opening label');assert.equal(detail.loads.length,2);
+ await update({color:'Approved new color'});review=await api(endpoint+'/review-changes');
+ db.run("UPDATE document_edit_locks SET first_locked_at=? WHERE kind='order' AND document_id=?",[new Date(Date.now()-25*3600e3).toISOString(),order.id]);
+ const body={versions:review.rows.map(row=>({id:row.id,version:row.version})),stages,approver_name:'Correction Reviewer'};
+ await api(endpoint+'/review-changes','POST',body,409);
+ detail=await api(endpoint+'/review-changes','POST',{...body,correction:true,reason:'Approved technical correction after shipment'});assert.match(detail.reference,/-COR-0001$/);assert.ok(detail.stage_approvals.every(stage=>stage.approved));assert.equal(detail.loads.length,2);
+ await update({leaves:1});review=await api(endpoint+'/review-changes');await api(endpoint+'/review-changes','POST',{versions:review.rows.map(row=>({id:row.id,version:row.version})),stages},409);
+ assert.notEqual((await api(endpoint)).items[0].specification.version,review.rows[0].version,'An invalid revised balance must roll back');
+ await update({leaves:2});review=await api(endpoint+'/review-changes');await api(endpoint+'/review-changes','POST',{versions:review.rows.map(row=>({id:row.id,version:row.version})),stages:[],approver_name:'Metadata reviewer'});
+ assert.equal(db.all('PRAGMA foreign_key_check').length,0);
+ if(process.env.AM_APPROVAL_QA_HOOK)await require(process.env.AM_APPROVAL_QA_HOOK)(context);
+ console.log('Approval recovery: named signatories, compact landscape matrix, technical reapproval after shipping, description-only preservation, correction deadlines and loaded balance protection passed.');
+};
+if(require.main===module){const result=require('node:child_process').spawnSync(process.execPath,[require.resolve('./test_vehicle_shipments.cjs')],{stdio:'inherit',env:{...process.env,AM_SHIPMENT_QA_HOOK:__filename}});process.exitCode=result.status??1;}

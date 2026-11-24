@@ -1,4 +1,5 @@
 import OrderLifecycle from './OrderLifecycle.jsx';
+import ApprovalReview from './ApprovalReview.jsx';
 import {useEffect,useRef,useState} from "react";
 import {Dialog,localDate,newKey,queryString,useResource} from "../certificates/shared.jsx";
 import {DimensionPair,ErrorMessage,Page,Pick,Suggest,Table,SearchableTable,Text,assignmentRoles,display,options,panelNames,quantity,results,stages,states,useAction,usePaged} from "./shared.jsx";
@@ -252,8 +253,9 @@ const approvalStages={measurement:["المقاسات","Measurements"],profile:["
 
 function StageApprovals({order,endpoint,request,t,can,reload}) {
   const [exceptions,setExceptions]=useState(false);
+  const [review,setReview]=useState(null);
   const action=useAction(request,reload);
-  const decide=(stage,approved,id)=>action.run(endpoint+"/approvals","POST",{stage,approved,order_item_id:id});
+  const decide=(stage,approved,id)=>setReview({stage,approved,itemId:id});
   return <section className="ops-stage-approvals pc-stack">
     <h3>{t("اعتمادات أمر التشغيل","Work order approvals")}</h3>
     <div className="ops-stage-buttons">{(order.stage_approvals||[]).map(({stage,approved})=><button type="button" key={stage}
@@ -272,6 +274,8 @@ function StageApprovals({order,endpoint,request,t,can,reload}) {
         }),
       ]])}/>}
     <ErrorMessage error={action.error}/>
+    {can('release')&&<button type="button" onClick={()=>setReview({})}>{t('مراجعة التعديلات وتجديد الاعتمادات','Review changes and renew approvals')}</button>}
+    {review&&<ApprovalReview {...{endpoint,request,t}} {...review} close={()=>setReview(null)} saved={reload}/>}
   </section>;
 }
 
@@ -316,6 +320,7 @@ function Assignments({people,values,set,t,required=false}) {
 }
 
 export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenance,approvals,people,close,apiBase,session,reference,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}) {
+  const [reviewApprovals,setReviewApprovals]=useState(false);
   const [draft,setDraft]=useState({classification:"materials",drawings:true,measurement_watermark:false,people:{},locale:uiLanguage});
   const [pdf,setPdf]=useState(null);
   const [error,setError]=useState(null);
@@ -417,7 +422,9 @@ export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenan
       </div>
       </fieldset>
       <ErrorMessage error={error}/>
+      {error&&can('release')&&<button type="button" onClick={()=>setReviewApprovals(true)}>{t('مراجعة التعديلات وتجديد الاعتمادات','Review changes and renew approvals')}</button>}
     </form>
+    {reviewApprovals&&<ApprovalReview {...{endpoint,request,t}} close={()=>setReviewApprovals(false)} saved={()=>{setError(null);reload();}}/>}
     {reportSaved&&<p role="status">{t('تم حفظ تعديلات التقرير لهذا المستند.','Report edits saved for this document.')}</p>}
     {editingReport&&<ReportEditor endpoint={endpoint} request={request} options={{...draft,kind}} t={t} canEdit={can('edit')}
       onSaved={()=>{setEditingReport(false);setPdf(null);setReportSaved(true);}} onCancel={()=>setEditingReport(false)}/>}

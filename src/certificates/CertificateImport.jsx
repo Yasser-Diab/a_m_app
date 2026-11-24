@@ -47,7 +47,7 @@ export default function CertificateImport({ certificate, request, t, locale, onC
   const [replace, setReplace] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const candidates = useResource(request, source === "measurements" ? null : `/projects/${certificate.project_id}/sources${queryString({ certificate_id: certificate.id })}`);
+  const candidates = useResource(request, source === "measurements" ? null : `/projects/${certificate.project_id}/sources${queryString({ certificate_id: certificate.id,account_id:certificate.header?.account_id||'base' })}`);
   const sources = (candidates.data?.[source] || []).filter((item) => source !== "certificates" || Number(item.id) !== Number(certificate.id));
   const record = sources.find((item) => String(item.id) === sourceId);
   const table = useMemo(() => {

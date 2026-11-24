@@ -73,14 +73,14 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   .loading-sheet tbody.opening-band-0{background:#f1f6f8}.loading-sheet tbody.opening-band-1{background:#fff}
   .loading-sheet td:nth-child(2),.loading-sheet td:nth-child(n+4):nth-child(-n+8){white-space:nowrap}
   .loading-sheet td:first-child,.loading-sheet td:nth-child(3){white-space:normal;overflow-wrap:anywhere}
-  .loading-sheet.delivery-sheet td:nth-child(1),.loading-sheet.delivery-sheet td:nth-child(2),.loading-sheet.delivery-sheet td:nth-child(4){white-space:normal;overflow-wrap:anywhere}.loading-sheet.delivery-sheet td:nth-child(3){white-space:nowrap}
+  .loading-sheet.delivery-sheet td:nth-child(1),.loading-sheet.delivery-sheet td:nth-child(2),.loading-sheet.delivery-sheet td:nth-child(4),.loading-sheet.delivery-sheet td:nth-child(7){white-space:normal;overflow-wrap:anywhere}.loading-sheet.delivery-sheet td:nth-child(3){white-space:nowrap}
   .loading-sheet th{font-size:8pt;overflow-wrap:normal;hyphens:none}.measurements td:first-child{overflow-wrap:anywhere}
   .drawings{display:flex;flex-wrap:wrap;gap:8px}
   figure{max-width:47%;margin:6px 0 0;break-inside:avoid}figure img{max-width:100%;max-height:66mm;object-fit:contain}
   .signoffs{display:grid;grid-template-columns:minmax(0,1fr);gap:28px;margin-block:28px 12px}
   .signoff h3{margin-block:0 15px}
-  .signatures{display:grid;grid-template-columns:repeat(var(--signers),minmax(0,1fr));gap:16px;padding-top:12px;align-items:start}
-  .signatures div{border-top:1px solid #587384;padding-top:6px;min-height:39px;min-width:0;text-align:center;overflow-wrap:anywhere;break-inside:avoid}
+  .signatures{display:flex;flex-wrap:wrap;gap:20px 16px;padding-top:12px;align-items:start}
+  .signatures>div{flex:1 1 130px;border-top:1px solid #587384;padding-top:6px;min-height:39px;min-width:0;text-align:center;overflow-wrap:anywhere;break-inside:avoid}
   .signoff{break-inside:avoid}
   .loading-transport dl{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
   .loading-transport dd{min-height:8mm;padding-top:2mm;border-bottom:1px dotted #587384}
@@ -375,25 +375,10 @@ function orderSummary(order,locale){
 }
 
 function approvalReport(db,order,locale) {
-  const t=(ar,en)=>label(ar,en,locale);
-  const stages={measurement:["المقاسات","Measurements"],profile:["القطاعات","Profiles"],glass:["الزجاج","Glass"],
-    accessories:["الإكسسوارات","Accessories"],finish:["التشطيب","Finish"],details:["التفاصيل","Technical details"],drawing:["الرسومات","Drawings"],
-    manufacturing:["التصنيع","Manufacturing"],pre_shipment:["الشحن","Shipment"]};
-  const list=order.stage_approvals.flatMap(({stage,items})=>items.map((item)=>row([openingDescription(order.items.find(row=>row.id===item.id)?.specification),t(...stages[stage]),
-    item.stale?t("المواصفات معدلة","Specifications changed"):item.approved?t("معتمد","Approved"):t("غير معتمد","Unapproved")])));
-  const history=order.inspections.map((item)=>row([item.reference,item.inspection_date,
-    openingDescription(order.items.find(({id})=>id===item.order_item_id)?.specification),t(...inspectionLabels[item.stage]),
-    item.inspector_name,t(...inspectionLabels[item.record.result]),t(...inspectionLabels[item.record.release])]));
-  const itemStatus=order.items.flatMap(({specification})=>[
-    ["measurement_status","حالة اعتماد المقاس","Measurement approval"],["material_status","حالة اعتماد الخامات","Material approval"],
-    ["manufacturing_status","حالة التصنيع","Manufacturing status"],["safety_approval","اعتماد السلامة","Safety approval"],
-  ].filter(([key])=>specification.technical[key]!=null&&specification.technical[key]!=="").map(([key,ar,en])=>
-    row([openingDescription(specification),t(ar,en),technicalText(specification.technical[key],locale)])));
-  return '<section class="loading"><table><thead>'+row([t("الفتحة","Opening"),t("المرحلة","Stage"),t("حالة الاعتماد","Approval status")],"th")+
-    "</thead><tbody>"+list.join("")+itemStatus.join("")+"</tbody></table></section>"+
-    (history.length?'<section class="loading"><h2>'+escape(t("سجل الفحص","Inspection history"))+'</h2><table><thead>'+
-      row([t("رقم الفحص","Inspection no."),t("التاريخ","Date"),t("الفتحة","Opening"),t("المرحلة","Stage"),t("الفاحص","Inspector"),t("النتيجة","Result"),t("الإفراج","Release")],"th")+
-      "</thead><tbody>"+history.join("")+"</tbody></table></section>":"");
+  const t=(ar,en)=>label(ar,en,locale),stages={measurement:['المقاسات','Measurements'],profile:['القطاعات','Profiles'],glass:['الزجاج','Glass'],accessories:['الإكسسوارات','Accessories'],finish:['التشطيب','Finish'],details:['التفاصيل','Details'],drawing:['الرسومات','Drawings'],manufacturing:['التصنيع','Manufacturing'],pre_shipment:['الشحن','Shipment']};
+  const matrix=order.items.map(item=>row([item.specification.technical.tag||'',openingDescription(item.specification),...order.stage_approvals.map(stage=>{const approved=stage.items.find(row=>row.id===item.id);return approved?.approved&&!approved.stale?'✓':'';})])).join('');
+  const blocks=order.stage_approvals.map(stage=>'<div><strong>'+escape(t(...stages[stage.stage]))+'</strong><div class="approval-sign-line"></div>'+(stage.people||[]).map(person=>'<bdi>'+escape(person.name)+'</bdi>'+(person.title?'<small>'+escape(person.title)+'</small>':'')+(person.date?'<small dir="ltr">'+escape(String(person.date).slice(0,10))+'</small>':'')).join('')+'</div>').join('');
+  return '<style>@page{size:A4 landscape}.approval-matrix{table-layout:fixed;font-size:8pt}.approval-matrix th,.approval-matrix td{text-align:center;overflow-wrap:anywhere;padding:4px}.approval-matrix th:nth-child(2),.approval-matrix td:nth-child(2){text-align:start}.approval-signatures{display:flex;flex-wrap:wrap;gap:20px 24px;break-inside:avoid;margin-top:22px}.approval-signatures>div{flex:1 1 calc((100% - 96px)/5);min-width:150px;text-align:center;break-inside:avoid}.approval-signatures small{display:block}.approval-sign-line{border-bottom:1px solid #789;margin:20px 0 5px}</style><section class="loading"><table class="approval-matrix"><colgroup><col style="width:7%"><col style="width:25%">'+order.stage_approvals.map(()=>'<col>').join('')+'</colgroup><thead>'+row(['Tag',t('البيان','Description'),...order.stage_approvals.map(stage=>t(...stages[stage.stage]))],'th')+'</thead><tbody>'+matrix+'</tbody></table></section><div class="approval-signatures">'+blocks+'</div>';
 }
 
 function reportFilename(customer,order,options) {
@@ -424,14 +409,14 @@ function report(db,state,rawOrder,options,branding) {
   const approvals=options.kind==="approvals";
   const approved=options.classification==="manufacturing";
   if (!loading&&!approvals&&approved&&!order.stage_approvals.find(({stage})=>stage==="manufacturing")?.approved)
-    fail(409,"Approve the manufacturing stage before generating this order");
+    fail(409,"Approve the manufacturing stage before generating this order",{approval_required:true});
   const classification="";
   const title=approvals?t("حالة الاعتمادات","Approval Status"):loading?t("أمر تحميل","Loading Order")+" "+(order.loading_reference||order.reference):
     approved?t("أمر تصنيع","Manufacturing Order"):t("طلب توريد الخامات","Material Requisition");
   const drawingSets=!loading && !approvals && options.drawings===true ? order.items.map((item)=>eligibleDrawings(db,item)) : [];
   const body=projectBlock(db,project,customer,state,order,locale,branding)+(approvals?approvalReport(db,order,locale):loading?loadingBlock(order,locale):
     groupedWork(db,order.items,locale,drawingSets))+(!approvals?orderSummary(order,locale):'')+(loading?loadingTransportBlock(order,locale):'')+
-    signatures(db,project.id,order,loading?"loading":"manufacturing",locale,options.people);
+    (approvals?'':signatures(db,project.id,order,loading?"loading":"manufacturing",locale,options.people));
   const measured=order.stage_approvals.find(({stage})=>stage==="measurement");
   const approvedMeasurements=measured?.items.filter(({approved})=>approved).length||0;
   const measurementState=measured?.approved?"approved":approvedMeasurements?"partial":"unapproved";

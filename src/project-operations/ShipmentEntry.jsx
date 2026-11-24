@@ -1,24 +1,27 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import {Dialog,localDate,newKey} from '../certificates/shared.jsx';
 import {ErrorMessage,Text,Pick,Suggest,display,panelNames,useAction} from './shared.jsx';
 import {PdfOutput} from './OperationsReports.jsx';
 import ShipmentGrid from './ShipmentGrid.jsx';
+import ApprovalReview from './ApprovalReview.jsx';
 import {technicalText,openingDescription} from './terminology.js';
 
 export default function ShipmentEntry(props){
   const {order,endpoint,request,t,people=[],reload,close,confirm,can,noteId,correction=false}=props;
+  const requestRef=useRef(request);requestRef.current=request;
   const [reason,setReason]=useState('');
+  const [reviewApprovals,setReviewApprovals]=useState(false);
   const [prepared,setPrepared]=useState(null),[error,setError]=useState(null),[amounts,setAmounts]=useState({}),[result,setResult]=useState(null);
   const [extra,setExtra]=useState(null),[extraBusy,setExtraBusy]=useState(false);
   const [data,setData]=useState(()=>({loading_date:localDate(),notes:'',driver_name:'',vehicle_plate:'',command_key:newKey(),responsible:{}}));
-  useEffect(()=>{const controller=new AbortController();request(noteId?'/delivery-notes/'+noteId:endpoint+'/shipment-preparation',{method:noteId?'GET':'POST',...(noteId?{}:{body:{}}),signal:controller.signal}).then(value=>{
+  useEffect(()=>{const controller=new AbortController();requestRef.current(noteId?'/delivery-notes/'+noteId:endpoint+'/shipment-preparation',{method:noteId?'GET':'POST',...(noteId?{}:{body:{}}),signal:controller.signal}).then(value=>{
     setPrepared(value);if(noteId)setAmounts(value.amounts||{});setData(old=>({...old,...(noteId?{loading_date:value.loading_date,notes:value.notes,version:value.version}:{}),reference:value.loading_reference,...value.loading_transport,
       responsible:noteId?Object.fromEntries(Object.entries(value.responsible||{}).map(([key,person])=>[key,typeof person==='object'?person.name:person])):Object.fromEntries(people.filter(person=>person.responsibility).map(person=>[person.responsibility,person.id]))}));
-  }).catch(cause=>{if(!controller.signal.aborted)setError(cause);});return()=>controller.abort();},[endpoint,request,noteId]);
+  }).catch(cause=>{if(!controller.signal.aborted)setError(cause);});return()=>controller.abort();},[endpoint,noteId]);
   const action=useAction(request,value=>{setResult(value);reload();});
-  const parts=(prepared?.parts||[]).map(part=>({...part,component:part.label||display(panelNames,part.kind,t),
+  const parts=useMemo(()=>(prepared?.parts||[]).map(part=>({...part,component:part.label||display(panelNames,part.kind,t),
     size:part.order_item_id?(t('ar','en')==='ar'?`${part.height_mm??'—'} × ${part.width_mm??'—'}`:`${part.width_mm??'—'} × ${part.height_mm??'—'}`):'',
-    unit:part.unit==='Pcs'?t('عدد','Pcs'):technicalText(part.unit,t('ar','en'))})).sort((a,b)=>(a.order_item_id||Number.MAX_SAFE_INTEGER)-(b.order_item_id||Number.MAX_SAFE_INTEGER)||(({frames:0,sliding:1,hinged:2,fixed:3,other:4,screens:5,sliding_blades:6})[a.kind]??7)-(({frames:0,sliding:1,hinged:2,fixed:3,other:4,screens:5,sliding_blades:6})[b.kind]??7));
+    unit:part.unit==='Pcs'?t('عدد','Pcs'):technicalText(part.unit,t('ar','en'))})).sort((a,b)=>(a.order_item_id||Number.MAX_SAFE_INTEGER)-(b.order_item_id||Number.MAX_SAFE_INTEGER)||(({frames:0,sliding:1,hinged:2,fixed:3,other:4,screens:5,sliding_blades:6})[a.kind]??7)-(({frames:0,sliding:1,hinged:2,fixed:3,other:4,screens:5,sliding_blades:6})[b.kind]??7)),[prepared?.parts,t]);
   const responsible=people.map(person=>[String(person.id),person.name+(person.position?' · '+person.position:'')]);
   const supplied=data.responsible.loading,person=people.find(person=>person.id===Number(supplied));
   const set=(key,value)=>setData(old=>({...old,[key]:value}));
@@ -26,6 +29,8 @@ export default function ShipmentEntry(props){
     if(!result&&Object.values(amounts).some(value=>Number(value)>0)&&!window.confirm(t('إغلاق جدول الشحنة دون تأكيد التحميل؟','Close the shipment table without confirming the loading?')))return;close();
   }}>
     {!prepared&&!error&&<p role="status">{t('جارٍ تحميل مكونات الأمر…','Loading order parts…')}</p>}<ErrorMessage error={error||action.error}/>
+    {can('release')&&(action.error||error)&&<button type="button" onClick={()=>setReviewApprovals(true)}>{t('مراجعة التعديلات وتجديد الاعتمادات','Review changes and renew approvals')}</button>}
+    {reviewApprovals&&<ApprovalReview {...{endpoint,request,t}} close={()=>setReviewApprovals(false)} saved={async()=>{reload();try{const value=await request(noteId?'/delivery-notes/'+noteId:endpoint+'/shipment-preparation',{method:noteId?'GET':'POST',...(noteId?{}:{body:{}})});setPrepared(value);if(noteId)setData(old=>({...old,version:value.version}));setError(null);action.clearError();}catch(cause){setError(cause);}}}/>}
     {prepared&&<form className="pc-stack" onSubmit={event=>{event.preventDefault();action.run(noteId?'/delivery-notes/'+noteId:endpoint+(confirm?'/shipment':'/loading'),noteId?'PATCH':'POST',{correction,reason,
       ...data,parts:parts.filter(part=>Number(amounts[part.part_id])>0).map(part=>({part_id:part.part_id,quantity:amounts[part.part_id]})),
     });}}>

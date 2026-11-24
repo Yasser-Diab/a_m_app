@@ -77,6 +77,24 @@
 .ops-order-picker input[type=checkbox]{inline-size:18px;block-size:18px;min-height:0;padding:0}
 .ops-coverage{border:1px solid #a58038;border-radius:8px;padding:12px;background:#d8aa3c0b}
 
-.signature-suggestion{position:relative;min-width:180px}.signature-suggestion:focus-within{z-index:100}.signature-options{position:absolute;top:100%;inset-inline:0;max-height:240px;overflow:auto;background:var(--surface,#fff);border:1px solid var(--line,#aaa);box-shadow:0 8px 25px #0003;z-index:200}.signature-options button{display:flex;flex-direction:column;width:100%;text-align:start;align-items:start}.signature-options small{opacity:.7}
 
 .ops-matrix-cell{display:flex;align-items:center;gap:8px}.ops-matrix-cell input[type=checkbox]{width:20px;height:20px}.ops-matrix-cell small{opacity:.6}.ops-part-editor{position:fixed;inset:20% 20%;z-index:270050;background:var(--surface);border:1px solid var(--line);padding:24px;max-height:65vh;overflow:auto;box-shadow:0 0 0 100vmax #0007}.ops-part-editor label{display:flex;align-items:center;gap:12px;margin:12px}.ops-part-editor input[type=number]{width:120px}
+.ops-spec-grid input[type=checkbox],.ops-approval-checks input[type=checkbox]{inline-size:18px;block-size:18px;min-inline-size:18px;min-block-size:18px;max-inline-size:18px;padding:0;flex:0 0 18px}
+.ops-grid-table thead input[type=checkbox]{display:block;margin:6px auto 0}.ops-approval-checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}.ops-approval-followup{padding:10px;border:1px solid var(--line);border-radius:8px}.ops-grid-table td,.ops-grid-table th{transition:none}
+.ops-progress-filters{grid-template-columns:minmax(220px,1.1fr) minmax(240px,1fr) auto;align-items:end}
+.ops-stage-filter{position:relative;min-inline-size:0}
+.ops-stage-filter>summary,.ops-progress-responsibles>summary{cursor:pointer;line-height:1.5;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);font-size:.9rem}
+.ops-stage-filter[open]>summary{border-color:var(--accent)}
+.ops-stage-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px 16px;padding:12px}
+.ops-stage-filter>.ops-stage-choices{position:absolute;inset-block-start:calc(100% + 5px);inset-inline:0;min-inline-size:min(430px,80vw);max-block-size:350px;overflow:auto;z-index:12;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow,0 8px 25px #0003)}
+.ops-stage-choices>button{grid-column:1/-1;justify-self:start}
+.ops-progress .pc-check{display:flex;flex-direction:row;align-items:center;gap:8px;min-block-size:32px;font-size:.9rem;margin:0}
+.ops-completed-check{padding-block:8px}
+.ops-progress-responsibles{border:1px solid var(--line);border-radius:9px}
+.ops-progress-responsibles>summary{border:0;background:transparent}
+.ops-progress>button{justify-self:start}
+.ops-progress .pc-table td:first-child>.pc-name{display:block;padding:3px 0;white-space:normal}
+.ops-progress .pc-table td:first-child>small{display:block;margin-block-start:4px;color:var(--muted);overflow-wrap:anywhere}
+.ops-progress .pc-toolbar>.pc-field{max-inline-size:220px}
+@media(max-width:900px){.ops-progress-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-completed-check{grid-column:1/-1}}
+@media(max-width:560px){.ops-progress-filters{grid-template-columns:minmax(0,1fr)}.ops-stage-filter>.ops-stage-choices{min-inline-size:0;inline-size:100%;grid-template-columns:minmax(0,1fr)}}

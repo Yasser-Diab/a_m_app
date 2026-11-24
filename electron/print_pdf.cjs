@@ -51,7 +51,7 @@ async function main() {
 
   const footer = readFooterMeta();
   const pdf = await win.webContents.printToPDF({
-    landscape: false,
+    landscape: Boolean(footer.landscape),
     printBackground: true,
     displayHeaderFooter: true,
     headerTemplate: "<div></div>",

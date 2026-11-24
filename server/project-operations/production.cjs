@@ -188,26 +188,22 @@ function latestInspection(rows,orderItem,stage) {
 const orderStages=[...approvalParts,"manufacturing","pre_shipment"];
 
 function stageApprovals(db,current) {
-  const rows=orderItems(db,current.id);
-  const inspectionsForOrder=inspections(db,current.id);
-  return orderStages.map((stage)=>{
-    const items=rows.map((row)=>{
-      const item=getItem(db,current.project_id,row.item_id);
-      const stale=item.version!==row.specification.version;
-      let approved=false;
-      if (approvalParts.includes(stage)) approved=!stale&&itemApprovals(db,item).some(({part})=>part===stage);
-      if (stage==="measurement") approved=approved&&latestInspection(inspectionsForOrder,row,"survey")?.release==="approved";
-      if (stage==="pre_shipment") approved=!stale&&latestInspection(inspectionsForOrder,row,stage)?.release==="approved";
-      if (stage==="manufacturing") {
-        const saved=db.get("SELECT approved FROM ops_order_reviews WHERE order_item_id=? AND item_version=? AND stage=?",
-          [row.id,row.specification.version,stage]);
-        const components=new Set(itemApprovals(db,item).map(({part})=>part));
-        approved=!stale&&["released","shipped","closed"].includes(current.status)&&saved?.approved!==0&&
-          approvalParts.every((part)=>components.has(part))&&latestInspection(inspectionsForOrder,row,"survey")?.release==="approved";
-      }
-      return {id:row.id,item_id:item.id,code:item.code,version:item.version,approved,stale};
+  const rows=orderItems(db,current.id),inspectionsForOrder=inspections(db,current.id);
+  const reviews=db.all(`SELECT r.*,COALESCE(NULLIF(r.approver_name,''),u.display_name,u.username,'') name FROM ops_order_reviews r
+    LEFT JOIN users u ON u.id=r.actor_id WHERE r.order_item_id IN(SELECT id FROM ops_order_items WHERE order_id=?)`,[current.id]);
+  const reviewMap=new Map(reviews.map(review=>[review.order_item_id+':'+review.item_version+':'+review.stage,review]));
+  const prepared=rows.map(row=>{const item=getItem(db,current.project_id,row.item_id);return {row,item,stale:item.version!==row.specification.version,components:new Set(itemApprovals(db,item).map(({part})=>part))};});
+  return orderStages.map(stage=>{
+    const items=prepared.map(({row,item,stale,components})=>{
+      const saved=reviewMap.get(row.id+':'+row.specification.version+':'+stage);let approved=false;
+      if(approvalParts.includes(stage))approved=!stale&&components.has(stage);
+      if(stage==='measurement')approved=approved&&latestInspection(inspectionsForOrder,row,'survey')?.release==='approved';
+      if(stage==='pre_shipment')approved=!stale&&latestInspection(inspectionsForOrder,row,stage)?.release==='approved';
+      if(stage==='manufacturing')approved=!stale&&['released','shipped','closed'].includes(current.status)&&saved?.approved!==0&&approvalParts.every(part=>components.has(part))&&latestInspection(inspectionsForOrder,row,'survey')?.release==='approved';
+      return {id:row.id,item_id:item.id,code:item.code,version:item.version,approved,stale,approver_name:saved?.name||'',approver_title:saved?.approver_title||'',approved_at:saved?.updated_at||null};
     });
-    return {stage,approved:items.length>0&&items.every((item)=>item.approved),items};
+    const people=[...new Map(items.filter(item=>item.approved&&item.approver_name).map(item=>[item.approver_name+':'+item.approver_title,{name:item.approver_name,title:item.approver_title,date:item.approved_at}])).values()];
+    return {stage,approved:items.length>0&&items.every(item=>item.approved),items,people};
   });
 }
 
@@ -229,9 +225,10 @@ function reviewStage(db,current,body,access) {
   if (!rows.length) fail(404,"Order item not found");
   const approved=body.approved;
   const user=access.user;
+  const approverName=str(body.approver_name,200)||user.display_name||user.username,approverTitle=str(body.approver_title,200);
   for (const row of rows) {
     const item=getItem(db,current.project_id,row.item_id);
-    if (approved&&item.version!==row.specification.version) fail(409,"Refresh the order before approving changed specifications");
+    if (approved&&item.version!==row.specification.version) fail(409,"Review the changed specifications before approving",{approval_required:true});
     if (approved&&stage==="manufacturing") {
       fitForManufacturing(db,item);
       if (latestInspection(inspections(db,current.id),row,"survey")?.release!=="approved")
@@ -244,15 +241,16 @@ function reviewStage(db,current,body,access) {
       const checklist=Object.fromEntries(qcChecks.map((key)=>[key,approved?"compliant":"uninspected"]));
       inspect(db,current,{order_item_id:row.id,stage:inspectionStage,result:approved?"passed":"hold",
         release:approved?"approved":"pending",checklist,defects:approved?"":"Approval withdrawn",
-        corrective_action:str(body.note)||current.reference,closed_on:today()},access);
+        corrective_action:str(body.note)||current.reference,closed_on:today(),inspector_name:approverName},access);
     }
     db.run(`INSERT INTO ops_order_reviews(order_item_id,item_version,stage,approved,actor_id) VALUES(?,?,?,?,?)
       ON CONFLICT(order_item_id,item_version,stage) DO UPDATE SET approved=excluded.approved,actor_id=excluded.actor_id,updated_at=CURRENT_TIMESTAMP`,
     [row.id,row.specification.version,stage,approved?1:0,user.id]);
+    db.run('UPDATE ops_order_reviews SET approver_name=?,approver_title=? WHERE order_item_id=? AND item_version=? AND stage=?',[approverName,approverTitle,row.id,row.specification.version,stage]);
   }
   if (stage==="manufacturing"&&approved&&current.status==="draft") updateOrderStatus(db,current,{status:"released"},user);
   record(db,user,current.project_id,approved?"order_stage_approved":"order_stage_unapproved",current.id,
-    {stage,order_item_ids:rows.map(({id})=>id),note:str(body.note)});
+    {stage,order_item_ids:rows.map(({id})=>id),note:str(body.note),approver_name:approverName,approver_title:approverTitle});
   return stageApprovals(db,order(db,current.project_id,current.id));
 }
 
@@ -360,7 +358,7 @@ function inspect(db,current,body,access) {
   const user=access.user;
   const reference=nextReference(db,current.project_id,"QC");
   const id=db.run(`INSERT INTO ops_inspections(order_item_id,stage,inspection_date,inspector_id,inspector_name,record,reference)
-    VALUES(?,?,?,?,?,?,?)`,[item.id,stage,date(body.inspection_date,true)||today(),user.id,user.display_name || user.username,encode(recordData),reference]).lastInsertRowid;
+    VALUES(?,?,?,?,?,?,?)`,[item.id,stage,date(body.inspection_date,true)||today(),user.id,str(body.inspector_name,200)||user.display_name || user.username,encode(recordData),reference]).lastInsertRowid;
   record(db,user,current.project_id,"inspection_recorded",id,{order_id:current.id,stage,result,release});
   return {id,reference,...recordData};
 }
@@ -404,7 +402,7 @@ function verifyShipment(db,orderId,items) {
   const qc=inspections(db,orderId);
   for (const item of orderItems(db,orderId).filter(({id})=>items.includes(id))) {
     const current=getItem(db,item.specification.project_id,item.item_id);
-    if (current.version!==item.specification.version) fail(409,"An order item changed. Review the revised specifications before loading.");
+    if (current.version!==item.specification.version) fail(409,"An order item changed. Review the revised specifications before loading.",{approval_required:true});
     fitForManufacturing(db,current);
     const decision=db.get("SELECT approved FROM ops_order_reviews WHERE order_item_id=? AND item_version=? AND stage='manufacturing'",
       [item.id,item.specification.version]);

@@ -173,7 +173,7 @@ export function Combobox({ label, selected, options, onSelect, onSearch, onAdd, 
   }, [selectedId, selectedLabel, resetKey]);
   const normalized = searchText(value);
   const matches = options.filter((option) => !normalized ||
-    [optionLabel(option),option.alternate_name,option.code,option.customer_project_code,option.contract_ref,option.address,...(option.search_aliases || [])]
+    [optionLabel(option),option.customer_name,option.alternate_name,option.code,option.customer_project_code,option.contract_ref,option.address,...(option.search_aliases || [])]
       .some((part) => searchText(part).includes(normalized))).slice(0, 30);
   const canAdd = onAdd && value.trim() && !matches.some((option) => searchText(optionLabel(option)) === normalized);
   const choices = matches.length + (canAdd ? 1 : 0);
@@ -221,7 +221,7 @@ export function Combobox({ label, selected, options, onSelect, onSearch, onAdd, 
     {shown && <div id={`${id}-choices`} className="pc-combo-options" role="listbox" aria-labelledby={`${id}-label`}>
       {matches.map((option, index) => <div key={option.id} id={`${id}-${index}`} role="option" aria-selected={active === index}
         onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}>
-        <bdi>{optionLabel(option)}</bdi>{(option.code || option.contract_ref || option.address) && <small dir="auto">{option.code || option.contract_ref || option.address}</small>}
+        <bdi>{optionLabel(option)}</bdi>{(option.customer_name || option.code || option.contract_ref || option.address) && <small dir="auto">{option.customer_name || option.code || option.contract_ref || option.address}</small>}
       </div>)}
       {canAdd && <div id={`${id}-${matches.length}`} role="option" aria-selected={active === matches.length}
         onMouseDown={(event) => event.preventDefault()} onClick={() => choose(matches.length)}>

@@ -426,7 +426,9 @@ function saveSpecifications(db,projectId,body,user) {
     }
     if (body.remember!==false && rememberSpecification(db,project.customer_id,source)) remembered++;
   }
-  return {saved:updated.length,applied,remembered};
+  const affected_orders=db.all(`SELECT DISTINCT o.id,o.reference,o.project_id FROM ops_orders o JOIN ops_order_items r ON r.order_id=o.id JOIN ops_items i ON i.id=r.item_id
+    WHERE o.project_id=? AND (json_extract(r.specification,'$.version')<>i.version OR COALESCE(json_extract(r.specification,'$.opening_description'),'')<>i.opening_description) ORDER BY o.id DESC`,[projectId]);
+  return {saved:updated.length,applied,remembered,affected_orders};
 }
 
 function cleanCommercial(input,before={}) {

@@ -17,12 +17,12 @@ export function useAction(request,onSaved) {
     setBusy(true);setError(null);
     try {
       const result=await request(path,{method,body});
-      onSaved?.(result);
+      await onSaved?.(result);
       return result;
     } catch(cause) {setError(cause);}
     finally {setBusy(false);}
   },[request,onSaved]);
-  return {run,busy,error};
+  return {run,busy,error,clearError:()=>setError(null)};
 }
 
 export function ErrorMessage({error}) {

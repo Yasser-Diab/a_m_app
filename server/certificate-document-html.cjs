@@ -302,8 +302,8 @@ function buildCertificateHtml(model) {
     .signoff { direction:ltr; display:grid; grid-template-columns:24mm minmax(0,1fr); gap:7mm; align-items:end; padding-block-start:7mm; color:${reportColors.muted}; }
     .stamp { inline-size:24mm; block-size:24mm; border:0.6pt solid #adc2c9; border-radius:50%;
       padding:4mm 2.5mm 0; font-size:8pt; text-align:center; }
-    .signatories { display:grid; grid-template-columns:repeat(var(--signatures),minmax(0,1fr)); gap:4mm; align-items:start; }
-    .signatory { justify-self:center; width:min(100%,34mm); min-width:0; padding-block-start:4mm;
+    .signatories { display:flex; flex-wrap:wrap; gap:6mm 4mm; align-items:start; }
+    .signatory { flex:1 1 28mm; min-width:0; padding-block-start:4mm;
       border-block-start:0.6pt solid #adc2c9; text-align:center; font-size:8pt; overflow-wrap:anywhere; }
     .signatory:only-child { justify-self:end; }
     .signatories[dir="rtl"] .signatory:only-child { justify-self:start; }

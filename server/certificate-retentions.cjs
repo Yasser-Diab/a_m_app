@@ -9,9 +9,9 @@ const categoryLabels={retention:['المحتجز','Retention'],works_insurance:[
 
 function retentionReport(db,access,query={}){
   const scope=scopeSql(access,'p.id'),project=idOf(query.project_id),customer=idOf(query.customer_id),q=lookup(query.q);
-  const revisions=db.all(`SELECT r.id,r.project_id,r.series_key,r.location_id,r.snapshot_json,p.name AS project,p.code,p.currency,
+  const revisions=db.all(`SELECT r.id,r.project_id,r.account_id,r.series_key,r.location_id,r.snapshot_json,p.name||CASE WHEN ca.number IS NOT NULL THEN ' #'||ca.number ELSE '' END AS project,p.code,p.currency,
     p.customer_id,c.display_name AS customer FROM cert_revisions r JOIN cert_projects p ON p.id=r.project_id
-    JOIN parties c ON c.id=p.customer_id WHERE ${scope.clause} AND r.status IN ('approved','issued') AND r.snapshot_json IS NOT NULL
+    JOIN parties c ON c.id=p.customer_id LEFT JOIN cert_accounts ca ON ca.id=r.account_id WHERE ${scope.clause} AND r.status IN ('approved','issued') AND r.snapshot_json IS NOT NULL
     AND (? IS NULL OR p.id=?) AND (? IS NULL OR p.customer_id=?)
     ORDER BY r.work_to DESC,COALESCE(r.root_id,r.id) DESC,r.revision DESC,r.id DESC`,[...scope.params,project,project,customer,customer]);
   const latest=new Map();
@@ -20,18 +20,18 @@ function retentionReport(db,access,query={}){
   for(const revision of latest.values()){
     if(q&&![revision.project,revision.code,revision.customer].some(value=>lookup(value).includes(q)))continue;
     const snapshot=withRetentionHistory(db,parse(revision.snapshot_json,{}));
-    const group=groups.get(revision.project_id)||{revision,holds:[],earned:0,recovered:0};
+    const groupKey=revision.project_id+':'+(revision.account_id||0),group=groups.get(groupKey)||{revision,holds:[],earned:0,recovered:0};
     group.earned+=toMinor(snapshot.totals?.cumulative_earned)||0;group.recovered+=toMinor(snapshot.totals?.cumulative_advance_recovery)||0;
     const profile=getProfile(db,revision.project_id),rules=new Map(profile.rules.map((rule,index)=>[ruleKey(rule,index),rule]));
     for(const hold of snapshot.totals?.holds||[]){const value=toMinor(hold.balance)||0;if(value<=0)continue;
       const current=rules.get(hold.key);
       group.holds.push({...hold,collection_date:current?current.collection_date||null:hold.collection_date,
         certificate_number:snapshot.official_number||snapshot.certificate_number||'',held_minor:value,revision_id:revision.id});}
-    groups.set(revision.project_id,group);
+    groups.set(groupKey,group);
   }
   const records=[];
   for(const {revision,holds,earned,recovered}of groups.values()){
-    const ledger=allocationLedger(db,revision.project_id,getProfile(db,revision.project_id),today());
+    const ledger=allocationLedger(db,revision.project_id,getProfile(db,revision.project_id),today(),{accountId:revision.account_id||null});
     const total=holds.reduce((sum,hold)=>sum+hold.held_minor,0);
     const cash=ledger.ordinary_minor+(ledger.advance_principal_minor||0);
     let covered=Math.min(total,Math.max(0,cash-(earned+recovered)));

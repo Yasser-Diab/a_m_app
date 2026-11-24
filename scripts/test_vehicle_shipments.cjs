@@ -35,17 +35,17 @@ async function main(){
   const first=await api(endpoint+'/shipment','POST',body);assert.equal(first.status,'released');
   assert.equal((await api(endpoint+'/shipment','POST',body)).id,first.id);assert.equal(db.get('SELECT COUNT(*) n FROM ops_loads').n,1);
   const snapshot=shipmentData(db,order,first.id),rows=shipmentRows(snapshot);assert.equal(rows.filter(row=>row.complete).length,1);assert.equal(rows[0].progress,100);assert.equal(rows[0].quantity,1);
-  assert.equal(rows.filter(row=>row.item?.id===other.id).length,1);assert.equal(rows.find(row=>row.item?.id===other.id).kind,'frames');assert.ok(rows.find(row=>row.item?.id===other.id).progress>0&&rows.find(row=>row.item?.id===other.id).progress<100);
+  assert.equal(rows.filter(row=>row.item?.id===other.id).length,1);assert.equal(rows.find(row=>row.item?.id===other.id).quantity,1);assert.ok(rows.find(row=>row.item?.id===other.id).remaining.some(part=>part.kind==='sliding'));assert.ok(rows.find(row=>row.item?.id===other.id).progress>0&&rows.find(row=>row.item?.id===other.id).progress<100);
   assert.deepEqual(rows.map(row=>row.tag),['1','2','3']);
   const tagged=structuredClone(snapshot);tagged.items[0].specification.technical.tag='W-01';assert.deepEqual(shipmentRows(tagged).map(row=>row.tag),['W-01','','']);
   tagged.items[1].specification.technical.tag='D-02';assert.deepEqual(shipmentRows(tagged).map(row=>row.tag),['W-01','D-02','']);
   assert.equal(snapshot.transport.driver_name,'Vehicle One Driver');assert.equal(rows.find(row=>row.part_id==='extra:packing').quantity,2.5);
   const source=require('../server/project-operations/core.cjs').operation(db,project.id),html=shipmentReport(db,source,order,first.id,'en',{}).html;
   assert.ok(html.includes('Delivery Note ')&&html.includes('<th><bdi dir="auto">Tag</bdi></th>'));
-  assert.ok(html.includes('Only the load on this vehicle')&&html.includes('100%')&&html.includes('ABC 123'));
+  assert.ok(!html.includes('Only the load on this vehicle')&&!html.includes('Shipment date')&&html.includes('100%')&&html.includes('ABC 123'));
   assert.ok(html.includes('Building B-41')&&html.includes('Building / sector'));
   assert.equal((html.match(/class="group-subtotal"/g)||[]).length,2);
-  assert.ok(html.includes('Complete opening area m²')&&html.includes('1.5')&&html.includes('Partially loaded openings'));
+  assert.ok(html.includes('Total')&&html.includes('2 openings')&&html.includes('Total general items'));assert.ok(!html.includes('Loaded quantity')&&!html.includes('Component')&&!html.includes('Group 1 of'));
   const plan=require('../server/project-operations/reports.cjs').report(db,source,order,{kind:'loading',locale:'en'},{}).html;
   const work=require('../server/project-operations/reports.cjs').report(db,source,require('../server/project-operations/production.cjs').order(db,project.id,order.id),{kind:'manufacturing',classification:'manufacturing',locale:'en'},{}).html;
   for(const output of [plan,work]){assert.ok(output.includes('Building B-41'));assert.equal((output.match(/class="group-subtotal"/g)||[]).length,2);assert.ok(output.includes('Estimated area m²'));}
@@ -56,14 +56,14 @@ async function main(){
   const regroupedHtml=shipmentReport(db,source,order,first.id,'en',{}).html;
   assert.deepEqual([...regroupedHtml.matchAll(/<tr><td><bdi dir="ltr">(\d+)<\/bdi><\/td><td>/g)].map(match=>match[1]),['1','2','3'],'Serial numbers follow displayed specification groups');
   db.run('UPDATE ops_loads SET shipment_data=? WHERE id=?',[originalSnapshot,first.id]);
-  assert.ok(!html.includes('Sliding blades')&&!html.includes('Remaining'),'Unloaded components and balances must not appear');
+  assert.ok(html.includes('Remaining:')&&html.includes('Sliding blades'),'Remaining components appear only as notes');
   await api(endpoint+'/loading-settings','PATCH',{...settings,version:1,rows:[]},409);
   await api(endpoint+'/shipment','POST',{...body,command_key:crypto.randomUUID(),reference:'OVERLOAD',parts:[{part_id:other.id+':frames',quantity:999}]},409);
   assert.equal(db.get('SELECT COUNT(*) n FROM ops_loads').n,1);
   const next=await api(endpoint+'/shipment-preparation','POST',{});assert.notEqual(next.loading_reference,first.reference);
   assert.equal(next.parts.find(part=>part.part_id==='extra:packing').remaining,7.5);
   const second=await api(endpoint+'/shipment','POST',{command_key:crypto.randomUUID(),reference:next.loading_reference,driver_name:'Vehicle Two Driver',vehicle_plate:'XYZ 456',responsible:{loading:'Dispatch lead'},parts:next.parts.filter(p=>p.remaining>0).map(p=>({part_id:p.part_id,quantity:p.remaining}))});
-  assert.equal(second.status,'shipped');assert.equal((await api(endpoint)).parts.every(p=>p.remaining===0),true);
+  assert.equal(second.status,'shipped');assert.equal(shipmentRows(shipmentData(db,order,second.id)).filter(row=>row.item)[0].progress,100);assert.ok(shipmentRows(shipmentData(db,order,second.id)).every(row=>!row.item||row.quantity>0));assert.equal((await api(endpoint)).parts.every(p=>p.remaining===0),true);
   assert.equal(new Set(shipmentRows(shipmentData(db,order,second.id)).filter(row=>row.item).map(row=>row.tag)).size,1);
   assert.equal(shipmentData(db,order,first.id).transport.driver_name,'Vehicle One Driver');assert.ok(!shipmentReport(db,source,order,second.id,'en',{}).html.includes('Complete window'),'Previously shipped openings must not reappear on the next vehicle report');
   assert.equal(db.all('PRAGMA foreign_key_check').length,0);

@@ -8005,7 +8005,7 @@ function writePdf(html, outputPath, data = {}) {
   const footerContact = brandingFooterContact(branding);
   const footerCenterContact = branding.website || footerContact;
   const locale = reportLocaleFrom(data.report_language);
-  const footerMeta = {...footerMetadata(data,branding,APP_VERSION),footerContact:footerCenterContact};
+  const footerMeta = {...footerMetadata(data,branding,APP_VERSION),footerContact:footerCenterContact,landscape:Boolean(data.landscape)};
   if (
     electronRuntime &&
     typeof electronRuntime === "object" &&
@@ -8024,7 +8024,7 @@ function writePdf(html, outputPath, data = {}) {
         const {prepareOperationsPrint}=require('./project-operations/print-layout.cjs');
         await win.webContents.executeJavaScript(`(${prepareOperationsPrint.toString()})()`);
         const pdf = await win.webContents.printToPDF({
-          landscape: false,
+          landscape: Boolean(data.landscape),
           printBackground: true,
           displayHeaderFooter: true,
           headerTemplate: "<div></div>",

@@ -28,6 +28,7 @@ const {reconcile:reconcileOperations} = require("./project-operations/finance.cj
 function initializeCertificates(database) {
   database.transaction(() => {
     database.exec(fs.readFileSync(path.join(__dirname, "certificate-schema.sql"), "utf8"));
+    require('./certificate-accounts.cjs').initialize(database);
     require('./document-edit-window.cjs').initialize(database);
     initializeCertificateNumbers(database);
     if (!database.all("PRAGMA table_info(cert_receipt_allocations)").some(({name}) => name === "allocated_at"))
@@ -77,14 +78,16 @@ function projectsResponse(database, req, access) {
   const matches = lookup(req.query.q);
   const rows = database.all(`
     SELECT id,name,alternate_name,customer_id,code,address,contract_ref,contract_date,currency,
-      json_extract(raw_json,'$.name_history') AS name_history,json_extract(raw_json,'$.customer_project_code') AS customer_project_code FROM cert_projects
+      json_extract(raw_json,'$.name_history') AS name_history,json_extract(raw_json,'$.customer_project_code') AS customer_project_code,
+      (SELECT display_name FROM parties WHERE parties.id=cert_projects.customer_id) AS customer_name FROM cert_projects
     WHERE ${scope.clause} AND (? IS NULL OR customer_id=?)
       AND (? = '' OR search_name LIKE ? OR alternate_name LIKE ? OR code LIKE ? OR contract_ref LIKE ? OR address LIKE ?
         OR EXISTS (SELECT 1 FROM json_each(cert_projects.raw_json,'$.name_history') WHERE value LIKE ?)
-        OR json_extract(raw_json,'$.customer_project_code') LIKE ?)
+        OR json_extract(raw_json,'$.customer_project_code') LIKE ?
+        OR EXISTS(SELECT 1 FROM parties WHERE parties.id=cert_projects.customer_id AND (search_name LIKE ? OR display_name LIKE ?)))
     ORDER BY created_at DESC,id DESC ${customerId&&req.query.all==='1'?'':'LIMIT 200'}
   `, [...scope.params,customerId,customerId,matches,`%${matches}%`,`%${str(req.query.q)}%`,`%${matches}%`,`%${str(req.query.q)}%`,
-    `%${str(req.query.q)}%`,`%${str(req.query.q)}%`,`%${str(req.query.q)}%`]);
+    `%${str(req.query.q)}%`,`%${str(req.query.q)}%`,`%${str(req.query.q)}%`,`%${matches}%`,`%${str(req.query.q)}%`]);
   return rows.map(({name_history,...row}) => ({...row,search_aliases:parse(name_history,[])}));
 }
 
@@ -101,17 +104,18 @@ function certificateList(database, req, access) {
   const displayStatus = "CASE WHEN r.status='historical' THEN CASE WHEN lw.approved_at IS NULL THEN 'unapproved' ELSE 'approved' END ELSE r.status END";
   const where = `${scope.clause} AND (? IS NULL OR r.project_id=?)
     AND (? = '' OR ${displayStatus}=? OR (? = 'historical' AND r.status='historical'))
+    AND (?=0 OR r.account_id IS ?)
     AND (? = '' OR cp.search_name LIKE ? OR p.search_name LIKE ? OR r.legacy_number LIKE ?
       OR CAST(r.official_number AS TEXT) LIKE ? OR CAST(r.reserved_number AS TEXT) LIKE ?)`;
-  const params = [...scope.params,projectId,projectId,val,val,val,match,like,like,like,like,like];
-  const joins = "FROM cert_revisions r JOIN cert_projects cp ON r.project_id=cp.id JOIN parties p ON p.id=cp.customer_id LEFT JOIN cert_legacy_workflow lw ON lw.revision_id=r.id";
+  const params = [...scope.params,projectId,projectId,val,val,val,Object.hasOwn(req.query,'account_id')?1:0,idOf(req.query.account_id),match,like,like,like,like,like];
+  const joins = "FROM cert_revisions r JOIN cert_projects cp ON r.project_id=cp.id JOIN parties p ON p.id=cp.customer_id LEFT JOIN cert_accounts ca ON ca.id=r.account_id LEFT JOIN cert_legacy_workflow lw ON lw.revision_id=r.id";
   const total = database.get(`SELECT count(*) AS total ${joins} WHERE ${where}`,params).total;
   const items = database.all(`
     SELECT r.id,r.project_id,r.series_key,r.revises_id,${displayStatus} AS status,r.pdf_status,r.type,r.revision,r.version,r.official_number,r.reserved_number,
       r.legacy_number,COALESCE(json_extract(lw.edited_json,'$.header.work_to'),r.work_to) AS work_to,r.collection_cutoff,r.issued_at,r.updated_at,r.header_json,
       COALESCE(json_extract(lw.edited_json,'$.totals.current'),json_extract(r.snapshot_json,'$.totals.current')) AS current,
       json_extract(r.snapshot_json,'$.totals.cumulative_payable') AS cumulative_payable,
-      cp.name AS project_name,p.display_name AS customer_name
+      cp.name||CASE WHEN ca.number IS NOT NULL THEN ' #'||ca.number ELSE '' END AS project_name,p.display_name AS customer_name
     ${joins} WHERE ${where} ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?
   `, [...params,pageSize,(page-1)*pageSize]).map(({header_json,series_key,revises_id,...row}) => ({...row,
     certificate_number:certificateNumber(database,{...row,series_key,revises_id}),header:parse(header_json)}));
@@ -124,12 +128,13 @@ function normalizeListStatus(status) {
   return status;
 }
 
-function sourceList(database, project) {
+function sourceList(database, project,accountId=null) {
+  require('./certificate-accounts.cjs').checked(database,project.id,accountId);
   const certificates = database.all(`
     SELECT id,project_id,series_key,revises_id,reserved_number,official_number,legacy_number,revision,work_to,snapshot_json
-    FROM cert_revisions WHERE project_id=? AND status IN ('approved','issued','historical')
+    FROM cert_revisions WHERE project_id=? AND account_id IS ? AND status IN ('approved','issued','historical')
     ORDER BY work_to DESC,id DESC LIMIT 12
-  `, [project.id]).map(({snapshot_json,...row}) => {
+  `, [project.id,accountId]).map(({snapshot_json,...row}) => {
     const snapshot=snapshot_json?parse(snapshot_json):certificateDocumentInput(database,getRevision(database,row.id));
     return {...row,label:`#${certificateNumber(database,row)}${row.revision > 1 ? ` · R${row.revision}` : ""}`,
     lines:snapshot.lines.map(({identity,location_id,location,work_type,work_item,description,mode,
@@ -282,7 +287,7 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     }
     const cutoff = options.receipts !== "0" && options.collections_through ? date(options.collections_through) : null;
     const paymentDetails = cutoff ? allocationLedger(database, model.project_id, getProfile(database, model.project_id, cutoff), cutoff, {
-      locationId:header.location_id || null,
+      locationId:header.location_id || null,accountId:header.account_id||null,
     }) : null;
     const project = model.project?.code ? model.project : {...model.project,code:getProject(database,model.project_id).code};
     const customerId = model.customer?.id || project.customer_id || getProject(database,model.project_id).customer_id;
@@ -437,9 +442,11 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
     const baseline = database.get(`SELECT id,official_number,revision,work_to,collection_cutoff FROM cert_revisions
       WHERE project_id=? AND status='issued' ORDER BY work_to DESC,issued_at DESC,id DESC LIMIT 1`,[row.id]);
     res.json({...row,customer:getCustomer(database,row.customer_id),locations:projectLocations(database,row.id),
+      accounts:require('./certificate-accounts.cjs').list(database,row),
       work_types:profile.settings.work_types,work_items:profile.settings.work_items,
       settings:{...profile, latest_version:latestVersion(database,row.id)},baseline});
   });
+  router.post('/projects/:projectId/accounts',(req,res)=>{const {project:row,access}=project(req,'create');res.status(201).json(database.transaction(()=>require('./certificate-accounts.cjs').create(database,row,req.body,access.user)));});
   router.patch("/projects/:projectId",(req,res) => {
     const {project:row,access} = project(req,"manage_settings");
     res.json(database.transaction(() => {
@@ -482,12 +489,12 @@ function registerCertificateRoutes(app, database, dataDir, { branding = () => ({
   });
   router.get("/projects/:projectId/sources",(req,res) => {
     const {project:row} = project(req,"create");
-    res.json(sourceList(database,row));
+    res.json(sourceList(database,row,idOf(req.query.account_id)));
   });
   router.get("/projects/:projectId/collections",(req,res) => {
     const {project:row} = project(req,"view_collections");
     const cutoff = date(req.query.cutoff,true) || today();
-    const ledger = allocationLedger(database,row.id,getProfile(database,row.id,cutoff),cutoff);
+    const ledger = allocationLedger(database,row.id,getProfile(database,row.id,cutoff),cutoff,{accountId:Object.hasOwn(req.query,'account_id')?idOf(req.query.account_id):undefined});
     res.json(collectionResponse(database,row,ledger,cutoff));
   });
   router.post("/projects/:projectId/collections",(req,res) => {

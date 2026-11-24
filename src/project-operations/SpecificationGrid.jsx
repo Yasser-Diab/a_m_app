@@ -1,5 +1,6 @@
 import {useCallback,useEffect,useId,useLayoutEffect,useMemo,useRef,useState} from "react";
 import {createPortal} from "react-dom";
+import ApprovalReview from './ApprovalReview.jsx';
 import {Copy,Filter,Maximize2,Minimize2,Save,Search} from "lucide-react";
 import {
   expandSmartClipboardGrid,fillSmartSelectionDownRows,isSmartFillDownShortcut,
@@ -62,17 +63,17 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
   const [remember,setRemember]=useState(true);
   const [message,setMessage]=useState("");
   const [problem,setProblem]=useState(null);
+  const [affectedOrders,setAffectedOrders]=useState([]),[approvalOrder,setApprovalOrder]=useState(null);
   const [busy,setBusy]=useState(false);
   const history=useRef([]);
   const redo=useRef([]);
   const grid=useRef(null);
   const dragging=useRef(false);
   const editAllowed=can("edit");
-  const allRecords=items.map((item)=>applySpecificationEdits(item,patches[item.id]));
+  const allRecords=useMemo(()=>items.map(item=>patches[item.id]?applySpecificationEdits(item,patches[item.id]):item),[items,patches]);
   const value=(row,key)=>key==='opening_description'?(row.opening_description||row.commercial.description):key==="category"||key==="system"?row[key]:row.technical[key];
   const filterValue=(row,key)=>String(value(row,key)??'');
-  const records=allRecords.filter(row=>Object.entries(filters).every(([key,values])=>values.includes(filterValue(row,key))));
-  if(sort)records.sort((a,b)=>filterValue(a,sort.key).localeCompare(filterValue(b,sort.key),locale,{numeric:true})*sort.direction);
+  const records=useMemo(()=>{const list=allRecords.filter(row=>Object.entries(filters).every(([key,values])=>values.includes(filterValue(row,key))));if(sort)list.sort((a,b)=>filterValue(a,sort.key).localeCompare(filterValue(b,sort.key),locale,{numeric:true})*sort.direction);return list;},[allRecords,filters,sort,locale]);
   const virtual=fullscreen&&records.length>200;
   const offsets=useMemo(()=>{const result=[0];for(const row of records)result.push(result.at(-1)+(heights.current.get(row.id)||64));return result;},[items,filters,sort,patches,heightTick]);
   const virtualStart=virtual?Math.max(0,offsetIndex(offsets,viewport.top)-8):0;
@@ -86,19 +87,18 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
   const selectedTypeKey=selected?JSON.stringify([...new Set(records.slice(Math.min(selected.start.row,selected.focus.row),Math.max(selected.start.row,selected.focus.row)+1).map(row=>row.category+':'+row.system))].sort()):null;
   // Let the double-click finish before moving columns, and keep the editor's cell stable.
   useEffect(()=>{if(editing)return;const timer=setTimeout(()=>setColumnTypeKey(selectedTypeKey),550);return()=>clearTimeout(timer);},[selectedTypeKey,Boolean(editing)]);
-  const selectedTypes=columnTypeKey?new Set(JSON.parse(columnTypeKey)):null;
-  const driverRows=selectedTypes?records.filter(row=>selectedTypes.has(row.category+':'+row.system)):records;
+  const driverRows=useMemo(()=>{const types=columnTypeKey?new Set(JSON.parse(columnTypeKey)):null;return types?records.filter(row=>types.has(row.category+':'+row.system)):records;},[records,columnTypeKey]);
   const essentials=new Set(['leaves','fixed_panels','screen','glazing','glass_type','hinge_side','opening_direction','lock_right','lock_left','central_lock_handle','vent_opening','panel_measurement_basis']);
-  const automatic=[...definitions].filter(([key,field])=>driverRows.some(row=>fieldAvailable(catalogue,row,key)&&
+  const automatic=useMemo(()=>[...definitions].filter(([key,field])=>driverRows.some(row=>fieldAvailable(catalogue,row,key)&&
     (essentials.has(key)||field.panelBasis||enabled(row.technical[key])||catalogue.dependencies[row.category]?.[key]&&enabled(row.technical[catalogue.dependencies[row.category][key]]))))
-    .map(([key])=>key);
-  const whole=[...definitions.keys()].filter(key=>mainKeys.includes(key)||catalogue.common.some(field=>field.key===key)||
+    .map(([key])=>key),[definitions,driverRows,catalogue]);
+  const whole=useMemo(()=>[...definitions.keys()].filter(key=>mainKeys.includes(key)||catalogue.common.some(field=>field.key===key)||
     allRecords.some(row=>catalogue.categories.find(category=>category.id===row.category)?.fields.some(field=>field.key===key)||
-      catalogue.categories.find(category=>category.id===row.category)?.systems.find(system=>system.id===row.system)?.fields.some(field=>field.key===key)));
-  const columns=[...new Set([...mainKeys,...additional,...(wholeTable?whole:automatic),...Object.keys(filters)])];
-  const picker=[...definitions.entries()].filter(([key])=>!columns.includes(key))
+      catalogue.categories.find(category=>category.id===row.category)?.systems.find(system=>system.id===row.system)?.fields.some(field=>field.key===key))),[definitions,allRecords,catalogue]);
+  const columns=useMemo(()=>[...new Set([...mainKeys,...additional,...(wholeTable?whole:automatic),...Object.keys(filters)])],[additional,wholeTable,whole,automatic,filters]);
+  const picker=useMemo(()=>[...definitions.entries()].filter(([key])=>!columns.includes(key))
     .filter(([key])=>driverRows.some((row)=>fieldAvailable(catalogue,row,key)))
-    .sort(([,a],[,b])=>a[locale].localeCompare(b[locale],locale));
+    .sort(([,a],[,b])=>a[locale].localeCompare(b[locale],locale)),[definitions,columns,driverRows,catalogue,locale]);
   const definitionFor=(row,key)=>special[key]||catalogue.categories.find(category=>category.id===row.category)?.systems.find(system=>system.id===row.system)?.fields.find(field=>field.key===key)||
     catalogue.categories.find(category=>category.id===row.category)?.fields.find(field=>field.key===key)||definitions.get(key);
   const names=(row,key)=>optionPairs(row,key,definitionFor(row,key),catalogue,locale,t);
@@ -323,6 +323,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
       const result=Object.keys(source).length||applyMatches?await request(path+"/specifications",{method:"POST",
         body:{rows:Object.values(source),remember,source_id:applyMatches?active?.id:undefined,apply_matches:applyMatches}}):{saved:0};
       setPatches({});history.current=[];redo.current=[];
+      setAffectedOrders(result.affected_orders||[]);
       setMessage(applyMatches?t(`تم تحديث ${result.applied} من البنود المطابقة.`,`${result.applied} matching items updated.`)
         :t(`تم حفظ ${result.saved} من الصفوف.`,`${result.saved} rows saved.`));
       reload();
@@ -330,8 +331,8 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
     finally {setBusy(false);}
   }
   const waiting=Object.keys(patches).length;
-  const searchResults=findSmartTableMatches({rows:records.map(row=>({_gridId:String(row.id),...Object.fromEntries(columns.map(key=>[key,show(row,key)]))})),columnOrder:columns,searchText})
-    .map(match=>({...match,replaceable:editable(records[match.rowIndex],match.columnKey)&&definitionFor(records[match.rowIndex],match.columnKey).type!=='sides'}));
+  const searchResults=useMemo(()=>!searchOpen||!searchText.trim()?[]:findSmartTableMatches({rows:records.map(row=>({_gridId:String(row.id),...Object.fromEntries(columns.map(key=>[key,show(row,key)]))})),columnOrder:columns,searchText})
+    .map(match=>({...match,replaceable:editable(records[match.rowIndex],match.columnKey)&&definitionFor(records[match.rowIndex],match.columnKey).type!=='sides'})),[searchOpen,searchText,records,columns,catalogue,locale,editAllowed,busy]);
   const currentMatch=searchResults[Math.max(0,Math.min(searchIndex,searchResults.length-1))];
   const changeSearch=useCallback(text=>{setSearchText(text);setSearchIndex(0);},[]);
   const jump=(match,index)=>{setSearchIndex(index);select({row:match.rowIndex,col:columns.indexOf(match.columnKey)});};
@@ -363,6 +364,8 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
     }catch(error){setProblem(error);}
   }
   return <section className={`ops-spec-grid pc-stack${fullscreen?" ops-grid-full":""}`} aria-label={t("جدول مواصفات البنود","BOQ specification worksheet")}>
+    {editAllowed&&affectedOrders.length>0&&<div className="pc-toolbar ops-approval-followup"><span>{t('أوامر تحتاج مراجعة التعديلات','Orders with changes to review')}</span>{affectedOrders.map(order=><button key={order.id} type="button" disabled={!can('release')} onClick={()=>setApprovalOrder(order)}>{order.reference}</button>)}</div>}
+    {approvalOrder&&<ApprovalReview endpoint={path+'/orders/'+approvalOrder.id} {...{request,t}} close={()=>setApprovalOrder(null)} saved={()=>{setAffectedOrders(list=>list.filter(order=>order.id!==approvalOrder.id));reload();}}/>}
     <div className="pc-toolbar ops-grid-tools">
       <button type="button" aria-pressed={wholeTable} onClick={()=>{setWholeTable(!wholeTable);setSelected(null);setEditing(null);}}>{wholeTable?t('أعمدة حسب التحديد','Columns for selection'):t('جميع الأعمدة','All columns')}</button>
       <button type="button" onClick={()=>setSearchOpen(true)}><Search size={15}/>{t('بحث في الجدول','Search Table')} <kbd>Ctrl+F</kbd></button>

@@ -459,7 +459,7 @@ async function main() {
     const signed=await api(compactEndpoint+"/report","POST",{kind:"manufacturing",classification:"manufacturing"});
     assert.ok(!signed.html.includes("Approved")&&!signed.html.includes("Approval status"));
     const approvalStatus=await api(compactEndpoint+"/report","POST",{kind:"approvals",locale:"en"});
-    assert.ok(approvalStatus.html.includes("Approval Status")&&approvalStatus.html.includes("Approved"));
+    assert.ok(approvalStatus.html.includes("Approval Status")&&approvalStatus.html.includes("approval-matrix")&&approvalStatus.html.includes("✓"));
     const manifest=await api(compactEndpoint+"/report","POST",{kind:"loading",locale:"ar"});
     assert.ok(manifest.html.includes('dir="rtl"><bdi dir="ltr">1100</bdi><span>×</span><bdi dir="ltr">1500</bdi>'));
     assert.ok(manifest.html.includes('dir="rtl"><bdi dir="ltr">1200</bdi><span>×</span><bdi dir="ltr">1500</bdi>'));

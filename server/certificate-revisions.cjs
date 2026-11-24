@@ -20,7 +20,7 @@ function normalizeHeader(input = {}, project, profile, originalType) {
   const header = {type, work_from: workFrom, work_to: workTo, collection_cutoff: cutoff,
     locale: input.locale === "en" ? "en" : "ar", currency: project.currency,
     contract_ref: str(input.contract_ref ?? project.contract_ref), location_id: idOf(input.location_id),
-    title: str(input.title), notes: str(input.notes, 3000),
+    title: str(input.title), notes: str(input.notes, 3000),account_id:idOf(input.account_id),
     paper_size: input.paper_size === "Letter" ? "Letter" : "A4",
     output_mode: ["auto", "cover", "detail", "multi"].includes(input.output_mode) ? input.output_mode : profile.settings.output_mode,
     group_work_types: input.group_work_types ?? profile.settings.group_work_types ?? false,
@@ -49,7 +49,7 @@ function normalizeHeader(input = {}, project, profile, originalType) {
   return header;
 }
 
-const scopeKey = (header) => lookup(header.contract_ref);
+const scopeKey = (header) => (header.account_id?'account:'+header.account_id+':':'')+lookup(header.contract_ref);
 
 function normalizeLines(database, project, header, candidates) {
   if (!Array.isArray(candidates) || candidates.length > 2500) fail(400, "Provide up to 2,500 work rows");
@@ -131,6 +131,7 @@ function replaceLines(database, id, lines) {
 }
 
 function scopeBaseline(database, row, header) {
+  require('./certificate-accounts.cjs').checked(database,row.project_id,header.account_id);
   if (row.revises_id) {
     const parent = getRevision(database, row.revises_id);
     if (parent.status === "historical") return legacyCertificateInput(database,parent,{useEdits:false});
@@ -157,7 +158,7 @@ function certificateDocumentInput(database, row, lines = null) {
     return {...parse(row.snapshot_json),version:row.version,pdf_status:row.pdf_status};
   }
   const header = parse(row.header_json);
-  const project = getProject(database, row.project_id);
+  const project = require('./certificate-accounts.cjs').display(getProject(database, row.project_id),require('./certificate-accounts.cjs').checked(database,row.project_id,header.account_id));
   const customer = getCustomer(database, project.customer_id);
   const profile = getProfile(database, project.id, row.rules_version == null ? today() : header.work_to, row.rules_version);
   if (header.rule_override) profile.rules = header.rule_override;
@@ -167,7 +168,7 @@ function certificateDocumentInput(database, row, lines = null) {
     profile.settings={...profile.settings,collections_basis:baseline?.rule_settings?.collections_basis||profile.settings.collections_basis};
   }
   const ledger = allocationLedger(database,project.id,profile,header.collection_cutoff,{workCutoff:header.work_to,
-    previousCutoff:baseline?.header?.collection_cutoff ?? DATE_FLOOR,locationId:header.location_id,revisionId:row.id,seriesKey:row.series_key});
+    previousCutoff:baseline?.header?.collection_cutoff ?? DATE_FLOOR,locationId:header.location_id,revisionId:row.id,seriesKey:row.series_key,accountId:header.account_id||null});
   const calculated = calculateValuation(lines || getLines(database, row.id), baseline, profile, ledger,
     {recoverAdvance:header.recover_advance===true,correction:row.type==='correction'});
   const validation = [...calculated.errors];
@@ -236,6 +237,7 @@ function createDraft(database, project, body, user, revision = {}) {
   const supplied = body.header || {};
   const profile = getProfile(database, project.id);
   const header = normalizeHeader(supplied, project, profile, revision.type);
+  require('./certificate-accounts.cjs').checked(database,project.id,header.account_id);
   const seriesKey = scopeKey(header);
   const series = database.get("SELECT final_revision_id FROM cert_series WHERE project_id=? AND reference=?", [project.id, seriesKey]);
   if (series?.final_revision_id && !revision.revisesId) fail(409, "The series was finalized. Issue an authorized reopening before starting new work");
@@ -253,6 +255,7 @@ function createDraft(database, project, body, user, revision = {}) {
     header.type, header.locale, header.location_id, header.work_to, header.collection_cutoff, encode(header), profile.version, user.id,
     revision.revisesId?null:nextSeriesNumber(database,{project_id:project.id,series_key:seriesKey})]);
   if (!revision.rootId) database.run("UPDATE cert_revisions SET root_id=id WHERE id=?", [id]);
+  database.run('UPDATE cert_revisions SET account_id=? WHERE id=?',[header.account_id,id]);
   replaceLines(database, id, rows);
   audit(database, user, "draft_created", {projectId: project.id, revisionId: id, reason: revision.reason});
   return getRevision(database, id);
@@ -276,6 +279,7 @@ function editApproved(db,row,body,user,grant){const window=require('./document-e
  window.revision(db,'certificate',row.id,'Certificate '+certificateNumber(db,row),before,certificateDocumentInput(db,updated),user);return updated;
 }
 function saveDraft(database, row, body, user, grant) {
+  if(['approved','issued','historical'].includes(row.status)&&Object.hasOwn(body.header||{},'account_id')&&idOf(body.header.account_id)!==(row.account_id||null))fail(409,'A finalized certificate must keep its original project account');
   if((["approved","issued"].includes(row.status))||(row.status==="historical"&&legacySnapshot(database,row,true).approval_at)){if(!grant.capabilities.includes("approve"))fail(403,"Approval permission is required to edit a finalized certificate");return editApproved(database,row,body,user,grant);}
   if (row.status === "historical") return saveLegacyDraft(database,row,body,user);
   if (!["draft","in_review"].includes(row.status)) fail(409, "Approved certificates require a correction");
@@ -290,6 +294,7 @@ function saveDraft(database, row, body, user, grant) {
     fail(403, "Certificate financial settings permission is required");
   const profile = getProfile(database, project.id, version == null ? today() : date(changes.work_to, true) || today(), version);
   const header = normalizeHeader(changes, project, profile, row.type);
+  require('./certificate-accounts.cjs').checked(database,project.id,header.account_id);
   checkedLocation(database, project.id, header.location_id);
   if (row.revises_id && (scopeKey(header) !== row.series_key || header.location_id !== row.location_id))
     fail(400, "A correction must use the issued certificate scope");
@@ -303,6 +308,7 @@ function saveDraft(database, row, body, user, grant) {
   [reference,header.type,header.locale,header.location_id,header.work_to,header.collection_cutoff,encode(header),profile.version,
     !row.revises_id&&reference!==row.series_key?nextSeriesNumber(database,{project_id:project.id,series_key:reference}):row.reserved_number,row.id]);
   replaceLines(database, row.id, rows);
+  database.run('UPDATE cert_revisions SET account_id=? WHERE id=?',[header.account_id,row.id]);
   audit(database, user, "draft_saved", {projectId: project.id, revisionId: row.id,
     reason: header.override_reason, details: {row_count:rows.length}});
   return getRevision(database, row.id);
@@ -364,7 +370,7 @@ function missingAdvanceRecovery(database,row,source) {
   profile.rules=[rule];
   profile.settings={...profile.settings,collections_basis:source.rule_settings?.collections_basis||profile.settings.collections_basis};
   const ledger=allocationLedger(database,row.project_id,profile,source.header.collection_cutoff,
-    {workCutoff:source.header.work_to,previousCutoff:source.header.collection_cutoff,locationId:source.header.location_id,seriesKey:row.series_key});
+    {workCutoff:source.header.work_to,previousCutoff:source.header.collection_cutoff,locationId:source.header.location_id,seriesKey:row.series_key,accountId:source.header.account_id||null});
   const preview=calculateValuation([],source,profile,ledger,{recoverAdvance:true});
   return preview.totals.advance_recovery>0?{rate:Number(rule.rate),amount:preview.totals.advance_recovery,payable:preview.totals.cumulative_payable}:null;
 }

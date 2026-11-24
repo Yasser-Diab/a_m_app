@@ -1,3 +1,4 @@
+import SettingsCategory from './settings-category.jsx';
 import SignatureSettings from './signature-directory.jsx';
 import React, {
   lazy,
@@ -4535,7 +4536,7 @@ function App() {
                 onSignInAgain={logout}
                 onOpenUsers={() => {
                   requestTabChange("settings");
-                  window.setTimeout(() => document.getElementById("settings-users")?.scrollIntoView({ block: "start" }), 0);
+                  window.setTimeout(() => { const panel=document.getElementById("settings-users");if(panel?.closest("details"))panel.closest("details").open=true;panel?.scrollIntoView({block:"start"}); }, 0);
                 }}
               />
             </Suspense>
@@ -18575,8 +18576,8 @@ function SettingsView({
     <div
       className={
         subscriptionOnly
-          ? "page-stack settings-subscription-only"
-          : "page-stack"
+          ? "page-stack settings-page settings-subscription-only"
+          : "page-stack settings-page"
       }
     >
       <ManagerEventCenter
@@ -18584,8 +18585,11 @@ function SettingsView({
         onAction={onManagerEventAction}
         uiLanguage={uiLanguage}
       />
-      {!subscriptionOnly&&canEditCompanySettings&&<SignatureSettings api={api} user={currentUser} uiLanguage={uiLanguage}/>}
-      <section className="panel application-version-panel">
+      <div className="settings-intro"><h2>{l("إعدادات مساحة العمل","Workspace settings")}</h2><p>{l("اختر القسم الذي تريد تعديله. تظل بياناتك المدخلة محفوظة عند طي الأقسام.","Open a category to adjust its settings. Collapsing a category keeps your current entries.")}</p></div>
+      <div className="settings-categories">
+      {!subscriptionOnly&&canEditCompanySettings&&<SettingsCategory id="signatures" icon={Users} title={l("الأسماء والتوقيعات","Names and signatures")} description={l("الأسماء المحفوظة والمناصب والتوقيعات الافتراضية","Saved names, job titles and default signatures")}><SignatureSettings api={api} user={currentUser} uiLanguage={uiLanguage}/></SettingsCategory>}
+      <SettingsCategory id="updates" icon={RefreshCw} title={l("إصدار التطبيق والتحديثات","App and updates")} description={l("الإصدار المثبت والتحديثات المتاحة","Installed version and available updates")}>
+        <section className="panel application-version-panel">
         <div className="panel-head">
           <h2>
             <RefreshCw size={18} /> {t("إصدار التطبيق والتحديثات")}
@@ -18636,7 +18640,9 @@ function SettingsView({
         )}
         {updateInfo?.error && <p className="error-text">{updateInfo.error}</p>}
       </section>
-      <section className="panel language-settings-panel">
+      </SettingsCategory>
+      <SettingsCategory id="language" icon={Languages} title={l("اللغة","Language")} description={l("لغة الواجهة والتقارير","Interface and report languages")}>
+        <section className="panel language-settings-panel">
         <div className="panel-head">
           <h2>
             <Languages size={18} /> {t("اللغة")}
@@ -18681,7 +18687,9 @@ function SettingsView({
           </Field>
         </div>
       </section>
+      </SettingsCategory>
       {desktopSettings && (
+        <SettingsCategory id="report-files" icon={FileDown} title={l("حفظ التقارير","Report files")} description={l("مجلدات الحفظ والمعاينة والطباعة","Save folders, previews and printing")}>
         <section className="panel report-save-settings-panel">
           <div className="panel-head">
             <h2>
@@ -18744,8 +18752,10 @@ function SettingsView({
               )}
           </div>
         </section>
+      </SettingsCategory>
       )}
-      <section className="panel settings-grid">
+      <SettingsCategory id="connection" icon={Server} title={l("الاتصال والبيانات والمظهر","Connection, data and appearance")} description={l("إعدادات السيرفر وقاعدة البيانات والثيم","Server, database and theme preferences")}>
+        <section className="panel settings-grid">
         <div className="server-settings-panel">
           <div className="panel-head">
             <h2>
@@ -18797,7 +18807,7 @@ function SettingsView({
                         updateDesktopSetting("startServerOnLaunch", event.target.checked)
                       }
                     />
-                    <span>Start the local server automatically when this desktop app opens</span>
+                    <span>{l("تشغيل السيرفر المحلي تلقائيًا عند فتح التطبيق", "Start the local server automatically when this desktop app opens")}</span>
                   </label>
                 )}
                 <label className={desktopSettings.supportsOpenAtLogin ? "" : "disabled"}>
@@ -18813,8 +18823,8 @@ function SettingsView({
                   />
                   <span>
                     {desktopSettings.supportsOpenAtLogin
-                      ? "Open the app when Windows starts"
-                      : "System sign-in startup is not available here"}
+                      ? l("فتح التطبيق عند بدء تشغيل Windows", "Open the app when Windows starts")
+                      : l("بدء التشغيل مع النظام غير متاح هنا", "System sign-in startup is not available here")}
                   </span>
                 </label>
               </div>
@@ -19110,7 +19120,7 @@ function SettingsView({
                 }
               }}
             >
-              <Field label="New company admin password">
+              <Field label={l("كلمة مرور جديدة لمدير الشركة", "New company admin password")}>
                 <input
                   type="password"
                   value={adminPasswordDraft}
@@ -19119,28 +19129,30 @@ function SettingsView({
                 />
               </Field>
               <button type="submit" disabled={!adminPasswordDraft}>
-                <KeyRound size={18} /> Save admin password
+                <KeyRound size={18} /> {l("حفظ كلمة مرور المدير", "Save admin password")}
               </button>
             </form>
           )}
         </div>
       </section>
+      </SettingsCategory>
 
-      <section className="panel commercial-settings">
+      <SettingsCategory id="company" icon={Building2} title={l("بيانات الشركة","Company profile")} description={l("بيانات التواصل والعنوان والهاتف","Contact details, address and phone")}>
+        <section className="panel commercial-settings">
         <div className="panel-head">
           <h2>
             <Building2 size={18} /> Company profile
           </h2>
-          <span className="user-chip">{canEditCompanySettings ? "Manager" : "Locked"}</span>
+          <span className="user-chip">{canEditCompanySettings ? l("المدير","Manager") : l("مقفل","Locked")}</span>
         </div>
         {canEditCompanySettings ? (
           <form className="form-grid company-profile-form" onSubmit={saveCompanyProfile}>
             {[
-              ["company_name", "Company name"],
-              ["contact_name", "Manager / contact name"],
-              ["email", "Contact email"],
-              ["phone", "Contact phone"],
-              ["website", "Company website"],
+              ["company_name", l("اسم الشركة","Company name")],
+              ["contact_name", l("اسم المدير / مسؤول التواصل","Manager / contact name")],
+              ["email", l("البريد الإلكتروني","Contact email")],
+              ["phone", l("هاتف التواصل","Contact phone")],
+              ["website", l("الموقع الإلكتروني","Company website")],
             ].map(([key, label]) => (
               <Field key={key} label={label}>
                 <input
@@ -19155,7 +19167,7 @@ function SettingsView({
                 />
               </Field>
             ))}
-            <Field label="Company address">
+            <Field label={l("عنوان الشركة","Company address")}>
               <textarea
                 value={companyProfileDraft.address || ""}
                 onChange={(event) =>
@@ -19167,20 +19179,22 @@ function SettingsView({
               />
             </Field>
             <button type="submit" className="primary">
-              <Save size={18} /> Save company profile
+              <Save size={18} /> {l("حفظ بيانات الشركة","Save company profile")}
             </button>
           </form>
         ) : (
           <div className="empty-state">Company profile is available for managers only.</div>
         )}
       </section>
+      </SettingsCategory>
 
-      <section className="panel commercial-settings">
+      <SettingsCategory id="report-design" icon={FileText} title={l("تصميم التقارير","Report design")} description={l("الشعار والألوان وتنسيق المستندات","Logo, colors and document formatting")}>
+        <section className="panel commercial-settings">
         <div className="panel-head">
           <h2>
             <FileText size={18} /> Report branding
           </h2>
-          <span className="user-chip">{canEditTableStyles ? "Company admin" : "Locked"}</span>
+          <span className="user-chip">{canEditTableStyles ? l("مدير الشركة","Company admin") : l("مقفل","Locked")}</span>
         </div>
         {canEditTableStyles ? (
           <form className="form-grid branding-form" onSubmit={saveBranding}>
@@ -19200,10 +19214,10 @@ function SettingsView({
               {brandingDraft.logoDataUri ? (
                 <img src={brandingDraft.logoDataUri} alt="Report logo" />
               ) : (
-                <span>Drop logo image</span>
+                <span>{l("اسحب صورة الشعار هنا","Drop logo image")}</span>
               )}
               <label className="logo-file-button">
-                <Paperclip size={16} /> Choose image
+                <Paperclip size={16} /> {l("اختيار صورة","Choose image")}
                 <input
                   type="file"
                   accept="image/*"
@@ -19211,55 +19225,55 @@ function SettingsView({
                 />
               </label>
             </div>
-            <Field label="Company name EN">
+            <Field label={l("اسم الشركة بالإنجليزية","Company name EN")}>
               <input
                 value={brandingDraft.companyNameEn || ""}
                 onChange={(event) => updateBranding("companyNameEn", event.target.value)}
               />
             </Field>
-            <Field label="Company name AR">
+            <Field label={l("اسم الشركة بالعربية","Company name AR")}>
               <input
                 value={brandingDraft.companyNameAr || ""}
                 onChange={(event) => updateBranding("companyNameAr", event.target.value)}
               />
             </Field>
-            <Field label="Abbreviation">
+            <Field label={l("الاختصار","Abbreviation")}>
               <input
                 value={brandingDraft.companyAbbreviation || ""}
                 onChange={(event) => updateBranding("companyAbbreviation", event.target.value)}
               />
             </Field>
-            <Field label="Website">
+            <Field label={l("الموقع الإلكتروني","Website")}>
               <input
                 dir="ltr"
                 value={brandingDraft.website || ""}
                 onChange={(event) => updateBranding("website", event.target.value)}
               />
             </Field>
-            <Field label="Company address">
+            <Field label={l("عنوان الشركة","Company address")}>
               <textarea
                 value={brandingDraft.companyAddress || ""}
                 onChange={(event) => updateBranding("companyAddress", event.target.value)}
               />
             </Field>
-            <Field label="Company phone">
+            <Field label={l("هاتف الشركة","Company phone")}>
               <input
                 dir="ltr"
                 value={brandingDraft.companyPhone || ""}
                 onChange={(event) => updateBranding("companyPhone", event.target.value)}
               />
             </Field>
-            <Field label="Footer contact">
+            <Field label={l("بيانات التواصل في التذييل","Footer contact")}>
               <select
                 value={brandingDraft.footerContactMode || "website"}
                 onChange={(event) => updateBranding("footerContactMode", event.target.value)}
               >
-                <option value="website">Website</option>
-                <option value="address">Address</option>
-                <option value="both">Website and address</option>
+                <option value="website">{l("الموقع الإلكتروني","Website")}</option>
+                <option value="address">{l("العنوان","Address")}</option>
+                <option value="both">{l("الموقع الإلكتروني والعنوان","Website and address")}</option>
               </select>
             </Field>
-            <Field label="Heading font">
+            <Field label={l("خط العناوين","Heading font")}>
               <select
                 value={brandingDraft.headingFontFamily || "georgia"}
                 onChange={(event) => updateBranding("headingFontFamily", event.target.value)}
@@ -19272,7 +19286,7 @@ function SettingsView({
                 <option value="cairo">Cairo</option>
               </select>
             </Field>
-            <Field label="Body font">
+            <Field label={l("خط النص","Body font")}>
               <select
                 value={brandingDraft.bodyFontFamily || "arial"}
                 onChange={(event) => updateBranding("bodyFontFamily", event.target.value)}
@@ -19286,15 +19300,15 @@ function SettingsView({
               </select>
             </Field>
             {[
-              ["companyNameColor", "Company color"],
-              ["lineColor", "Report line color"],
-              ["tableHeaderBg", "Table header background"],
-              ["tableHeaderText", "Table header text"],
-              ["tableBodyText", "Table body text"],
-              ["tableOddBg", "Odd row background"],
-              ["tableEvenBg", "Even row background"],
-              ["qrColor", "QR color"],
-              ["qrBackground", "QR background"],
+              ["companyNameColor", l("لون الشركة","Company color")],
+              ["lineColor", l("لون خطوط التقرير","Report line color")],
+              ["tableHeaderBg", l("خلفية رؤوس الجدول","Table header background")],
+              ["tableHeaderText", l("نص رؤوس الجدول","Table header text")],
+              ["tableBodyText", l("نص الجدول","Table body text")],
+              ["tableOddBg", l("خلفية الصفوف الفردية","Odd row background")],
+              ["tableEvenBg", l("خلفية الصفوف الزوجية","Even row background")],
+              ["qrColor", l("لون رمز QR","QR color")],
+              ["qrBackground", l("خلفية رمز QR","QR background")],
             ].map(([key, label]) => (
               <Field key={key} label={label}>
                 <input
@@ -19312,7 +19326,7 @@ function SettingsView({
                   updateBranding("showAddressInDateBlock", event.target.checked)
                 }
               />
-              <span>Show address under report date block</span>
+              <span>{l("إظهار العنوان أسفل تاريخ التقرير","Show address under report date block")}</span>
             </label>
             <button type="submit" className="primary" disabled={!canEditTableStyles}>
               <Save size={18} /> Save branding
@@ -19322,8 +19336,10 @@ function SettingsView({
           <div className="empty-state">Report branding is available for admins only.</div>
         )}
       </section>
+      </SettingsCategory>
 
-      <section className="panel subscription-panel">
+      <SettingsCategory id="subscription" icon={WalletCards} title={l("الاشتراك والدفع","Subscription and billing")} description={l("الحساب وخيارات الاشتراك والمدفوعات","Account, subscription and payment options")}>
+        <section className="panel subscription-panel">
         <div className="panel-head">
           <h2>
             <WalletCards size={18} /> {t("الإشتراك والدفع")}
@@ -19514,8 +19530,10 @@ function SettingsView({
           </button>
         </div>
       </section>
+      </SettingsCategory>
 
-      <section className="panel users-panel" id="settings-users">
+      <SettingsCategory id="users" icon={Users} title={l("المستخدمون والصلاحيات","Users and permissions")} description={l("كلمات المرور والحسابات وصلاحيات الوصول","Passwords, accounts and access permissions")}>
+        <section className="panel users-panel" id="settings-users">
         <div className="panel-head">
           <h2>
             <Users size={18} /> {t("المستخدمون")}
@@ -19862,8 +19880,10 @@ function SettingsView({
           <div className="empty-state">{t("إدارة المستخدمين للمدير فقط")}</div>
         )}
       </section>
+      </SettingsCategory>
 
-      <section className="terms-layout">
+      <SettingsCategory id="terms" icon={ClipboardList} title={l("الشروط والأحكام","Terms and conditions")} description={l("نماذج الشروط بالعربية والإنجليزية","Arabic and English terms templates")}>
+        <section className="terms-layout">
         <TermEditor
           title="الشروط والأحكام العربية — الأفراد"
           value={retailTerms}
@@ -19895,11 +19915,15 @@ function SettingsView({
           language="en"
         />
       </section>
+      </SettingsCategory>
 
-      <section className="settings-bottom-panels">
+      <SettingsCategory id="overview" icon={Activity} title={l("حالة النظام","System overview")} description={l("ملخص المستندات ومؤشرات النشاط","Document status and activity summary")}>
+        <section className="settings-bottom-panels">
         <DashboardMetricGrid summary={dashboardSummary} />
         <DocumentStatusPanel docs={documentStatuses} />
       </section>
+      </SettingsCategory>
+      </div>
     </div>
   );
 }

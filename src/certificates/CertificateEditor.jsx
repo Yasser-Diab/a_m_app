@@ -61,7 +61,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const customers = useResource(request, canWrite && !record ? `/customers${queryString({ q: customerQuery })}` : null, projectRevision);
   const projects = useResource(request, canWrite && !record && customer?.id ? `/projects${queryString({ customer_id: customer.id, q: projectQuery })}` : null, projectRevision);
   const carryForward = useResource(request,canWrite&&!record&&project?.id?`/projects/${project.id}/carry-forward${queryString({
-    work_to:header.work_to,contract_ref:header.contract_ref??project.contract_ref,location_id:header.location_id})}`:null,projectRevision);
+    work_to:header.work_to,contract_ref:header.contract_ref??project.contract_ref,location_id:header.location_id,account_id:header.account_id||'base'})}`:null,projectRevision);
   const context = useResource(request, project?.id ? `/projects/${project.id}${queryString({ work_to: header.work_to })}` : null, projectRevision);
   const suggested = useResource(request, canWrite && project?.id ? `/projects/${project.id}/entry-suggestions` : null, projectRevision);
   const operationItems=useResource(request,can("ops_view")&&project?.id?
@@ -70,6 +70,8 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   const validation = error?.payload?.validation || record?.validation || [];
   const activeLocation = locations.find((entry) => String(entry.id) === String(header.location_id));
   const currency = project?.currency || header.currency || "EGP";
+  const accounts=context.data?.accounts||[],selectedAccount=accounts.find(item=>(item.id||null)===(Number(header.account_id)||null));
+  useEffect(()=>{if(record||!context.data||header.account_id!==undefined)return;const current=[...context.data.accounts].reverse().find(account=>!account.final_id)||context.data.accounts.at(-1);setHeader(old=>({...old,account_id:current?.id||null}));},[context.data,record,header.account_id]);
 
   useEffect(() => { dirtyRef.current = dirty; return () => { dirtyRef.current = false; }; }, [dirty, dirtyRef]);
   useEffect(()=>{
@@ -111,7 +113,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
       setRows((current) => current.filter(line=>!line.carried_forward).map(({ work_item_id, ops_item_id, source, location, ...line }) => ({ ...line, location_id: "", location_name: "" })));
       setGridGeneration((current) => current + 1);
     }
-    setHeader((current) => different ? { ...current, contract_ref: nextProject?.contract_ref || "", location_id: "", output_mode: "" } : current);
+    setHeader((current) => different ? { ...current,account_id:undefined, contract_ref: nextProject?.contract_ref || "", location_id: "", output_mode: "" } : current);
     setProjectSearch(""); setDirty(true);
   }
 
@@ -218,8 +220,19 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
   function openImport() {
     run(async () => setImportDraft(await save({ announce: false })));
   }
+  async function startAdditionalWorks(){
+    const finalId=record?.type==='final'&&['approved','issued'].includes(record.status)?record.id:selectedAccount?.final_id;
+    if(!finalId)return;
+    if(!window.confirm(t('بدء حساب جديد لهذا المشروع بترقيم مستخلصات من 1؟ تظل أرصدة الحساب السابق محفوظة منفصلة.','Start a new project account with certificates from 1? Earlier balances remain separate.')))return;
+    await run(async()=>{const account=await request('/projects/'+project.id+'/accounts',{method:'POST',body:{final_id:finalId,command_key:newKey()}});
+      const nextHeader={...header,type:'progress',account_id:account.id,location_id:'',work_from:'',rule_override:undefined,override_reason:undefined};
+      if(record&&['approved','issued'].includes(record.status)){const drafts=await request('/'+queryString({project_id:project.id,account_id:account.id,status:'draft',limit:1}));applySaved(drafts.items.length?await request('/'+drafts.items[0].id):await request('/',{method:'POST',body:{project_id:project.id,header:nextHeader,lines:[]}}),false);}
+      else{setHeader(nextHeader);changeRows(rows.filter(row=>!row.carried_forward));setGridGeneration(value=>value+1);setDirty(true);}
+      refreshContext();});
+  }
 
   return <section className="pc-panel pc-editor">
+    {can('create')&&project&&(selectedAccount?.final_id||record?.type==='final'&&['approved','issued'].includes(record.status))&&<div className="pc-toolbar"><button type="button" disabled={busy} onClick={startAdditionalWorks}>{t('أعمال جديدة لنفس المشروع','New work for this project')} #{accounts.find(account=>account.source_final_id===(record?.type==='final'?record.id:selectedAccount?.final_id))?.number||(accounts.at(-1)?.number||1)+1}</button></div>}
     <div className="pc-toolbar">
       <h2>{record ? <>{t("مستخلص", "Certificate")} <bdi>{record.certificate_number ?? record.official_number ?? record.legacy_number}</bdi></> : t("مستخلص جديد", "New certificate")}</h2>
       {record && <><Status value={record.status} t={t} />{record.revision > 1 && <span className="pc-chip">{t("المراجعة", "Revision")} <bdi>&nbsp;{record.revision}</bdi></span>}</>}
@@ -257,6 +270,7 @@ export default function CertificateEditor({ initial, request, apiBase, session, 
         <Field label={t("العميل", "Customer")}><input value={optionLabel(customer)} readOnly dir="auto" /></Field>
         <Field label={t("المشروع", "Project")}><input value={optionLabel(project)} readOnly dir="auto" /></Field>
       </>}
+      {accounts.length>1&&<Field label={t('حساب المشروع','Project account')}><select value={header.account_id||''} disabled={!canWrite||Boolean(record?.revises_id)||record&&record.status!=='draft'} onChange={event=>{changeHeader('account_id',Number(event.target.value)||null);changeRows(rows.filter(row=>!row.carried_forward));setGridGeneration(value=>value+1);}}>{accounts.map(account=><option key={account.id||'base'} value={account.id||''}>{account.name}</option>)}</select></Field>}
       <Field label={t("العقد / أمر الشراء", "Contract / PO")}><input dir="auto" readOnly={!canWrite} value={header.contract_ref ?? project?.contract_ref ?? ""} onChange={(event) => changeHeader("contract_ref", event.target.value)} /></Field>
       <Field label={t("نوع المستخلص", "Certificate type")}><select value={header.type || record?.type || "progress"} disabled={!canWrite || !["progress", "final"].includes(header.type)} onChange={(event) => changeHeader("type", event.target.value)}>
         {Object.entries(typeLabels).map(([value, names]) => <option key={value} value={value} disabled={!historical && !["progress", "final", header.type].includes(value)}>{t(...names)}</option>)}

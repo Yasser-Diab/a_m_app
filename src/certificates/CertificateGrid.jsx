@@ -156,7 +156,7 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     return modes ? rows.some((row) => modes.includes(row.mode)) : rows.some((row) => row[key] != null && row[key] !== "");
   }), [readOnly,rows]);
   const columns = fullReadView ? GRID_COLUMNS : compactColumns;
-  const selectionColumns = columns.map(({key}) => key);
+  const selectionColumns = useMemo(()=>columns.map(({key}) => key),[columns]);
   const editableColumns = columns.filter(({key}) => gridKeys.includes(key)).map(({key}) => key);
   const locationMap = useMemo(() => new Map(locations.map((location) => [String(location.id), location])), [locations]);
   const editable = !readOnly && !sortedView;
@@ -353,11 +353,11 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     return true;
   }
 
-  function rowSelection(id,extend) {
+  const rowSelection=useCallback((id,extend)=>{
     const first = {rowId:id,columnKey:selectionColumns[0]};
     const last = {rowId:id,columnKey:selectionColumns.at(-1)};
     setSelection((current) => ({anchorCell:extend && current?.anchorCell ? current.anchorCell : first,focusCell:last}));
-  }
+  },[selectionColumns]);
 
   function copySelection(event) {
     const bounds = range();
@@ -392,13 +392,13 @@ export default function CertificateGrid({ rows, onChange, readOnly, t, locale, l
     return true;
   }
 
-  function updateEditor(value) {
+  const updateEditor=useCallback(value=>{
     if (!editing.current) return;
     const active = {...editing.current,value};
     editing.current = active;
     setEditor(active);
     setSuggestionIndex(-1);
-  }
+  },[]);
 
   function finishEditing({commit = true, restore = false, value} = {}) {
     const active = editing.current;

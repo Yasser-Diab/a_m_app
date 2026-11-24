@@ -50,6 +50,8 @@ function initializeOperations(db) {
     addColumn("ops_loading_orders","previous_reference","TEXT");
     addColumn("ops_loads","command_key","TEXT");
     addColumn("ops_loads","version","INTEGER NOT NULL DEFAULT 1");
+    addColumn('ops_order_reviews','approver_name',"TEXT NOT NULL DEFAULT ''");
+    addColumn('ops_order_reviews','approver_title',"TEXT NOT NULL DEFAULT ''");
     addColumn("ops_loads","shipment_data","TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(shipment_data))");
     addColumn("ops_inspections","reference","TEXT");
     addColumn("ops_confirmations","command_key","TEXT");
@@ -170,6 +172,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
     const pdf=await renderPdf(output.html,{report_language:req.body.locale==='en'?'en':'ar',prepared_by:access.user.display_name||access.user.username});res.set('Cache-Control','no-store').attachment(reportFilename(output.customer,{reference:output.reference,loading_reference:output.reference},{kind:'delivery',locale:req.body.locale})).type('application/pdf').send(pdf);
   });
   get('/signature-directory',()=>require('../signature-directory.cjs').directory(db));
+  get('/approval-options',(_,access)=>({name:access.user.display_name||access.user.username,...require('../signature-directory.cjs').directory(db)}));
   get("/catalogue",()=>specs.catalogueForClient(db));
   get("/projects",(req,access)=>core.projectChoices(db,access,req.query));
   get("/report-options",(_,access)=>management.reportOptions(db,access));
@@ -303,6 +306,8 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   post(base+'/orders/:orderId/include-remaining','ops_edit',(req,access,id)=>production.includeRemaining(db,order(req,id),req.body,access));
   post(base+"/orders/:orderId/inspections","ops_qc",(req,access,id)=>production.inspect(db,order(req,id),req.body,access));
   post(base+"/orders/:orderId/approvals","ops_release",(req,access,id)=>production.reviewStage(db,order(req,id),req.body,access));
+  get(base+'/orders/:orderId/review-changes',(req,_,id)=>require('./approval-review.cjs').changes(db,order(req,id)));
+  post(base+'/orders/:orderId/review-changes','ops_release',(req,access,id)=>require('./approval-review.cjs').save(db,order(req,id),req.body,access));
   endpoint('post',base+'/orders/:orderId/history/:historyId/pdf','ops_export',async(req,access,id,res)=>{const current=order(req,id),history=db.get("SELECT * FROM document_edit_history WHERE kind='order' AND document_id=? AND id=?",[current.id,idOf(req.params.historyId)]);if(!history)fail(404,'Order revision not found');const output=require('./reports.cjs').snapshotReport(db,core.operation(db,id),JSON.parse(history.before_json),req.body.locale==='en'?'en':'ar',branding());const pdf=await appendDrawings(await renderPdf(output.html,{report_language:req.body.locale}),output.pdfDrawings);res.attachment(history.reference+' - previous.pdf').type('application/pdf').send(pdf);});
   get(base+'/orders/:orderId/installation',(req,_,id)=>require('./lifecycle.cjs').installation(db,order(req,id)));
   patch(base+'/orders/:orderId/installation','ops_edit',(req,access,id)=>require('./lifecycle.cjs').saveInstallation(db,order(req,id),req.body,access.user));
@@ -331,7 +336,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   });
   endpoint("post",base+"/orders/:orderId/pdf","ops_export",async(req,access,id,res)=>{
     const {current,html,pdfDrawings}=prepareReport(req,access,id);
-    const rendered=await renderPdf(html,{report_language:req.body.locale==="ar"?"ar":"en",prepared_by:access.user.display_name || access.user.username});
+    const rendered=await renderPdf(html,{landscape:req.body.kind==='approvals',report_language:req.body.locale==="ar"?"ar":"en",prepared_by:access.user.display_name || access.user.username});
     const pdf=await appendDrawings(rendered,pdfDrawings);
     const customer=getCustomer(db,getProject(db,id).customer_id);
     const name=reportFilename(customer,current,req.body);

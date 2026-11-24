@@ -1,5 +1,5 @@
 import {SignatureInput,useSignatureDirectory} from '../signature-directory.jsx';
-import { useMemo, useState } from "react";
+import { useEffect,useMemo, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Combobox, Dialog, Field, localDate, locationOptions, Money, newKey, numberText, optionLabel, Problem, ProjectDetailsFields, queryString, ReportGroupingChecks, Status, useDebounce, useResource } from "./shared.jsx";
 import "./certificates.css";
@@ -218,14 +218,16 @@ const kinds = { receipt: ["تحصيل عادي", "Ordinary receipt"], advance: [
 
 export function Collections({ request, canEdit, canDelete, locale, t, onAccessChanged }) {
   const [project, setProject] = useState(null);
+  const [account,setAccount]=useState('');
   const [cutoff, setCutoff] = useState(localDate);
   const [revision, setRevision] = useState(0);
   const [editor, setEditor] = useState(null);
   const [changeError, setChangeError] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const ledger = useResource(request, project ? `/projects/${project.id}/collections${queryString({ cutoff })}` : null, revision);
+  const ledger = useResource(request, project ? `/projects/${project.id}/collections${queryString({ cutoff,account_id:account==='all'?undefined:account||'base' })}` : null, revision);
   const context = useResource(request, project ? `/projects/${project.id}` : null);
-  const certificates = useResource(request, project && editor ? `/${queryString({ project_id: project.id, status: "issued" })}` : null);
+  const certificates = useResource(request, project && editor ? `/${queryString({ project_id: project.id, status: "issued",account_id:editor.receipt?.account_id||account||'base' })}` : null);
+  useEffect(()=>{if(!context.data||!project||context.data.id!==project.id)return;const current=[...(context.data.accounts||[])].reverse().find(item=>!item.final_id)||context.data.accounts?.at(-1);setAccount(String(current?.id||''));},[context.data,project?.id]);
   const currency = project?.currency || context.data?.currency;
   const locations = useMemo(() => locationOptions(context.data?.locations), [context.data?.locations]);
   const data = ledger.data;
@@ -244,7 +246,8 @@ export function Collections({ request, canEdit, canDelete, locale, t, onAccessCh
     <div className="pc-toolbar"><h2>{t("التحصيلات", "Collections")}</h2>
       {canEdit && <button type="button" className="primary" disabled={!project} onClick={() => setEditor({ kind: "receipt" })}><Plus size={16} />{t("تسجيل تحصيل", "Record receipt")}</button>}</div>
     <div className="pc-form">
-      <ProjectPicker value={project} onSelect={setProject} request={request} t={t} />
+      <ProjectPicker value={project} onSelect={value=>{setProject(value);setAccount('');}} request={request} t={t} />
+      {context.data?.accounts?.length>1&&<Field label={t('حساب المشروع','Project account')}><select value={account} onChange={event=>setAccount(event.target.value)}><option value="all">{t('جميع الحسابات','All accounts')}</option>{context.data.accounts.map(item=><option key={item.id||'base'} value={item.id||''}>{item.name}</option>)}</select></Field>}
       <Field label={t("تاريخ قطع التحصيلات", "Collections cutoff")}><input type="date" dir="ltr" value={cutoff} onChange={(event) => setCutoff(event.target.value)} /></Field>
     </div>
     <Problem error={changeError || ledger.error || context.error} t={t} />
@@ -260,7 +263,7 @@ export function Collections({ request, canEdit, canDelete, locale, t, onAccessCh
         onFollowup={(action, receipt) => { setChangeError(null); setEditor({ action, receipt }); }} />
     </>}
     {!project && <div className="pc-empty">{t("اختر مشروعًا لعرض تحصيلاته.", "Select a project to see its collections.")}</div>}
-    {editor && project && <ReceiptEditor data={editor} project={project} locations={locations} certificates={certificates.data?.items || []} t={t} request={request} currency={currency} onClose={() => setEditor(null)} onSaved={() => {
+    {editor && project && <ReceiptEditor data={editor} project={project} accounts={context.data?.accounts||[]} accountId={account==='all'?null:Number(account)||null} locations={locations} certificates={certificates.data?.items || []} t={t} request={request} currency={currency} onClose={() => setEditor(null)} onSaved={() => {
       setEditor(null); setRevision((current) => current + 1);
     }} onAccessChanged={onAccessChanged} />}
   </section>;
@@ -295,22 +298,24 @@ function LedgerTable({ data, canEdit, canDelete, deleting, t, locale, currency, 
   </>;
 }
 
-export function ReceiptEditor({ data, project, locations = [], certificates = [], t, request, currency, onClose, onSaved, onAccessChanged }) {
+export function ReceiptEditor({ data, project,accounts=[],accountId=null, locations = [], certificates = [], t, request, currency, onClose, onSaved, onAccessChanged }) {
   const [commandKey] = useState(newKey);
   const [draft, setDraft] = useState(() => {
     const today = localDate();
     const actionDate = data.receipt?.received_at > today ? data.receipt.received_at : today;
     if (data.action === "edit") {
       const receipt = data.receipt;
-      return {kind:receipt.kind,received_at:receipt.received_at,due_at:receipt.due_at || "",cleared_at:receipt.cleared_at || "",
+      return {kind:receipt.kind,account_id:receipt.account_id||null,received_at:receipt.received_at,due_at:receipt.due_at || "",cleared_at:receipt.cleared_at || "",
         method:receipt.method || "",reference:receipt.reference || "",evidence:receipt.evidence || "",amount:receipt.amount,
         status:receipt.status,allocations:[]};
     }
-    return { kind: data.kind, received_at: actionDate, allocated_at: actionDate, due_at: "", cleared_at: data.action === "clear" ? actionDate : "", method: "", reference: "", evidence: "", amount: data.receipt?.amount ?? "", status: "received", allocations: data.action === "allocate" ? [{ key: newKey(), amount: "" }] : [] };
+    return { kind: data.kind,account_id:data.receipt?.account_id||accountId, received_at: actionDate, allocated_at: actionDate, due_at: "", cleared_at: data.action === "clear" ? actionDate : "", method: "", reference: "", evidence: "", amount: data.receipt?.amount ?? "", status: "received", allocations: data.action === "allocate" ? [{ key: newKey(), amount: "" }] : [] };
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const change = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
+  const accountCertificates=useResource(request,project?.id&&draft.allocations.length?'/'+queryString({project_id:project.id,status:'issued',account_id:draft.account_id||'base'}):null);
+  const allocationCertificates=accountCertificates.data?.items||certificates.filter(item=>(item.header?.account_id||null)===(draft.account_id||null));
   const reverse = draft.kind === "reversal";
   const isEdit = data.action === "edit";
   const followup = isEdit ? null : data.action;
@@ -342,6 +347,7 @@ export function ReceiptEditor({ data, project, locations = [], certificates = []
       {followup === "clear" && <Field label={t("تاريخ التحصيل", "Clearance date")}><input type="date" dir="ltr" value={draft.cleared_at} min={data.receipt.received_at} required onChange={(event) => change("cleared_at", event.target.value)} /></Field>}
       {followup === "allocate" && <Field label={t("تاريخ التوزيع", "Allocation date")}><input type="date" dir="ltr" value={draft.allocated_at} min={data.receipt.received_at} required onChange={(event) => change("allocated_at", event.target.value)} /></Field>}
       {!followup && <div className="pc-form">
+        {accounts.length>1&&<Field label={t('حساب المشروع','Project account')}><select disabled={isEdit||reverse} value={draft.account_id||''} onChange={event=>change('account_id',Number(event.target.value)||null)}>{accounts.map(item=><option key={item.id||'base'} value={item.id||''}>{item.name}</option>)}</select></Field>}
         {!reverse && <Field label={t("نوع التحصيل", "Receipt type")}><select value={draft.kind} onChange={(event) => change("kind", event.target.value)}><option value="receipt">{t(...kinds.receipt)}</option><option value="advance">{t(...kinds.advance)}</option></select></Field>}
         <Field label={t("المبلغ", "Amount")}><input value={draft.amount} dir="ltr" inputMode="decimal" required readOnly={reverse} onChange={(event) => change("amount", event.target.value)} /></Field>
         <Field label={reverse ? t("تاريخ العكس", "Reversal date") : t("تاريخ الاستلام", "Received date")}><input type="date" dir="ltr" value={draft.received_at} required onChange={(event) => change("received_at", event.target.value)} /></Field>
@@ -356,7 +362,7 @@ export function ReceiptEditor({ data, project, locations = [], certificates = []
         <legend>{t("توزيع المبلغ", "Allocations")}</legend>
         {draft.allocations.map((row, index) => <div className="pc-form" key={row.key}>
           <Field label={t("الموقع", "Location")}><select value={row.location_id || ""} onChange={(event) => allocationEdit(row.key, "location_id", event.target.value)}><option value="">{t("المشروع بالكامل", "Project-wide")}</option>{locations.map((location) => <option key={location.id} value={location.id}>{optionLabel(location)}</option>)}</select></Field>
-          <Field label={t("المستخلص", "Certificate")}><select value={row.certificate_id || ""} onChange={(event) => allocationEdit(row.key, "certificate_id", event.target.value)}><option value="">{t("بدون مستخلص محدد", "Any certificate")}</option>{certificates.map((certificate) => <option key={certificate.id} value={certificate.id}>{certificate.official_number || certificate.id}</option>)}</select></Field>
+          <Field label={t("المستخلص", "Certificate")}><select value={row.certificate_id || ""} onChange={(event) => allocationEdit(row.key, "certificate_id", event.target.value)}><option value="">{t("بدون مستخلص محدد", "Any certificate")}</option>{allocationCertificates.map((certificate) => <option key={certificate.id} value={certificate.id}>{certificate.official_number || certificate.id}</option>)}</select></Field>
           <Field label={`${t("المبلغ", "Amount")} ${index + 1}`}><input value={row.amount} dir="ltr" inputMode="decimal" required onChange={(event) => allocationEdit(row.key, "amount", event.target.value)} /></Field>
           <button type="button" onClick={() => change("allocations", draft.allocations.filter((item) => item.key !== row.key))}>{t("حذف التوزيع", "Remove allocation")}</button>
         </div>)}
