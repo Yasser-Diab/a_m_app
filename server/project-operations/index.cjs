@@ -83,6 +83,7 @@ function initializeOperations(db) {
     }
     for(const current of [...seeded.values()].reverse())defaults.rememberProjectSpecification(db,current);
     require('./manual-shipments.cjs').initialize(db);
+    require('../inspections/index.cjs').initialize(db);
     require('./references.cjs').migrateLoadingReferences(db);
   });
 }
@@ -133,6 +134,7 @@ function saveSystem(db,body,actor) {
 
 function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   const router=express.Router();
+  require('../inspections/index.cjs').register(router,db,{branding,renderPdf});
   function endpoint(method,route,capability,handler,write=false) {
     router[method](route,async(req,res)=>{
       const projectId=req.params.projectId==null?null:idOf(req.params.projectId);

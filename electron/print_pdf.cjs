@@ -50,14 +50,16 @@ async function main() {
   await win.webContents.executeJavaScript(`(${prepareOperationsPrint.toString()})()`);
 
   const footer = readFooterMeta();
+  if(footer.inspectionLayout){const {prepareInspectionPrint}=require('../server/inspections/print-layout.cjs');await win.webContents.executeJavaScript(`(${prepareInspectionPrint.toString()})()`);}
   const pdf = await win.webContents.printToPDF({
     landscape: Boolean(footer.landscape),
     printBackground: true,
-    displayHeaderFooter: true,
+    displayHeaderFooter: !footer.inspectionLayout,
+    preferCSSPageSize: Boolean(footer.inspectionLayout),
     headerTemplate: "<div></div>",
     footerTemplate: pdfFooter(footer),
     pageSize: "A4",
-    margins: {
+    margins: footer.inspectionLayout ? {top:0,bottom:0,left:0,right:0} : {
       marginType: "custom",
       top: 0.35,
       bottom: 1.35,

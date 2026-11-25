@@ -24,6 +24,17 @@ $stringsPath = Join-Path $root "android\app\src\main\res\values\strings.xml"
 $androidOutput = if ($config.androidOutput) { $config.androidOutput } else { "dist-android" }
 $outputDir = Join-Path $root $androidOutput
 $temporaryAssetDirs = @()
+$originalAndroidUserHome = $env:ANDROID_USER_HOME
+$appSigningHome = if ($env:AM_ANDROID_USER_HOME) {
+  [string]$env:AM_ANDROID_USER_HOME
+} else {
+  Join-Path $env:USERPROFILE ".android\easy-commercial"
+}
+# Keep this application's update key separate from other Android projects.
+# Keystores stay outside the source tree and are never included in release sources.
+if (Test-Path -LiteralPath (Join-Path $appSigningHome "debug.keystore")) {
+  $env:ANDROID_USER_HOME = $appSigningHome
+}
 
 $originalCapacitor = Get-Content -Raw -LiteralPath $capacitorPath
 $originalGradle = Get-Content -Raw -LiteralPath $gradlePath
@@ -211,6 +222,11 @@ try {
   }
 }
 finally {
+  if ($null -eq $originalAndroidUserHome) {
+    Remove-Item Env:\ANDROID_USER_HOME -ErrorAction SilentlyContinue
+  } else {
+    $env:ANDROID_USER_HOME = $originalAndroidUserHome
+  }
   Remove-Item Env:\VITE_APP_VARIANT -ErrorAction SilentlyContinue
   Remove-Item Env:\VITE_APP_VERSION -ErrorAction SilentlyContinue
   Remove-Item Env:\AM_ANDROID_ASSET_DIR -ErrorAction SilentlyContinue

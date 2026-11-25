@@ -4040,6 +4040,15 @@ function resetLocalCompanyAccount(database, { dataDir, dbPath, chatUploadDir } =
     BEGIN TRANSACTION;
     DELETE FROM cert_pdf_artifacts;
     DELETE FROM cert_audit;
+    DELETE FROM inspection_attachments;
+    DELETE FROM inspection_artifacts;
+    DELETE FROM inspection_events;
+    DELETE FROM inspection_requests;
+    DELETE FROM inspection_template_history;
+    DELETE FROM inspection_templates;
+    DELETE FROM inspection_profiles;
+    DELETE FROM inspection_sequences;
+    DELETE FROM inspection_assets;
     DELETE FROM ops_manual_shipment_lines;
     DELETE FROM ops_manual_shipments;
     DELETE FROM ops_manual_loading_history;
@@ -8009,7 +8018,7 @@ function writePdf(html, outputPath, data = {}) {
   const footerContact = brandingFooterContact(branding);
   const footerCenterContact = branding.website || footerContact;
   const locale = reportLocaleFrom(data.report_language);
-  const footerMeta = {...footerMetadata(data,branding,APP_VERSION),footerContact:footerCenterContact,landscape:Boolean(data.landscape)};
+  const footerMeta = {...footerMetadata(data,branding,APP_VERSION),footerContact:footerCenterContact,landscape:Boolean(data.landscape),inspectionLayout:data.inspection_layout===true};
   if (
     electronRuntime &&
     typeof electronRuntime === "object" &&
@@ -8027,14 +8036,16 @@ function writePdf(html, outputPath, data = {}) {
         await new Promise((resolve) => setTimeout(resolve, 450));
         const {prepareOperationsPrint}=require('./project-operations/print-layout.cjs');
         await win.webContents.executeJavaScript(`(${prepareOperationsPrint.toString()})()`);
+        if(footerMeta.inspectionLayout){const {prepareInspectionPrint}=require('./inspections/print-layout.cjs');await win.webContents.executeJavaScript(`(${prepareInspectionPrint.toString()})()`);}
         const pdf = await win.webContents.printToPDF({
           landscape: Boolean(data.landscape),
           printBackground: true,
-          displayHeaderFooter: true,
+          displayHeaderFooter: !footerMeta.inspectionLayout,
+          preferCSSPageSize: footerMeta.inspectionLayout,
           headerTemplate: "<div></div>",
           footerTemplate: pdfFooter(footerMeta),
           pageSize: "A4",
-          margins: {
+          margins: footerMeta.inspectionLayout ? {top:0,bottom:0,left:0,right:0} : {
             marginType: "custom",
             top: 0.35,
             bottom: 1.35,

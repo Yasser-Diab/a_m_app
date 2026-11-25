@@ -1,6 +1,6 @@
 import {SignatureInput,useSignatureDirectory} from '../signature-directory.jsx';
 import DeliveryNotes from './DeliveryNotes.jsx';
-import {useEffect,useState} from "react";
+import {lazy,Suspense,useEffect,useState} from "react";
 import {ClipboardList,Factory,History,Layers3,Truck,Users} from "lucide-react";
 import {queryString,useDebounce,useResource} from "../certificates/shared.jsx";
 import "../certificates/certificates.css";
@@ -13,6 +13,7 @@ import ProjectSignatures from "./ProjectSignatures.jsx";
 import SourceRefresh from './SourceRefresh.jsx';
 import {RunningProjects,QuantityTakeoff} from "./OperationsReports.jsx";
 import LoadingOrders from './LoadingOrders.jsx';
+const Inspections=lazy(()=>import('../inspections/Inspections.jsx'));
 
 const tabs=[
   ["items","جدول الكميات","BOQ",Layers3],["overview","بيانات المشروع","Project details",ClipboardList],
@@ -42,6 +43,8 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState("items");
   const [view,setView]=useState("projects");
+  const [visitedInspections,setVisitedInspections]=useState(false);
+  useEffect(()=>{if(view==='inspections')setVisitedInspections(true);},[view]);
   const [preferred,setPreferred]=useState(null);
   const [discoveryError,setDiscoveryError]=useState(null);
   const [opening,setOpening]=useState(false);
@@ -76,7 +79,7 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
   const documentLabel=(doc)=>doc.document_type==="invoice"?t("فاتورة","Invoice"):t("عرض سعر","Quotation");
   return <div className="pc-workspace ops-workspace" dir={uiLanguage==="ar"?"rtl":"ltr"}>
     <nav className="pc-tabs" aria-label={t("أقسام إدارة التشغيل","Operations management sections")}>
-      {[["projects","المشروعات","Projects"],["loading","أوامر التحميل","Loading Orders"],["delivery","أذون التسليم","Delivery Notes"],["progress","متابعة التشغيل","Work progress"],["quantities","حصر الكميات","Quantity takeoff"]].map(([id,ar,en])=>
+      {[["projects","المشروعات","Projects"],["loading","أوامر التحميل","Loading Orders"],["delivery","أذون التسليم","Delivery Notes"],["inspections","الفحص والاستلام IR / MIR","Inspections IR / MIR"],["progress","متابعة التشغيل","Work progress"],["quantities","حصر الكميات","Quantity takeoff"]].map(([id,ar,en])=>
         <button type="button" key={id} aria-pressed={view===id} onClick={()=>setView(id)}>{t(ar,en)}</button>)}
     </nav>
     <div className="pc-stack" hidden={view!=="projects"}>
@@ -124,6 +127,7 @@ export default function ProjectOperations({api,apiBase,session,access,uiLanguage
     </div>
     <div hidden={view!=='delivery'}><DeliveryNotes {...controls} active={view==='delivery'}/></div>
     <div hidden={view!=='loading'}><LoadingOrders {...controls} active={view==='loading'}/></div>
+    {(view==='inspections'||visitedInspections)&&<div hidden={view!=='inspections'}><Suspense fallback={<p role="status">{t('جارٍ تحميل نماذج الفحص…','Loading inspections…')}</p>}><Inspections {...controls} active={view==='inspections'}/></Suspense></div>}
     <div hidden={view!=="progress"}><RunningProjects {...controls} active={view==="progress"} onOpenProject={row=>{setView("projects");openProject(row);}}/></div>
     <div hidden={view!=="quantities"}><QuantityTakeoff {...controls} active={view==="quantities"}/></div>
   </div>;
