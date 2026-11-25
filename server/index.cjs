@@ -4040,6 +4040,8 @@ function resetLocalCompanyAccount(database, { dataDir, dbPath, chatUploadDir } =
     BEGIN TRANSACTION;
     DELETE FROM cert_pdf_artifacts;
     DELETE FROM cert_audit;
+    DELETE FROM ops_manual_shipment_lines;
+    DELETE FROM ops_manual_shipments;
     DELETE FROM ops_manual_loading_history;
     DELETE FROM ops_manual_loading_orders;
     DELETE FROM ops_loading_sequences;

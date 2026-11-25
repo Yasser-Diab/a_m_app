@@ -484,7 +484,7 @@ function loadBatch(db,current,input,user) {
 
 function orderDetails(db,current) {
   const loads=db.all("SELECT * FROM ops_loads WHERE order_id=? ORDER BY id DESC",[current.id]);
-  const byBatch=new Map(loads.map((row)=>[row.id,{...row,responsible:parse(row.responsible),lines:[]}]));
+  const byBatch=new Map(loads.map((row)=>[row.id,{...row,reference:parse(row.shipment_data,{}).document_reference||row.reference,responsible:parse(row.responsible),lines:[]}]));
   for (const row of db.all(`SELECT l.*,i.code FROM ops_load_lines l JOIN ops_loads b ON b.id=l.load_id
     JOIN ops_order_items oi ON oi.id=l.order_item_id JOIN ops_items i ON i.id=oi.item_id WHERE b.order_id=? ORDER BY l.load_id`,[current.id]))
     byBatch.get(row.load_id).lines.push(row);

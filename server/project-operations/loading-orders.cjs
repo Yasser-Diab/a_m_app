@@ -1,3 +1,4 @@
+const {randomUUID}=require('node:crypto');
 const {idOf,str,date,today,parse,encode,fail,inScope,scopeSql,audit}=require('../certificate-access.cjs');
 const {getProject,getCustomer}=require('../certificate-projects.cjs');
 const {nextReference}=require('./references.cjs');
@@ -24,22 +25,31 @@ function list(db,access,query={}){
     JOIN cert_projects p ON p.id=x.project_id JOIN parties c ON c.id=p.customer_id
     WHERE ${scope.clause} AND (? IS NULL OR x.project_id=?) AND (? IS NULL OR p.customer_id=?) AND (x.reference LIKE ? OR p.name LIKE ? OR p.code LIKE ? OR c.display_name LIKE ?)`;
   const args=[...scope.params,project,project,customer,customer,q,q,q,q];
-  return {items:db.all(`SELECT x.*,p.name AS project,p.code AS project_code,p.customer_id,c.display_name AS customer ${from} ORDER BY x.created_at DESC,x.id DESC LIMIT ? OFFSET ?`,[...args,limit,(page-1)*limit]),
-    total:db.get('SELECT COUNT(*) n '+from,args).n,page,limit};
+  const items=db.all(`SELECT x.*,p.name AS project,p.code AS project_code,p.customer_id,c.display_name AS customer ${from} ORDER BY x.created_at DESC,x.id DESC LIMIT ? OFFSET ?`,[...args,limit,(page-1)*limit]);
+  const ids=items.filter(item=>item.kind==='manual').map(item=>item.id),byOrder=new Map();
+  if(ids.length){for(const row of db.all('SELECT s.loading_order_id,l.row_id,SUM(l.quantity) quantity FROM ops_manual_shipment_lines l JOIN ops_manual_shipments s ON s.id=l.shipment_id WHERE s.loading_order_id IN (SELECT value FROM json_each(?)) GROUP BY s.loading_order_id,l.row_id',[encode(ids)])){if(!byOrder.has(row.loading_order_id))byOrder.set(row.loading_order_id,new Map());byOrder.get(row.loading_order_id).set(row.row_id,row.quantity);}
+    const plans=new Map(db.all('SELECT id,items FROM ops_manual_loading_orders WHERE id IN (SELECT value FROM json_each(?))',[encode(ids)]).map(row=>[row.id,parse(row.items,[])]));
+    for(const item of items.filter(item=>item.kind==='manual')){const loaded=byOrder.get(item.id);item.loading_state=!loaded?'pending':plans.get(item.id).every(row=>(loaded.get(row.id)||0)>=row.quantity-1e-8)?'complete':'partial';}}
+  return {items,total:db.get('SELECT COUNT(*) n '+from,args).n,page,limit};
 }
 function get(db,access,id){
   const result=db.get('SELECT * FROM ops_manual_loading_orders WHERE id=?',[id]);
   if(!result||!inScope(access,result.project_id))fail(404,'Loading order not found');
-  return {...result,edit_window:require('../document-edit-window.cjs').info(db,'manual_loading',result.id,result.status!=='draft'?result.created_at:null),document_history:require('../document-edit-window.cjs').history(db,'manual_loading',result.id),items:parse(result.items,[]),signatures:parse(result.signatures,[]),project:getProject(db,result.project_id),
+  const current={...result,items:parse(result.items,[]).map((item,index)=>({...item,id:item.id||'legacy-'+result.id+'-'+index,part_id:item.part_id||''}))};
+  const rows=require('./manual-shipments.cjs').balance(db,current);
+  const shipments=db.all("SELECT s.id,COALESCE((SELECT reference FROM document_edit_history WHERE kind='manual_delivery' AND document_id=s.id AND is_correction=1 ORDER BY id DESC LIMIT 1),s.reference) reference,s.loading_date,s.version,json_extract(s.data,'$.vehicle_plate') vehicle_plate,json_extract(s.data,'$.driver_name') driver_name FROM ops_manual_shipments s WHERE s.loading_order_id=? ORDER BY s.id DESC",[result.id]).map(row=>({...row,id:'manual-'+row.id}));
+  return {...result,rows,shipments,loading_state:rows.every(row=>row.remaining<=1e-8)?'complete':rows.some(row=>row.loaded>0)?'partial':'pending',edit_window:require('../document-edit-window.cjs').info(db,'manual_loading',result.id,result.status!=='draft'?result.created_at:null),document_history:require('../document-edit-window.cjs').history(db,'manual_loading',result.id),items:current.items,signatures:parse(result.signatures,[]),project:getProject(db,result.project_id),
     customer:getCustomer(db,getProject(db,result.project_id).customer_id),project_details:parse(db.get('SELECT details FROM ops_projects WHERE project_id=?',[result.project_id])?.details,{}),people:require('./core.cjs').people(db,result.project_id)};
 }
-function values(body){
+function values(body,before=[]){
+  const ids=new Set();
   if(!Array.isArray(body.items)||!body.items.length)fail(400,'Add at least one loading item');
-  const items=body.items.map(item=>{
+  const items=body.items.map((item,index)=>{
     if(!item||typeof item!=='object')fail(400,'Enter valid loading items');
     const label=str(item.label,3000),unit=str(item.unit,60),quantity=Number(item.quantity);
     if(!label||!unit||!Number.isFinite(quantity)||quantity<=0)fail(400,'Each loading item needs a description, unit and positive quantity');
-    return {label,unit,quantity};
+    const id=str(item.id,100)||before[index]?.id||randomUUID();if(ids.has(id))fail(400,'Loading items need distinct identities');ids.add(id);
+    return {id,label,unit,quantity,part_id:str(item.part_id,160)};
   });
   const status=str(body.status)||'draft';if(!['draft','issued','cancelled'].includes(status))fail(400,'Choose a loading order status');
   const signatures=(Array.isArray(body.signatures)?body.signatures:[]).map(person=>({name:str(person.name,200),title:str(person.title,200),side:person.side==='client'?'client':'company'})).filter(person=>person.name||person.title);
@@ -55,9 +65,10 @@ function create(db,access,body){
   const command=str(body.command_key,100);if(!command)fail(400,'Provide a loading order request reference');
   const previous=db.get('SELECT id,project_id FROM ops_manual_loading_orders WHERE command_key=?',[command]);
   if(previous){if(previous.project_id!==project.id)fail(409,'This request belongs to a different project');return get(db,access,previous.id);}
-  const data=values({...body,signatures:body.signatures??require('../signature-directory.cjs').defaults(db,'loading')}),reference=nextReference(db,project.id,'LO');
-  const id=db.run(`INSERT INTO ops_manual_loading_orders(project_id,reference,command_key,loading_date,status,items,signatures,vehicle_plate,driver_name,notes,created_by)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?)`,[project.id,reference,command,data.loading_date,data.status,encode(data.items),encode(data.signatures),data.vehicle_plate,data.driver_name,data.notes,access.user.id]).lastInsertRowid;
+  const data=values({...body,signatures:body.signatures??require('../signature-directory.cjs').defaults(db,'loading')}),reference=nextReference(db,project.id,'LO'),workOrder=body.work_order_id?idOf(body.work_order_id):null;
+  require('./manual-shipments.cjs').validatePlan(db,{project_id:project.id},data,workOrder);
+  const id=db.run(`INSERT INTO ops_manual_loading_orders(project_id,reference,command_key,loading_date,status,items,signatures,vehicle_plate,driver_name,notes,created_by,work_order_id)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,[project.id,reference,command,data.loading_date,data.status,encode(data.items),encode(data.signatures),data.vehicle_plate,data.driver_name,data.notes,access.user.id,workOrder]).lastInsertRowid;
   if(data.status!=='draft')require('../document-edit-window.cjs').lock(db,'manual_loading',id);
   const current=get(db,access,id);history(db,current,access.user);return current;
 }
@@ -65,11 +76,15 @@ function update(db,access,id,body){
   const before=get(db,access,id);if(Number(body.version)!==before.version)fail(409,'The loading order changed. Reload it before saving');
   if(body.project_id!=null&&Number(body.project_id)!==before.project_id)fail(400,'Create a new loading order for a different project');
   if(before.edit_window.locked)require('../document-edit-window.cjs').check(db,'manual_loading',id,before.edit_window.first_locked_at,body.correction===true,body.reason);
-  const data=values(body);
-  db.run(`UPDATE ops_manual_loading_orders SET loading_date=?,status=?,items=?,signatures=?,vehicle_plate=?,driver_name=?,notes=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-    [data.loading_date,data.status,encode(data.items),encode(data.signatures),data.vehicle_plate,data.driver_name,data.notes,id]);
+  const data=values(body,before.items),workOrder=body.work_order_id?idOf(body.work_order_id):null;
+  require('./manual-shipments.cjs').validatePlan(db,before,data,workOrder);
+  db.run(`UPDATE ops_manual_loading_orders SET loading_date=?,status=?,items=?,signatures=?,vehicle_plate=?,driver_name=?,notes=?,work_order_id=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+    [data.loading_date,data.status,encode(data.items),encode(data.signatures),data.vehicle_plate,data.driver_name,data.notes,workOrder,id]);
   if(data.status!=='draft')require('../document-edit-window.cjs').lock(db,'manual_loading',id,before.edit_window.first_locked_at||new Date().toISOString());
   const current=get(db,access,id);require('../document-edit-window.cjs').revision(db,'manual_loading',id,current.reference,before,current,access.user,{correction:body.correction===true,reason:body.reason});history(db,current,access.user);return get(db,access,id);
+}
+function signatureBlock(signatures,locale){
+ const t=(ar,en)=>locale==='ar'?ar:en;return ['company','client'].map(side=>{const people=signatures.filter(person=>person.side===side);return !people.length?'':`<div class="signoff">${side==='client'?'<h3>'+t('العميل','Customer')+'</h3>':''}<div class="signatures">${people.map(person=>'<div><strong><bdi>'+escape(person.name||person.title)+'</bdi></strong>'+(person.responsibility==='loading'?'<br>'+t('مسؤول التحميل','Loading lead'):person.name&&person.title?'<br><bdi>'+escape(person.title)+'</bdi>':'')+'</div>').join('')}</div></div>`;}).join('');
 }
 function manualReport(order,options,branding){
   const locale=options.locale==='en'?'en':'ar',t=(ar,en)=>locale==='ar'?ar:en,totals=new Map();
@@ -82,10 +97,10 @@ function manualReport(order,options,branding){
   const body='<section class="project-info">'+grid([[t('العميل','Customer'),order.customer.display_name],[t('كود العميل','Customer code'),order.customer.code],
     [t('المشروع','Project'),order.project.name],[t('رقم المشروع','Project code'),order.project.code],[t('عنوان الموقع','Site address'),order.project.address],
     [t('المبنى / القطاع','Building / sector'),order.project_details?.building],[t('تاريخ التحميل','Loading date'),order.loading_date]])+(personnel?'<div class="project-people">'+personnel+'</div>':'')+'</section><section class="loading"><table><thead>'+row([t('البيان','Description'),t('الوحدة','Unit'),t('الكمية المطلوبة','Required quantity'),t('التحميل الفعلي','Actual loading'),t('ملاحظات','Remarks')],'th')+
-    '</thead><tbody>'+order.items.map(item=>row([item.label,unitName(unitKey(item.unit),locale),new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(item.quantity),'',''])).join('')+'</tbody></table></section>'+
+    '</thead><tbody>'+(order.rows||order.items).map(item=>row([item.label,unitName(unitKey(item.unit),locale),new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(item.quantity),item.loaded>0?new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(item.loaded):'',''])).join('')+'</tbody></table></section>'+
     (order.notes?'<section>'+grid([[t('ملاحظات','Notes'),order.notes]])+'</section>':'')+
     '<section class="order-summary">'+grid([...totals].map(([unit,amount])=>[t('إجمالي ','Total ')+unitName(unit,locale),new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(amount)]))+'</section>'+
     loadingTransportBlock({loading_transport:order},locale)+(signoffs?'<div class="signoffs">'+signoffs+'</div>':'');
   return wrap({locale,branding,title:t('أمر تحميل ','Loading Order ')+(order.edit_window?.active_reference||order.reference),color:'#7992a3',body});
 }
-module.exports={options,list,get,create,update,manualReport};
+module.exports={options,list,get,create,update,manualReport,signatureBlock};

@@ -82,6 +82,7 @@ function initializeOperations(db) {
       if(!seeded.has(key))seeded.set(key,current);
     }
     for(const current of [...seeded.values()].reverse())defaults.rememberProjectSpecification(db,current);
+    require('./manual-shipments.cjs').initialize(db);
     require('./references.cjs').migrateLoadingReferences(db);
   });
 }
@@ -151,6 +152,10 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   const base="/projects/:projectId";
   get('/loading-options',(req,access)=>loadingOrders.options(db,access,req.query));
   get('/loading-orders',(req,access)=>loadingOrders.list(db,access,req.query));
+  get('/loading-work-options',(req,access)=>require('./manual-shipments.cjs').workOptions(db,access,null,req.query.work_order_id,req.query.project_id));
+  get('/loading-orders/:loadingId/work-options',(req,access)=>require('./manual-shipments.cjs').workOptions(db,access,idOf(req.params.loadingId),req.query.work_order_id));
+  post('/loading-orders/:loadingId/shipment-preparation','ops_load',(req,access)=>require('./manual-shipments.cjs').preparation(db,access,idOf(req.params.loadingId)));
+  post('/loading-orders/:loadingId/shipments','ops_release',(req,access)=>require('./manual-shipments.cjs').confirm(db,access,idOf(req.params.loadingId),req.body));
   get('/loading-orders/:loadingId',(req,access)=>loadingOrders.get(db,access,idOf(req.params.loadingId)));
   post('/loading-orders','ops_edit',(req,access)=>loadingOrders.create(db,access,req.body));
   patch('/loading-orders/:loadingId','ops_edit',(req,access)=>loadingOrders.update(db,access,idOf(req.params.loadingId),req.body));
@@ -163,10 +168,11 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
     res.set('Cache-Control','no-store').set('Access-Control-Expose-Headers','Content-Disposition').attachment(name).type('application/pdf').send(pdf);
   });
   get('/delivery-notes',(req,access)=>require('./delivery-notes.cjs').list(db,access,req.query));
-  get('/delivery-notes/:noteId',(req,access)=>require('./delivery-notes.cjs').get(db,access,idOf(req.params.noteId)));
-  patch('/delivery-notes/:noteId','ops_load',(req,access)=>require('./delivery-notes.cjs').save(db,access,idOf(req.params.noteId),req.body));
+  get('/delivery-notes/:noteId',(req,access)=>require('./delivery-notes.cjs').get(db,access,req.params.noteId));
+  patch('/delivery-notes/:noteId','ops_load',(req,access)=>require('./delivery-notes.cjs').save(db,access,req.params.noteId,req.body));
   endpoint('post','/delivery-notes/:noteId/pdf','ops_export',async(req,access,_,res)=>{
-    const note=require('./delivery-notes.cjs').get(db,access,idOf(req.params.noteId));
+    const note=require('./delivery-notes.cjs').get(db,access,req.params.noteId);
+    if(note.kind==='manual'){const output=require('./manual-shipments.cjs').report(db,access,note.id,req.body,branding());const pdf=await renderPdf(output.html,{report_language:req.body.locale==='en'?'en':'ar',prepared_by:access.user.display_name||access.user.username});res.set('Cache-Control','no-store').attachment(reportFilename(output.customer,{reference:output.reference,loading_reference:output.reference},{kind:'delivery',locale:req.body.locale})).type('application/pdf').send(pdf);return;}
     let snapshot;if(req.body.history_id){const history=db.get("SELECT before_json FROM document_edit_history WHERE kind='delivery' AND document_id=? AND id=?",[note.id,idOf(req.body.history_id)]);if(!history)fail(404,'Delivery Note revision not found');snapshot=JSON.parse(history.before_json);}
     const output=require('./shipment-report.cjs').shipmentReport(db,core.operation(db,note.project_id),note.order,note.id,req.body.locale,branding(),snapshot);
     const pdf=await renderPdf(output.html,{report_language:req.body.locale==='en'?'en':'ar',prepared_by:access.user.display_name||access.user.username});res.set('Cache-Control','no-store').attachment(reportFilename(output.customer,{reference:output.reference,loading_reference:output.reference},{kind:'delivery',locale:req.body.locale})).type('application/pdf').send(pdf);
@@ -318,7 +324,8 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   post(base+'/orders/:orderId/shipment-preparation','ops_load',(req,access,id)=>production.shipmentPreparation(db,order(req,id),access.user));
   post(base+'/orders/:orderId/shipment','ops_release',(req,access,id)=>production.confirmShipment(db,order(req,id),req.body,access));
   endpoint('post',base+'/orders/:orderId/shipments/:loadId/pdf','ops_export',async(req,access,id,res)=>{
-    const output=require('./shipment-report.cjs').shipmentReport(db,core.operation(db,id),order(req,id),idOf(req.params.loadId),req.body.locale,branding());
+    const current=order(req,id),manual=db.get('SELECT m.id FROM ops_manual_shipments m JOIN ops_loads l ON l.id=m.linked_load_id WHERE l.id=? AND l.order_id=?',[idOf(req.params.loadId),current.id]);
+    const output=manual?require('./manual-shipments.cjs').report(db,access,'manual-'+manual.id,req.body,branding()):require('./shipment-report.cjs').shipmentReport(db,core.operation(db,id),current,idOf(req.params.loadId),req.body.locale,branding());
     const pdf=await renderPdf(output.html,{report_language:req.body.locale==='en'?'en':'ar',prepared_by:access.user.display_name||access.user.username});
     const name=reportFilename(output.customer,{reference:output.reference,loading_reference:output.reference},{kind:'delivery',locale:req.body.locale});
     res.set('Cache-Control','no-store').set('Access-Control-Expose-Headers','Content-Disposition').attachment(name).type('application/pdf').send(pdf);

@@ -45,25 +45,26 @@ function shipmentReport(db,state,current,id,locale,branding,overrideData){
   const general=rows.filter(part=>!part.item);if(general.length)groups.push({items:[],rows:general});
   const hasTags=rows.some(part=>String(part.item?.specification.technical.tag||'').trim()),serials=new Map();
   const tables=groups.map((group,groupIndex)=>{
+    const hasSize=!Array.isArray(data.manual_signatures)||group.rows.some(part=>part.item);
     const body=group.rows.map((part,index)=>{
       const key=part.item?.id||part.part_id;if(!serials.has(key))serials.set(key,String(serials.size+1));
       const tech=part.item?.specification.technical||{};
       const remaining=[...new Set((Array.isArray(part.remaining)?part.remaining:[]).map(component=>component.label||({frames:t('الحلوق','Frames'),sliding:t('الضلف','Leaves'),hinged:t('الضلف','Leaves'),other:t('الضلف','Leaves'),sliding_blades:t('السكاكين','Sliding blades'),fixed:t('الثوابت','Fixed panels'),screens:t('ضلف السلك','Flyscreen leaves')})[component.kind]||component.kind))];
       return '<tbody class="opening-band-'+index%2+'">'+row([
         hasTags?part.tag:serials.get(key),part.item?openingDescription(part.item.specification):part.label,
-        part.item?dimensionPair([tech.width_mm||'—',tech.height_mm||'—'],locale):'',
+        ...(hasSize?[part.item?dimensionPair([tech.width_mm||'—',tech.height_mm||'—'],locale):'']:[]),
         format(part.quantity),part.item?t('عدد','Pcs'):unitName(unitKey(part.unit),locale),format(part.progress)+'%',remaining.length?t('متبقي: ','Remaining: ')+remaining.join(t(' و',' and ')):'',
       ])+'</tbody>';
     }).join('');
     const subtotal=group.rows.filter(part=>part.item).reduce((sum,part)=>sum+part.quantity,0);
-    return (groups.length>1?'<h3>'+t(`${groupIndex+1} من ${groups.length}`,`${groupIndex+1} of ${groups.length}`)+'</h3>':'')+'<table class="loading-sheet delivery-sheet"><colgroup>'+[8,29,16,8,7,11,21].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row(['Tag',t('البيان','Description'),t('المقاس مم','Size mm'),t('الكمية','Quantity'),t('الوحدة','Unit'),t('نسبة التحميل','Loading progress'),t('ملاحظات','Notes')],'th')+'</thead>'+body+'</table>'+
+    return (groups.length>1?'<h3>'+t(`${groupIndex+1} من ${groups.length}`,`${groupIndex+1} of ${groups.length}`)+'</h3>':'')+'<table class="loading-sheet delivery-sheet"><colgroup>'+(hasSize?[8,29,16,8,7,11,21]:[8,45,8,7,11,21]).map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row(['Tag',t('البيان','Description'),...(hasSize?[t('المقاس مم','Size mm')]:[]),t('الكمية','Quantity'),t('الوحدة','Unit'),t('نسبة التحميل','Loading progress'),t('ملاحظات','Notes')],'th')+'</thead>'+body+'</table>'+
       (groups.filter(group=>group.items.length).length>1&&group.items.length?'<div class="group-subtotal">'+grid([[t('إجمالي','Total'),format(subtotal)+' '+t('فتحة','openings')]])+'</div>':'');
   }).join('');
   const openings=rows.filter(part=>part.item).reduce((sum,part)=>sum+part.quantity,0),generalTotals=new Map();
   for(const part of rows.filter(part=>!part.item)){const unit=unitKey(part.unit);generalTotals.set(unit,(generalTotals.get(unit)||0)+part.quantity);}
-  const html=projectBlock(db,project,customer,state,order,locale,branding)+'<section class="loading">'+tables+'</section>'+
-    '<section>'+grid([...(openings?[[t('إجمالي','Total'),format(openings)+' '+t('فتحة','openings')]]:[]),...[...generalTotals].map(([unit,amount])=>[t('إجمالي الإضافات','Total general items'),format(amount)+' '+unitName(unit,locale)])])+'</section>'+
-    loadingTransportBlock(order,locale)+signatures(db,project.id,order,'delivery',locale);
+  const html=projectBlock(db,project,customer,state,order,locale,branding)+'<section class="loading">'+tables+'</section>'+(Array.isArray(data.manual_signatures)&&data.notes?'<section>'+grid([[t('ملاحظات','Notes'),data.notes]])+'</section>':'')+
+    '<section>'+grid([...(openings?[[t('إجمالي','Total'),format(openings)+' '+t('فتحة','openings')]]:[]),...[...generalTotals].map(([unit,amount])=>[Array.isArray(data.manual_signatures)?t('إجمالي','Total'):t('إجمالي الإضافات','Total general items'),format(amount)+' '+unitName(unit,locale)])])+'</section>'+
+    loadingTransportBlock(order,locale)+(Array.isArray(data.manual_signatures)?'<div class="signoffs">'+require('./loading-orders.cjs').signatureBlock(data.manual_signatures,locale)+'</div>':signatures(db,project.id,order,'delivery',locale));
   return {html:wrap({locale,branding,title:t('إذن تسليم ','Delivery Note ')+data.reference,color:'#7992a3',body:html}),reference:data.reference,customer};
 }
 module.exports={shipmentData,shipmentRows,shipmentReport};

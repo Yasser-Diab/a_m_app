@@ -117,7 +117,7 @@ function projectBlock(db,project,customer,state,order,locale,branding) {
     ...projectBoqs.map((source)=>[
       source.document_type==="invoice"?t("الفاتورة","Invoice"):t("عرض السعر","Quotation"),source.operation_no,
     ]),
-    [order.kind==="maintenance"?t("رقم أمر الصيانة","Maintenance order no."):t("رقم أمر التشغيل","Work order no."),order.reference],
+    [order.kind==='manual'?t('رقم أمر التحميل','Loading order no.'):order.kind==="maintenance"?t("رقم أمر الصيانة","Maintenance order no."):t("رقم أمر التشغيل","Work order no."),order.reference],
     [t("تاريخ الأمر","Order date"),order.created_at?.slice(0,10)],
     [t("موعد التسليم","Required by"),order.required_date],[t("المخطط","Drawing number"),info.drawing_ref],
     [t("إصدار المخطط","Drawing revision"),info.drawing_revision],
