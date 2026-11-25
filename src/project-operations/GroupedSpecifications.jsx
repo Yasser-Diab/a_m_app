@@ -2,7 +2,7 @@ import {useEffect,useId,useMemo,useRef,useState} from "react";
 import {Field,queryString,useResource} from "../certificates/shared.jsx";
 import {ErrorMessage,Page,Pick,SystemPick,Table} from "./shared.jsx";
 import {SpecificationError,applySpecificationEdits,editSpecification,resolveSpecificationEdits} from "./specification-edits.jsx";
-import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText,hasTrim,partMeasurementAvailable} from "./terminology.js";
+import {technicalText,fieldOptions,coatingValue,configurationTags,perimeterText,hasTrim,partMeasurementAvailable,commonAvailable} from "./terminology.js";
 import {SelectionStatus,TableSearchPanel} from '../table-tools.jsx';
 import {tableReplacementCandidates} from '../table-tools.mjs';
 import {findSmartTableMatches,normalizeSmartNumericClipboardValue,normalizeSmartSearchText} from '../smart-table-clipboard.mjs';
@@ -85,7 +85,7 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
   const current=(key)=>together(displayed,(item)=>key==="category"||key==="system"?item?.[key]:item?.technical[key]);
   const category=catalogue.categories.find(({id})=>id===current("category").value);
   const system=category?.systems.find(({id})=>id===current("system").value);
-  const fields=useMemo(()=>new Map([...catalogue.common,...(category?.fields||[]),...(system?.fields||[]),
+  const fields=useMemo(()=>new Map([...catalogue.common.filter(field=>commonAvailable(category,field.key)),...(category?.fields||[]),...(system?.fields||[]),
     ...(["windows","doors"].includes(category?.id)?[{key:"rubber_bar",type:"boolean"}]:[])].map((field)=>[field.key,field])),
   [catalogue,category,system]);
   const label=(key)=>{
@@ -199,7 +199,7 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
       }}/>
       {message&&<p role="status">{message}</p>}
       <fieldset className="ops-paper-fields" disabled={!editAllowed||busy}>
-        <legend>{t("القطاع واللون والزجاج","Profile, finish & glass")}</legend>
+        <legend>{category?.id==='maintenance'?t("نوع الصيانة ومكان التنفيذ","Maintenance service and location"):t("القطاع واللون والزجاج","Profile, finish & glass")}</legend>
         <div className="pc-form">
           <Pick label={label("category")} value={current("category").value} onChange={(value)=>changeShared("category",value)}
             placeholder={current("category").mixed?t("قيم مختلفة","Different values"):t("اختر النوع","Select type")}
@@ -207,7 +207,7 @@ export default function GroupedSpecifications({request,path,boqId,revision,catal
           <SystemPick label={label("system")} t={t} value={current("system").value} onChange={(value)=>changeShared("system",value)}
             placeholder={current("system").mixed?t("قيم مختلفة","Different values"):t("اختر النظام","Select system")}
             items={(category?.systems||[]).map((item)=>[item.id,item[uiLanguage]])}/>
-          {controls(CORE_FIELDS)}
+          {controls(category?.id==='maintenance'?['maintenance_mode','service_component','replacement_spec','service_findings','screen_material','glass_type','infill','glass_thickness']:CORE_FIELDS)}
         </div>
       </fieldset>
       {LOCK_FIELDS.some(visible)&&<fieldset className="ops-paper-fields" disabled={!editAllowed||busy}>

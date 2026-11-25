@@ -25,6 +25,7 @@ function inheritApprovals(db,row,item){
  }
 }
 function save(db,current,body,access){
+ if(require('./maintenance.cjs').onSite(current))fail(400,'On-site maintenance uses service completion without manufacturing approvals');
  const production=require('./production.cjs'),before=production.orderDetails(db,current),preview=changes(db,current);
  windows.check(db,'order',current.id,preview.edit_window.first_locked_at,body.correction===true,body.reason);
  if(preview.edit_window.locked)windows.lock(db,'order',current.id,preview.edit_window.first_locked_at);
@@ -37,6 +38,7 @@ function save(db,current,body,access){
   const item=core.getItem(db,current.project_id,row.item_id);if(!item.active||!item.system)fail(409,'The opening is no longer active or configured');
   const reserved=db.get("SELECT SUM(i.quantity) n FROM ops_order_items i JOIN ops_orders o ON o.id=i.order_id WHERE i.item_id=? AND o.kind='manufacturing'",[item.id]).n||0;
   if(reserved>item.technical.quantity)fail(409,'The revised source quantity is below the existing work orders');
+  if(require('./maintenance.cjs').factory(current)&&item.category==='maintenance'&&specs.openingDefaults(item.category,item.technical).maintenance_mode!=='Factory')fail(409,'This item is now on-site maintenance. Review its work order route');
   const system=specs.configuration(db,item.category,item.system),quantities=specs.loadingQuantities(item.category,system,item.technical,row.quantity);
   for(const loaded of db.all('SELECT kind,SUM(quantity) quantity FROM ops_load_lines WHERE order_item_id=? GROUP BY kind',[row.id]))
    if(loaded.quantity>(quantities[loaded.kind]||0))fail(409,'Confirmed loading exceeds the revised component quantity. Correct the Delivery Notes or create a new work order');

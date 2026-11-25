@@ -1,3 +1,4 @@
+const {onSite}=require('./maintenance.cjs');
 const {createHash}=require('node:crypto');
 const {encode,parse,idOf,fail,lookup}=require('../certificate-access.cjs');
 const {getProject,projectLookupKeys}=require('../certificate-projects.cjs');
@@ -46,7 +47,7 @@ function refreshSource(db,projectId,body,user){
   const savedFor=require('./customer-defaults.cjs').sourceDefaults(db,project.customer_id);
   const beforeOrders=refreshable.map(order=>({...order,items:db.all('SELECT * FROM ops_order_items WHERE order_id=?',[order.id])}));
   const previous=new Map(old.map(item=>[item.id,parse(item.technical,{})]));
-  const owners=beforeOrders.filter(order=>order.kind!=='maintenance'&&(order.source_scope==='all'&&order.source_document_id===source.id||old.filter(item=>item.active).every(item=>
+  const owners=beforeOrders.filter(order=>order.kind!=='maintenance'&&(order.source_scope==='all'&&order.source_document_id===source.id||old.filter(item=>item.active&&item.category!=='maintenance').every(item=>
     order.items.some(line=>line.item_id===item.id&&line.quantity===previous.get(item.id).quantity))));
   const owner=owners.length===1?owners[0]:null;
   const changed=[];
@@ -82,11 +83,11 @@ function refreshSource(db,projectId,body,user){
       const quantity=current.kind==='maintenance'?line.quantity:Math.max(0,Math.min(owner?.id===current.id?count:line.quantity,Number(count||0)-reserved));
       if(!quantity){db.run('DELETE FROM ops_order_items WHERE id=?',[line.id]);continue;}
       const system=item.system?configuration(db,item.category,item.system):null;
-      const quantities=current.kind==='maintenance'||!system?{}:loadingQuantities(item.category,system,item.technical,quantity);
+      const quantities=onSite(current)||!system?{}:loadingQuantities(item.category,system,item.technical,quantity);
       db.run('UPDATE ops_order_items SET quantity=?,quantities=?,specification=? WHERE id=?',
         [quantity,encode(quantities),encode({...item,original:undefined,system_label:system?{ar:system.ar,en:system.en}:null}),line.id]);
     }
-    if(owner?.id===current.id)for(const item of changed.filter(item=>!old.some(before=>before.id===item.id)&&item.system&&item.technical.quantity)){
+    if(owner?.id===current.id)for(const item of changed.filter(item=>item.category!=='maintenance'&&!old.some(before=>before.id===item.id)&&item.system&&item.technical.quantity)){
       const system=configuration(db,item.category,item.system),quantity=item.technical.quantity;
       db.run('INSERT INTO ops_order_items(order_id,item_id,quantity,quantities,specification) VALUES(?,?,?,?,?)',
         [current.id,item.id,quantity,encode(loadingQuantities(item.category,system,item.technical,quantity)),encode({...item,original:undefined,system_label:{ar:system.ar,en:system.en}})]);

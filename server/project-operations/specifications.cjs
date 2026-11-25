@@ -1,4 +1,5 @@
-const catalogue = require("./catalogue.json");
+const originalCatalogue = require("./catalogue.json");
+const catalogue={...originalCatalogue,categories:[...originalCatalogue.categories,require('./maintenance.cjs').category]};
 const {date, encode, fail, parse, str} = require("../certificate-access.cjs");
 
 const directions = ["right","left","top","bottom"];
@@ -47,6 +48,7 @@ const conditional = {
     spacer:"insulated",sealant:"insulated",interlayer:"laminated",bend_radius:"bent",coating_surface:"coated",printing:"printing"},
   roofs:{motor:"moving",control:"moving",rain_sensor:"moving",wind_sensor:"moving",fabric:"fabric"},
   louvers:{motor:"moving",side_guide:"moving",cover_box:"moving",limit_switch:"moving",water:"water",fire_rating:"fire",acoustic:"acoustic"},
+  maintenance:{service_component:'factory',screen_material:'flyscreen',glass_type:'glass',infill:'glass',glass_thickness:'glass'},
 };
 const dependencies = {
   windows:{screen_type:"screen",screen_material:"screen",screen_configuration:"screen",
@@ -106,17 +108,19 @@ function configuration(db, category, id) {
 }
 
 function openingDefaults(category,input={}){
-  return openings.has(category)?{viewing:"Inside",perimeter:[...directions],...input}:input;
+  return openings.has(category)?{viewing:"Inside",perimeter:[...directions],...input}:category==='maintenance'?{maintenance_mode:'On site',...input}:input;
 }
 
 function fieldsFor(category, system, data = {}, includePopulated = false) {
   const tags = new Set(system?.tags || []);
+  if(category==='maintenance'&&data.maintenance_mode==='Factory')tags.add('factory');
   if (Number(data.fixed_panels)>0) tags.add("fixed_panel");
   if(Number(data.top_fixed_height)>0||Number(data.bottom_fixed_height)>0||/upper|lower|علوي|سفلي/i.test(data.tilt_fixed||""))tags.add("fixed_panel");
   if (/double|triple|دبل|مزدوج|ثلاثي/i.test(data.glazing||"")) tags.add("insulated");
   if (/laminat|مصفح|رقائقي/i.test(data.glass_type||"")) tags.add("laminated");
   const specific = [...categoryFields(category),...(system?.fields||[])];
   return [...common,...specific].filter((field)=>{
+    if(category==='maintenance'&&categories.get(category).hidden_common.includes(field.key)&&!specific.includes(field))return false;
     if((field.requiresFixed||field.panelBasis)&&!(tags.has('fixed_panel')||tags.has('fixed')))return false;
     if(field.panelBasis&&data.panel_measurement_basis!==field.panelBasis)return false;
     if(trimFields.some(item=>item.key===field.key)&&(!Array.isArray(data.perimeter)||!data.perimeter.length))return false;
@@ -170,6 +174,7 @@ function cleanFrame(frame) {
 
 function cleanTechnical(db, category, system, input = {}, nested = false) {
   input=openingDefaults(category,require('./customer-defaults.cjs').normalizeLocks(input));
+  if(category==='maintenance'&&!['On site','Factory'].includes(input.maintenance_mode))fail(400,'Select on-site or factory maintenance');
   const result = {};
   for (const {key,type,en} of fieldsFor(category,system,input)) {
     if (input[key] == null || input[key] === "") continue;
@@ -243,6 +248,12 @@ function perimeterDescription(value,locale) {
 }
 
 function loadingQuantities(category, system, technical, quantity) {
+  if(category==='maintenance'){
+    if(technical.maintenance_mode!=='Factory')return {};
+    const kind={'Flyscreen leaf':'screens','Operable leaf':'other',Frame:'frames','Glass panel':'fixed','Complete opening':'items','Other item':'items'}[technical.service_component];
+    if(!kind)fail(400,'Choose the maintenance component that will return to the customer');
+    return {[kind]:quantity};
+  }
   const blades=counts=>({...counts,...(counts.sliding>0?{sliding_blades:counts.sliding}:{})});
   const perOpening = technical.panel_counts;
   const frames=frameQuantity(category,system,technical,quantity);

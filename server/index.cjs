@@ -7022,9 +7022,11 @@ function renderReportHtmlV2(data) {
     .report-table tr,.report-table th,.report-table td{break-inside:avoid!important;break-inside:avoid-page!important;page-break-inside:avoid!important}
     .report-table tbody{break-inside:auto!important;page-break-inside:auto!important}
     .report-table tbody tr{break-inside:avoid!important;break-inside:avoid-page!important;page-break-inside:avoid!important}
+    thead th,h1,h2,h3{word-break:normal;overflow-wrap:normal;hyphens:none}
     th,td{border:1px solid #d6d0c3;padding:4px 4px;vertical-align:middle;overflow-wrap:break-word}
     th{background:var(--table-head-bg);color:var(--table-head-text);font-weight:700;text-align:center}
     td{text-align:center;color:var(--table-body-text);background:var(--table-even-bg)}
+    thead th{overflow-wrap:normal;word-break:normal;hyphens:none}
     .nowrap,.date-cell,.id-cell,.number-cell,.dimension-cell,.unit-cell,.work-rate-cell{white-space:nowrap;word-break:keep-all;overflow-wrap:normal}
     .date-cell,.id-cell,.number-cell,.dimension-cell{direction:ltr;unicode-bidi:isolate}
     .date-cell{width:72px}
@@ -8283,6 +8285,7 @@ function renderProductiveQuantitiesHtml(data) {
     tfoot{display:table-footer-group}
     tr,th,td{break-inside:avoid!important;page-break-inside:avoid!important}
     th,td{border:1px solid #d7cfbf;padding:5px 6px;text-align:center;vertical-align:top;overflow-wrap:anywhere}
+    thead th,h1,h2,h3{word-break:normal;overflow-wrap:normal;hyphens:none}
     th{background:${branding.tableHeaderBg};color:${branding.tableHeaderText};font-weight:700}
     tbody tr:nth-child(odd){background:#faf8f2}
     .text{text-align:right;line-height:1.45}.number,.ltr{direction:ltr;unicode-bidi:isolate;white-space:nowrap}

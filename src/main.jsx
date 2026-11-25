@@ -584,13 +584,20 @@ function applyUiTranslations(root, language = "ar") {
   const textNodes = [];
   while (walker.nextNode()) textNodes.push(walker.currentNode);
   for (const node of textNodes) {
-    if (!originals.has(node)) originals.set(node, node.nodeValue);
-    const original = originals.get(node);
+    let stored = originals.get(node);
+    // React can reuse a text node for another language or an updated label.
+    // Only restore our own last translation; accept a fresh React render as the source.
+    if (!stored || node.nodeValue !== stored.rendered) {
+      stored = { source: node.nodeValue, rendered: node.nodeValue };
+      originals.set(node, stored);
+    }
+    const original = stored.source;
     const translated = translateString(original);
     const nextValue = language === "en" && translated
       ? original.replace(original.trim(), translated)
       : original;
     if (node.nodeValue !== nextValue) node.nodeValue = nextValue;
+    stored.rendered = nextValue;
   }
   const attributeNames = ["title", "aria-label", "placeholder"];
   root.querySelectorAll?.("[title], [aria-label], [placeholder]").forEach((element) => {
@@ -602,10 +609,12 @@ function applyUiTranslations(root, language = "ar") {
     }
     for (const attr of attributeNames) {
       if (!element.hasAttribute(attr)) continue;
-      if (!Object.prototype.hasOwnProperty.call(stored, attr)) stored[attr] = element.getAttribute(attr);
-      const translated = translateString(stored[attr]);
-      const nextValue = language === "en" && translated ? translated : stored[attr];
+      const current = element.getAttribute(attr);
+      if (!stored[attr] || current !== stored[attr].rendered) stored[attr] = { source: current, rendered: current };
+      const translated = translateString(stored[attr].source);
+      const nextValue = language === "en" && translated ? translated : stored[attr].source;
       if (element.getAttribute(attr) !== nextValue) element.setAttribute(attr, nextValue);
+      stored[attr].rendered = nextValue;
     }
   });
 }
@@ -18933,8 +18942,8 @@ function SettingsView({
                   updateServerDraft("databaseProvider", event.target.value)
                 }
               >
-                <option value="local">Local SQLite</option>
-                <option value="remote">Remote URL / tunnel</option>
+                <option value="local">{l("قاعدة بيانات SQLite محلية", "Local SQLite")}</option>
+                <option value="remote">{l("رابط بعيد / نفق اتصال", "Remote URL / tunnel")}</option>
               </select>
             </Field>
             <div className="action-row server-actions">
@@ -18974,7 +18983,7 @@ function SettingsView({
               <button
                 type="submit"
                 className="primary"
-                title="Save selected data/database paths"
+                title={l("حفظ مسارات البيانات وقاعدة البيانات المختارة", "Save selected data/database paths")}
                 disabled={serverBusy || !canEditServerSettings}
               >
                 <Save size={17} /> {t("حفظ المسارات")}
@@ -18982,7 +18991,7 @@ function SettingsView({
               <button
                 type="button"
                 onClick={migrateDatabase}
-                title="Copy data from an old database file into the selected new database file"
+                title={l("نسخ البيانات من قاعدة بيانات قديمة إلى الملف الجديد المختار", "Copy data from an old database file into the selected new database file")}
                 disabled={serverBusy || !canEditServerSettings}
               >
                 <Database size={17} /> {t("ترحيل قاعدة البيانات")}
@@ -19010,7 +19019,7 @@ function SettingsView({
                 type="button"
                 className="server-process-copy"
                 onClick={copyServerStatus}
-                title="Copy server status"
+                title={l("نسخ حالة السيرفر", "Copy server status")}
               >
                 <Copy size={16} />
               </button>
@@ -19183,7 +19192,7 @@ function SettingsView({
             </button>
           </form>
         ) : (
-          <div className="empty-state">Company profile is available for managers only.</div>
+          <div className="empty-state">{l("بيانات الشركة متاحة للمديرين فقط.", "Company profile is available for managers only.")}</div>
         )}
       </section>
       </SettingsCategory>
@@ -19333,7 +19342,7 @@ function SettingsView({
             </button>
           </form>
         ) : (
-          <div className="empty-state">Report branding is available for admins only.</div>
+          <div className="empty-state">{l("تصميم التقارير متاح للمسؤولين فقط.", "Report branding is available for admins only.")}</div>
         )}
       </section>
       </SettingsCategory>
@@ -19356,7 +19365,7 @@ function SettingsView({
         {managerSubscriptionError && (
           <div className="error-state">{managerSubscriptionError}</div>
         )}
-        <div className="subscription-mode-grid" role="tablist" aria-label="Payment mode">
+        <div className="subscription-mode-grid" role="tablist" aria-label={l("طريقة الدفع", "Payment mode")}>
           <button
             type="button"
             className={managerPaymentMode === "recurring" ? "active" : ""}
@@ -19372,7 +19381,7 @@ function SettingsView({
             {t("دفع مرة واحدة")}
           </button>
         </div>
-        <div className="subscription-cycle" role="tablist" aria-label="Billing cycle">
+        <div className="subscription-cycle" role="tablist" aria-label={l("دورة الفوترة", "Billing cycle")}>
           <button
             type="button"
             className={managerBillingCycle === "monthly" ? "active" : ""}
@@ -19467,7 +19476,7 @@ function SettingsView({
             </div>
           </div>
           {managerSubscriptionLoading && (
-            <div className="manager-muted">Loading manager plans...</div>
+            <div className="manager-muted">{l("جارٍ تحميل خطط الاشتراك…", "Loading manager plans...")}</div>
           )}
           <div
             ref={managerPaypalButtonsRef}
@@ -19477,7 +19486,7 @@ function SettingsView({
           {managerPaymentMode === "one_time" && (
             <>
               <div className="paypal-divider">
-                <span>Card checkout</span>
+                <span>{l("الدفع بالبطاقة", "Card checkout")}</span>
               </div>
               <div ref={managerPaypalCardRef} className="paypal-card-container" />
               <button
@@ -19491,7 +19500,7 @@ function SettingsView({
             </>
           )}
           {managerCheckoutLoading && (
-            <div className="manager-muted">Preparing PayPal checkout...</div>
+            <div className="manager-muted">{l("جارٍ تجهيز الدفع عبر PayPal…", "Preparing PayPal checkout...")}</div>
           )}
           {managerCheckoutError && (
             <div className="error-state">{managerCheckoutError}</div>
@@ -19588,7 +19597,7 @@ function SettingsView({
                   onChange={(event) =>
                     setNewUser({ ...newUser, display_name: event.target.value })
                   }
-                  placeholder="Eng. Name"
+                  placeholder={l("م. الاسم", "Eng. Name")}
                   required
                 />
               </Field>
@@ -19610,7 +19619,7 @@ function SettingsView({
                   }
                 >
                   <option value="user">{t("مستخدم")}</option>
-                  <option value="manager">Manager</option>
+                  <option value="manager">{l("مدير", "Manager")}</option>
                   <option value="admin">{t("مدير")}</option>
                 </select>
               </Field>
@@ -19719,9 +19728,9 @@ function SettingsView({
                                 })
                               }
                             >
-                              <option value="user">user</option>
-                              <option value="manager">manager</option>
-                              <option value="admin">admin</option>
+                              <option value="user">{l("مستخدم", "user")}</option>
+                              <option value="manager">{l("مدير", "manager")}</option>
+                              <option value="admin">{l("مسؤول النظام", "admin")}</option>
                             </select>
                           </td>
                           <td>

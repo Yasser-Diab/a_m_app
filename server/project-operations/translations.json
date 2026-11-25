@@ -48,5 +48,6 @@
   "ريموت":["ريموت","Remote control"],"مفتاح جداري":["مفتاح حائط","Wall switch"],"تطبيق":["تطبيق","App"],
   "جديد":["جديد","New"],"رفع مقاسات":["رفع مقاسات","Survey"],"اعتمادات":["اعتمادات","Approvals"],"تصنيع":["تصنيع","Manufacturing"],
   "تسليم":["تسليم","Delivery"],"توريد":["توريد","Supply"],"تركيب":["تركيب","Installation"],
-  "عدل":["عدل","Straight"],"بومبيه":["بومبيه","Rounded"],"Tilt Before Turn":["قلاب عادي","Tilt Before Turn"]
+  "عدل":["عدل","Straight"],"بومبيه":["بومبيه","Rounded"],"Tilt Before Turn":["قلاب عادي","Tilt Before Turn"],
+  "On site":["في الموقع", "On site"], "Factory":["بالمصنع", "Factory"], "Flyscreen leaf":["ضلفة سلك", "Flyscreen leaf"], "Frame":["حلق", "Frame"], "Glass panel":["لوح زجاج", "Glass panel"], "Complete opening":["فتحة كاملة", "Complete opening"], "Other item":["قطعة أخرى", "Other item"]
 }

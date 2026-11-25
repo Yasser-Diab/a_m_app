@@ -7,7 +7,7 @@ import {
   normalizeSmartNumericClipboardValue,parseSmartClipboardGrid,findSmartTableMatches,findSmartCtrlArrowDestination,
 } from "../smart-table-clipboard.mjs";
 import {SpecificationError,applySpecificationEdits,editSpecification,resolveSpecificationEdits} from "./specification-edits.jsx";
-import {technicalText,fieldOptions,configurationTags,perimeterText,hasTrim,partMeasurementAvailable} from "./terminology.js";
+import {technicalText,fieldOptions,configurationTags,perimeterText,hasTrim,partMeasurementAvailable,commonAvailable} from "./terminology.js";
 import {ColumnFilter,SelectionStatus,TableSearchPanel,SearchMatchText} from '../table-tools.jsx';
 import {tableReplacementCandidates,offsetIndex} from '../table-tools.mjs';
 
@@ -23,8 +23,10 @@ const missing=(value)=>value==null||value==="";
 const enabled=(value)=>Boolean(value&&!["لا","بدون","لا ينطبق","none","no","n/a"].includes(String(value).toLowerCase()));
 
 export function fieldAvailable(catalogue,row,key) {
-  if (mainKeys.includes(key)) return true;
   const category=catalogue.categories.find(({id})=>id===row.category);
+  if(!commonAvailable(category,key))return false;
+  if(['trim_type','trim_size_cm'].includes(key)&&row.category==='maintenance')return false;
+  if (mainKeys.includes(key)&&!(row.category==='maintenance'&&catalogue.conditional.maintenance?.[key])) return true;
   const system=category?.systems.find(({id})=>id===row.system);
   if (key==="rubber_bar") return ["windows","doors"].includes(row.category);
   const part=category?.fields.find((field)=>field.key===key)||system?.fields.find((field)=>field.key===key);
@@ -88,7 +90,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
   // Let the double-click finish before moving columns, and keep the editor's cell stable.
   useEffect(()=>{if(editing)return;const timer=setTimeout(()=>setColumnTypeKey(selectedTypeKey),550);return()=>clearTimeout(timer);},[selectedTypeKey,Boolean(editing)]);
   const driverRows=useMemo(()=>{const types=columnTypeKey?new Set(JSON.parse(columnTypeKey)):null;return types?records.filter(row=>types.has(row.category+':'+row.system)):records;},[records,columnTypeKey]);
-  const essentials=new Set(['leaves','fixed_panels','screen','glazing','glass_type','hinge_side','opening_direction','lock_right','lock_left','central_lock_handle','vent_opening','panel_measurement_basis']);
+  const essentials=new Set(['maintenance_mode','service_component','replacement_spec','service_findings','leaves','fixed_panels','screen','glazing','glass_type','hinge_side','opening_direction','lock_right','lock_left','central_lock_handle','vent_opening','panel_measurement_basis']);
   const automatic=useMemo(()=>[...definitions].filter(([key,field])=>driverRows.some(row=>fieldAvailable(catalogue,row,key)&&
     (essentials.has(key)||field.panelBasis||enabled(row.technical[key])||catalogue.dependencies[row.category]?.[key]&&enabled(row.technical[catalogue.dependencies[row.category][key]]))))
     .map(([key])=>key),[definitions,driverRows,catalogue]);

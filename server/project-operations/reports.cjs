@@ -1,3 +1,4 @@
+const {onSite,factory}=require('./maintenance.cjs');
 const {fail,idOf} = require("../certificate-access.cjs");
 const {getProject,getCustomer} = require("../certificate-projects.cjs");
 const {people} = require("./core.cjs");
@@ -23,6 +24,7 @@ const valueHtml=value=>value?.[dimensionMarker]
   ?`<span class="dimension-pair" dir="${value.locale==='ar'?'rtl':'ltr'}">${value.values.map(part=>`<bdi dir="ltr">${escape(part)}</bdi>`).join('<span>×</span>')}</span>${value.suffix?`<bdi dir="auto">${escape(value.suffix)}</bdi>`:''}`
   :`<bdi dir="${direction(value)}">${escape(value)}</bdi>`;
 const row = (cells,tag="td")=>`<tr>${cells.map((value)=>`<${tag}>${valueHtml(value)}</${tag}>`).join("")}</tr>`;
+const stageHeader=cells=>'<tr>'+cells.map((value,index)=>index<2?'<th>'+escape(value)+'</th>':'<th class="stage-heading"><span>'+escape(value)+'</span></th>').join('')+'</tr>';
 const grid = (pairs) => `<dl>${pairs.filter(([,value])=>value!=="" && value!=null).map(([key,value,scope])=>
   `<div><dt>${escape(key)}</dt><dd>${valueHtml(value)}${scope?`<small class="field-scope"><bdi>${escape(scope)}</bdi></small>`:""}</dd></div>`).join("")}</dl>`;
 const panelLabels={frames:["حلوق","Frames"],sliding:["ضلف جرار","Sliding leaves"],hinged:["ضلف مفصلي","Hinged leaves"],
@@ -66,6 +68,10 @@ function wrap({locale,branding,title,classification,watermark,watermarkColor,col
   .shared-specifications{break-inside:avoid}.item-number{font-weight:700;font-size:9pt;margin:0 0 5px}
   .field-scope{display:block;color:#546573;font-size:8pt}dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 10px;margin:4px 0}
   dl div{break-inside:avoid}dt{font-size:9pt;font-weight:700;color:#405467}dd{margin:0;overflow-wrap:anywhere}
+  th,h1,h2,h3{overflow-wrap:normal;word-break:normal;hyphens:none}
+  th.stage-heading{position:relative;height:96px;padding:0 5px;vertical-align:middle;overflow:visible}
+  th.stage-heading>span{position:absolute;left:50%;top:50%;display:block;white-space:nowrap;font-size:8pt;line-height:1.15;transform:translate(-50%,-50%) rotate(-55deg)}
+  html[dir="rtl"] th.stage-heading>span{transform:translate(-50%,-50%) rotate(55deg)}
   table{border-collapse:collapse;width:100%;margin-block:7px}th,td{text-align:start;border-bottom:1px solid #dce7e9;padding:4px}
   td.number{white-space:nowrap;font-variant-numeric:tabular-nums}.work-group h3{font-size:10.5pt}
   thead{display:table-header-group;background:#e5eef1}tr,td,th{break-inside:avoid!important;page-break-inside:avoid!important}
@@ -304,15 +310,26 @@ function maintenanceBlock(order,locale) {
   const t=(ar,en)=>label(ar,en,locale);
   const service=order.service;
   return `<section>${grid([
+    [t("مكان الصيانة","Maintenance location"),t("في الموقع","On site")],
     [t("حالة الصيانة","Status"),service.completed_on?t("مكتملة","Completed"):order.status==="draft"?t("مفتوحة","Open"):t("ملغاة","Cancelled")],
     [t("مسؤول الصيانة","Assigned to"),service.assignee?.name],
     [t("أعمال الصيانة المطلوبة","Instructions"),service.instructions],
     [t("تاريخ الإنهاء","Completed on"),service.completed_on],
     [t("مسجل الإنهاء","Completed by"),service.completed_by],
     [t("ملاحظات الإنهاء","Completion notes"),service.completion_notes],
-  ])}<table><thead>${row([t("وصف الفتحة","Opening description"),t("العدد","Count")],"th")}</thead><tbody>
-    ${order.items.map((item)=>row([openingDescription(item.specification),item.quantity])).join("")}
-    </tbody></table></section>`;
+  ])}${order.items.some(item=>item.specification.category!=='maintenance')?`<table><thead>${row([t("وصف الفتحة","Opening description"),t("العدد","Count")],"th")}</thead><tbody>
+    ${order.items.filter(item=>item.specification.category!=='maintenance').map((item)=>row([openingDescription(item.specification),item.quantity])).join("")}
+    </tbody></table>`:''}</section>`;
+}
+
+function factoryInstructions(order,locale){
+  if(!factory(order))return '';
+  const t=(ar,en)=>label(ar,en,locale),service=order.service||{};
+  const entries=[
+    [t('مسؤول الصيانة','Assigned technician'),[service.assignee?.name,service.assignee?.position].filter(Boolean).join(' · ')],
+    [t('أعمال الصيانة المطلوبة','Maintenance instructions'),service.instructions],
+  ].filter(([,value])=>value);
+  return entries.length?'<section>'+grid(entries)+'</section>':'';
 }
 
 function loadingBlock(order,locale) {
@@ -321,19 +338,20 @@ function loadingBlock(order,locale) {
   const priority={frames:0,sliding:1,hinged:2,fixed:3,other:4,items:5,screens:6,sliding_blades:7};
   const groups=specificationGroups(order.items);
   const tables=groups.map((group,groupIndex)=>{
+  const hasSize=!factory(order)||group.items.some(item=>item.specification.technical.width_mm||item.specification.technical.height_mm);
   const ordered=group.items.flatMap(item=>order.balances.filter(entry=>entry.order_item_id===item.id).sort((a,b)=>(priority[a.kind]??5)-(priority[b.kind]??5)));
   let last=null,band=-1;
   const rows=ordered.map((entry)=>{
     const begin=last!==entry.order_item_id;if(begin){last=entry.order_item_id;band++;}
     const spec=details.get(entry.order_item_id);
     const tech=spec.technical;
-    const values=[openingDescription(spec)+(tech.tag?' · '+tech.tag:''),dimensionPair([tech.width_mm??"—",tech.height_mm??"—"],locale),t(...panelLabels[entry.kind]),
+    const values=[openingDescription(spec)+(tech.tag?' · '+tech.tag:''),...(hasSize?[dimensionPair([tech.width_mm??"—",tech.height_mm??"—"],locale)]:[]),t(...panelLabels[entry.kind]),
       entry.required,entry.loaded,"","",entry.remaining,""];
     return (begin?(band?'</tbody>':'')+`<tbody class="opening-band-${band%2}" data-opening="${entry.order_item_id}">`:'')+
-      "<tr>"+values.map((value,index)=>'<td'+(index>2&&index<8?' class="number"':"")+'>'+valueHtml(value)+"</td>").join("")+"</tr>";
+      "<tr>"+values.map((value,index)=>'<td'+(index>=(hasSize?3:2)&&index<(hasSize?8:7)?' class="number"':"")+'>'+valueHtml(value)+"</td>").join("")+"</tr>";
   }).join("");
   return '<h3>'+escape(t(`المجموعة ${groupIndex+1} من ${groups.length}`,`Group ${groupIndex+1} of ${groups.length}`))+'</h3>'+
-    '<table class="loading-sheet"><colgroup>'+[22,14,15,8,9,8,8,9,7].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row([t("وصف الفتحة","Opening description"),t("المقاس مم","Size mm"),t("المكون","Component"),t("المطلوب","Required"),
+    '<table class="loading-sheet"><colgroup>'+(hasSize?[22,14,15,8,9,8,8,9,7]:[36,15,8,9,8,8,9,7]).map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead>'+row([t("وصف الفتحة","Opening description"),...(hasSize?[t("المقاس مم","Size mm")]:[]),t("المكون","Component"),t("المطلوب","Required"),
       t("المحمل سابقًا","Previous"),t("الحالي","This load"),t("التراكمي","To date"),t("المتبقي","Remaining"),t("ملاحظات / تاريخ","Notes / date")],"th")+
     "</thead>"+rows+(ordered.length?'</tbody>':'')+"</table>"+(groups.length>1?groupSubtotal(group.items,locale):'');
   }).join('');
@@ -377,14 +395,15 @@ function orderSummary(order,locale){
 function approvalReport(db,order,locale) {
   const t=(ar,en)=>label(ar,en,locale),stages={measurement:['المقاسات','Measurements'],profile:['القطاعات','Profiles'],glass:['الزجاج','Glass'],accessories:['الإكسسوارات','Accessories'],finish:['التشطيب','Finish'],details:['التفاصيل','Details'],drawing:['الرسومات','Drawings'],manufacturing:['التصنيع','Manufacturing'],pre_shipment:['الشحن','Shipment']};
   const matrix=order.items.map(item=>row([item.specification.technical.tag||'',openingDescription(item.specification),...order.stage_approvals.map(stage=>{const approved=stage.items.find(row=>row.id===item.id);return approved?.approved&&!approved.stale?'✓':'';})])).join('');
+  const widths=order.stage_approvals.map(stage=>Math.max(7,...t(...stages[stage.stage]).split(/\s+/).map(word=>word.length+1))),totalWidth=widths.reduce((sum,n)=>sum+n,0);
   const blocks=order.stage_approvals.map(stage=>'<div><strong>'+escape(t(...stages[stage.stage]))+'</strong><div class="approval-sign-line"></div>'+(stage.people||[]).map(person=>'<bdi>'+escape(person.name)+'</bdi>'+(person.title?'<small>'+escape(person.title)+'</small>':'')+(person.date?'<small dir="ltr">'+escape(String(person.date).slice(0,10))+'</small>':'')).join('')+'</div>').join('');
-  return '<style>@page{size:A4 landscape}.approval-matrix{table-layout:fixed;font-size:8pt}.approval-matrix th,.approval-matrix td{text-align:center;overflow-wrap:anywhere;padding:4px}.approval-matrix th:nth-child(2),.approval-matrix td:nth-child(2){text-align:start}.approval-signatures{display:flex;flex-wrap:wrap;gap:20px 24px;break-inside:avoid;margin-top:22px}.approval-signatures>div{flex:1 1 calc((100% - 96px)/5);min-width:150px;text-align:center;break-inside:avoid}.approval-signatures small{display:block}.approval-sign-line{border-bottom:1px solid #789;margin:20px 0 5px}</style><section class="loading"><table class="approval-matrix"><colgroup><col style="width:7%"><col style="width:25%">'+order.stage_approvals.map(()=>'<col>').join('')+'</colgroup><thead>'+row(['Tag',t('البيان','Description'),...order.stage_approvals.map(stage=>t(...stages[stage.stage]))],'th')+'</thead><tbody>'+matrix+'</tbody></table></section><div class="approval-signatures">'+blocks+'</div>';
+  return '<style>@page{size:A4 landscape}.approval-matrix{table-layout:fixed;font-size:8pt}.approval-matrix th,.approval-matrix td{text-align:center;padding:4px}.approval-matrix td{overflow-wrap:anywhere}.approval-matrix th{overflow-wrap:normal;word-break:normal;hyphens:none}.approval-matrix th:nth-child(2),.approval-matrix td:nth-child(2){text-align:start}.approval-signatures{display:flex;flex-wrap:wrap;gap:20px 24px;break-inside:avoid;margin-top:22px}.approval-signatures>div{flex:1 1 calc((100% - 96px)/5);min-width:150px;text-align:center;break-inside:avoid}.approval-signatures small{display:block}.approval-sign-line{border-bottom:1px solid #789;margin:20px 0 5px}</style><section class="loading"><table class="approval-matrix"><colgroup><col style="width:6%"><col style="width:23%">'+widths.map(width=>'<col style="width:'+(width/totalWidth*71)+'%">').join('')+'</colgroup><thead>'+stageHeader(['Tag',t('البيان','Description'),...order.stage_approvals.map(stage=>t(...stages[stage.stage]))])+'</thead><tbody>'+matrix+'</tbody></table></section><div class="approval-signatures">'+blocks+'</div>';
 }
 
 function reportFilename(customer,order,options) {
   const ar=options.locale==="ar";
-  const stage=order.kind==="maintenance"?(ar?"صيانة":"Maintenance"):options.kind==="approvals"?(ar?"حالة الاعتمادات":"Approval Status"):
-    options.kind==="delivery"?(ar?"إذن تسليم":"Delivery Note"):options.kind==="loading"?(ar?"تحميل":"Loading"):options.classification==="manufacturing"?(ar?"تصنيع":"Manufacturing"):(ar?"طلب خامات":"Material Requisition");
+  const stage=onSite(order)?(ar?"صيانة":"Maintenance"):options.kind==="approvals"?(ar?"حالة الاعتمادات":"Approval Status"):
+    options.kind==="delivery"?(ar?"إذن تسليم":"Delivery Note"):options.kind==="loading"?(ar?"تحميل":"Loading"):options.classification==="manufacturing"?(factory(order)?(ar?"صيانة بالمصنع":"Factory Maintenance"):(ar?"تصنيع":"Manufacturing")):(ar?"طلب خامات":"Material Requisition");
   const safe=(value)=>String(value||"").replace(/[\\/:*?"<>|\u0000-\u001f]/g,"_").replace(/[. ]+$/g,"").slice(0,90);
   return safe(customer.display_name||customer.name)+" - "+safe(["loading","delivery"].includes(options.kind)?order.loading_reference||order.reference:order.reference)+" - "+stage+".pdf";
 }
@@ -400,8 +419,8 @@ function report(db,state,rawOrder,options,branding) {
     order.loading_transport=db.get('SELECT * FROM ops_loading_orders WHERE order_id=? AND reference=?',[order.id,rawOrder.loading_reference]);
     if(rawOrder.loading_after_load_id!=null)order.balances=require('./production.cjs').loadingBalances(db,order.id,rawOrder.loading_after_load_id);
   }
-  if (order.kind==="maintenance") {
-    const body=projectBlock(db,project,customer,state,order,locale,branding)+maintenanceBlock(order,locale)+
+  if (onSite(order)) {
+    const body=projectBlock(db,project,customer,state,order,locale,branding)+maintenanceBlock(order,locale)+groupedWork(db,order.items.filter(item=>item.specification.category==='maintenance'),locale,order.items.map(()=>[]))+
       signatures(db,project.id,order,"maintenance",locale);
     return {html:wrap({locale,branding,title:t("تقرير الصيانة","Maintenance Report"),color:"#7992a3",body}),pdfDrawings:[]};
   }
@@ -412,9 +431,9 @@ function report(db,state,rawOrder,options,branding) {
     fail(409,"Approve the manufacturing stage before generating this order",{approval_required:true});
   const classification="";
   const title=approvals?t("حالة الاعتمادات","Approval Status"):loading?t("أمر تحميل","Loading Order")+" "+(order.loading_reference||order.reference):
-    approved?t("أمر تصنيع","Manufacturing Order"):t("طلب توريد الخامات","Material Requisition");
+    factory(order)?(approved?t("أمر صيانة بالمصنع","Factory Maintenance Order"):t("طلب خامات صيانة","Maintenance Material Requisition")):approved?t("أمر تصنيع","Manufacturing Order"):t("طلب توريد الخامات","Material Requisition");
   const drawingSets=!loading && !approvals && options.drawings===true ? order.items.map((item)=>eligibleDrawings(db,item)) : [];
-  const body=projectBlock(db,project,customer,state,order,locale,branding)+(approvals?approvalReport(db,order,locale):loading?loadingBlock(order,locale):
+  const body=projectBlock(db,project,customer,state,order,locale,branding)+(!loading&&!approvals?factoryInstructions(order,locale):'')+(approvals?approvalReport(db,order,locale):loading?loadingBlock(order,locale):
     groupedWork(db,order.items,locale,drawingSets))+(!approvals?orderSummary(order,locale):'')+(loading?loadingTransportBlock(order,locale):'')+
     (approvals?'':signatures(db,project.id,order,loading?"loading":"manufacturing",locale,options.people));
   const measured=order.stage_approvals.find(({stage})=>stage==="measurement");
@@ -448,4 +467,4 @@ async function appendDrawings(buffer,drawings) {
   return Buffer.from(await output.save());
 }
 
-module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,dimensionPair,orderSummary,loadingTransportBlock,projectBlock,signatures,panelLabels,specificationGroups,groupSubtotal,snapshotReport};
+module.exports={report,appendDrawings,reportFilename,wrap,escape,grid,row,stageHeader,dimensionPair,orderSummary,loadingTransportBlock,projectBlock,signatures,panelLabels,specificationGroups,groupSubtotal,snapshotReport};

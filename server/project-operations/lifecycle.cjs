@@ -1,13 +1,35 @@
 const {fail,parse,encode,str,date}=require('../certificate-access.cjs');
 const window=require('../document-edit-window.cjs');
+const {onSite}=require('./maintenance.cjs');
 const stages=['specifications','measurement','materials','manufacturing','qc','loading','installation','maintenance'];
+function confirmStage(db,current,body,user){
+ const stage=str(body.stage);if(!stages.includes(stage))fail(400,'Choose a work stage');
+ if(current.status==='closed')fail(409,'Reopen the order before changing its work stage');
+ if(onSite(current)&&stage!=='maintenance')fail(400,'On-site maintenance uses the maintenance stage only');
+ const production=require('./production.cjs'),details=production.orderDetails(db,current),approved=key=>details.stage_approvals.find(row=>row.stage===key)?.approved;
+ if(!onSite(current)){
+  if(db.get("SELECT 1 FROM ops_order_items oi JOIN ops_items i ON i.id=oi.item_id WHERE oi.order_id=? AND i.version<>json_extract(oi.specification,'$.version') LIMIT 1",[current.id]))fail(409,'Review the changed specifications before confirming a work stage');
+  if(stage==='maintenance'&&current.kind!=='maintenance')fail(400,'Choose a maintenance order for this stage');
+  if(stage==='materials'&&!approved('measurement'))fail(409,'Approve measurements before confirming the materials stage');
+  if(['manufacturing','maintenance','qc'].includes(stage)&&(!approved('manufacturing')||!['released','shipped'].includes(current.status)))fail(409,'Approve and release the order before confirming workshop or QC work');
+  if(stage==='loading'&&!approved('pre_shipment'))fail(409,'Approve pre-shipment QC before confirming the loading stage');
+  if(stage==='installation'&&!installation(db,current).items.some(row=>row.loaded>0))fail(409,'Confirm delivered openings before starting installation');
+ }
+ const service=parse(current.service_data,{});
+ if((body.expected_confirmation||null)!==(service.workflow_confirmed_at||null))fail(409,'The confirmed stage changed. Refresh the order before confirming another stage');
+ if(Array.isArray(body.assignees))assign(db,current,{stage,assignees:body.assignees,version:body.responsibility_version||0},user);
+ const next={...service,workflow_stage:stage,workflow_versions:Object.fromEntries(details.items.map(row=>[row.item_id,row.specification.version])),workflow_confirmed_at:new Date().toISOString(),workflow_confirmed_by:user.display_name||user.username};
+ db.run('UPDATE ops_orders SET service_data=? WHERE id=?',[encode(next),current.id]);
+ require('./core.cjs').record(db,user,current.project_id,'work_stage_confirmed',current.id,{before:service.workflow_stage||null,stage,confirmed_at:next.workflow_confirmed_at});
+ return production.orderDetails(db,production.order(db,current.project_id,current.id));
+}
 function assignments(db,id){return Object.fromEntries(db.all('SELECT * FROM ops_stage_assignments WHERE order_id=?',[id]).map(row=>[row.stage,{...parse(row.data,{}),version:row.version,updated_at:row.updated_at}]));}
 function assign(db,current,body,user){if(!stages.includes(body.stage))fail(400,'Select a work stage');const old=db.get('SELECT * FROM ops_stage_assignments WHERE order_id=? AND stage=?',[current.id,body.stage]);if(Number(body.version||0)!==Number(old?.version||0))fail(409,'The stage assignment changed. Reload before saving');const data={assignees:(body.assignees||[]).map(person=>({name:str(person.name,200),title:str(person.title,200)})).filter(person=>person.name||person.title)};
  db.run('INSERT INTO ops_stage_assignments(order_id,stage,data) VALUES(?,?,?) ON CONFLICT(order_id,stage) DO UPDATE SET data=excluded.data,version=version+1,updated_at=CURRENT_TIMESTAMP',[current.id,body.stage,encode(data)]);require('./core.cjs').record(db,user,current.project_id,'stage_responsibility_saved',current.id,{stage:body.stage,before:parse(old?.data,{}),after:data});return assignments(db,current.id);}
 function installation(db,current){const production=require('./production.cjs'),items=production.orderDetails(db,current).items,parts=production.loadingParts(db,current),saved=new Map(db.all('SELECT * FROM ops_installations WHERE order_item_id IN (SELECT id FROM ops_order_items WHERE order_id=?)',[current.id]).map(row=>[row.order_item_id,row]));
  const rows=items.map(item=>{const required=parts.filter(part=>part.order_item_id===item.id&&part.required>0);const loaded=required.length?Math.min(item.quantity,...required.map(part=>Math.floor((part.loaded+1e-8)/(part.required/item.quantity)))):0;return {order_item_id:item.id,description:require('./customer-defaults.cjs').openingDescription(item.specification),tag:item.specification.technical.tag||'',...saved.get(item.id),quantity:item.quantity,loaded,installed:saved.get(item.id)?.quantity||0};});
  const total=rows.reduce((s,row)=>s+row.quantity,0),installed=rows.reduce((s,row)=>s+row.installed,0);return {items:rows,total,installed,percent:total?installed/total*100:0,complete:total>0&&installed===total};}
-function saveInstallation(db,current,body,user){if(current.kind==='maintenance')fail(400,'Select a manufacturing work order');const before=installation(db,current),complete=before.complete;
+function saveInstallation(db,current,body,user){if(onSite(current))fail(400,'On-site maintenance does not require installation quantities');const before=installation(db,current),complete=before.complete;
  if(complete||window.info(db,'installation',current.id).locked){window.lock(db,'installation',current.id,before.items.map(row=>row.updated_at).filter(Boolean).sort()[0]);window.check(db,'installation',current.id,null,body.correction===true,body.reason);}
  if(!Array.isArray(body.items)||body.items.length!==before.items.length)fail(400,'Review all installation rows');const seen=new Set();for(const input of body.items){const row=before.items.find(row=>row.order_item_id===Number(input.order_item_id)),quantity=Number(input.installed);if(!row||seen.has(row.order_item_id)||!Number.isInteger(quantity)||quantity<0||quantity>row.loaded)fail(400,'Installed quantities must be within complete delivered openings');seen.add(row.order_item_id);
  db.run('INSERT INTO ops_installations(order_item_id,quantity,installation_date,notes) VALUES(?,?,?,?) ON CONFLICT(order_item_id) DO UPDATE SET quantity=excluded.quantity,installation_date=excluded.installation_date,notes=excluded.notes,updated_at=CURRENT_TIMESTAMP',[row.order_item_id,quantity,date(body.installation_date,true),str(input.notes,2000)]);}
@@ -15,4 +37,4 @@ function saveInstallation(db,current,body,user){if(current.kind==='maintenance')
 function reopen(db,current,body,user){const fallback=require('./production.cjs').orderDetails(db,current).edit_window.first_locked_at||current.created_at;const state=window.check(db,'order',current.id,fallback,body.correction===true,body.reason);window.lock(db,'order',current.id,state.first_locked_at||current.created_at);const before=require('./production.cjs').orderDetails(db,current);let status=current.status;
  if(current.status==='closed'){const event=db.get("SELECT details FROM ops_audit WHERE entity_id=? AND project_id=? AND action='production_order_closed' ORDER BY id DESC LIMIT 1",[current.id,current.project_id]);const previous=parse(event?.details,{}).previous;status=['draft','released','shipped'].includes(previous)?previous:db.get('SELECT 1 FROM ops_loads WHERE order_id=?',[current.id])?'shipped':'draft';db.run('UPDATE ops_orders SET status=? WHERE id=?',[status,current.id]);if(current.kind==='maintenance'&&status==='draft'){const service=parse(current.service_data,{});delete service.completed_on;delete service.completed_by;delete service.completion_notes;db.run('UPDATE ops_orders SET service_data=? WHERE id=?',[encode(service),current.id]);}}
  const revision=window.revision(db,'order',current.id,current.reference,before,{status},user,{correction:body.correction===true,reason:body.reason});require('./core.cjs').record(db,user,current.project_id,'order_reopened',current.id,{status,correction_reference:revision.reference});return require('./production.cjs').orderDetails(db,require('./production.cjs').order(db,current.project_id,current.id));}
-module.exports={stages,assignments,assign,installation,saveInstallation,reopen};
+module.exports={stages,assignments,assign,confirmStage,installation,saveInstallation,reopen};

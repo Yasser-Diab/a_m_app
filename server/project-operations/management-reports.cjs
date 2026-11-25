@@ -1,6 +1,7 @@
+const {onSite}=require('./maintenance.cjs');
 const {scopeSql,parse,idOf,date,fail,lookup,today}=require("../certificate-access.cjs");
 const {approvalParts,frameQuantity,screenQuantity,configuration}=require("./specifications.cjs");
-const {wrap,escape,row,grid,dimensionPair}=require("./reports.cjs");
+const {wrap,escape,row,stageHeader,grid,dimensionPair}=require("./reports.cjs");
 const {pageOptions}=require("./core.cjs");
 const {unitKey,unitName}=require('./order-quantities.cjs');
 const stages={installation:["التركيب","Installation"],specifications:["استكمال المواصفات","Specifications"],measurement:["اعتماد المقاسات","Measurements"],
@@ -31,7 +32,7 @@ function sourceData(db,projects){
   const items=db.all(`SELECT id,code,project_id,source_document_id,active,version,category,system,technical,commercial FROM ops_items WHERE project_id ${inside}`,[ids])
     .map(item=>({...item,technical:parse(item.technical,{}),commercial:parse(item.commercial,{})}));
   const orders=db.all(`SELECT * FROM ops_orders WHERE project_id ${inside} ORDER BY id DESC`,[ids]);
-  const openings=db.all(`SELECT oi.*,o.project_id,o.status,o.kind FROM ops_order_items oi JOIN ops_orders o ON o.id=oi.order_id
+  const openings=db.all(`SELECT oi.*,o.project_id,o.status,o.kind,o.service_data FROM ops_order_items oi JOIN ops_orders o ON o.id=oi.order_id
     WHERE o.project_id ${inside}`,[ids]).map(item=>{
       const quantities=parse(item.quantities,{}),specification=parse(item.specification,{}),technical=specification.technical||{};
       if(Object.keys(quantities).length){
@@ -76,15 +77,15 @@ function runningProjects(db,access,query={},all=false){
   const withdrawn=new Set(reviews.filter(review=>review.approved===0).map(review=>review.order_item_id+':'+review.item_version));
   for(const order of data.orders){
     const rows=openingsByOrder.get(order.id)||[];
-    const started=order.kind==='maintenance'||seenOrders.has(order.id)||rows.some(row=>seenItems.has(row.item_id));
-    const rejected=started&&order.kind!=='maintenance'&&rows.some(row=>withdrawn.has(row.id+':'+byId.get(row.item_id)?.version));
+    const started=onSite(order)||seenOrders.has(order.id)||rows.some(row=>seenItems.has(row.item_id));
+    const rejected=started&&!onSite(order)&&rows.some(row=>withdrawn.has(row.id+':'+byId.get(row.item_id)?.version));
     orderStates.set(order.id,{started,rejected});
   }
   const records=projects.map(project=>{
     const allItems=data.itemsByProject.get(project.id)||[],allOrders=data.ordersByProject.get(project.id)||[],allOpenings=data.openingsByProject.get(project.id)||[];
     const orders=allOrders.filter(order=>orderStates.get(order.id)?.started&&!(query.exclude_rejected==='1'&&orderStates.get(order.id)?.rejected));
     const orderIds=new Set(orders.map(order=>order.id));
-    const projectOpenings=allOpenings.filter(item=>orderIds.has(item.order_id)),openings=projectOpenings.filter(item=>item.kind!=="maintenance");
+    const projectOpenings=allOpenings.filter(item=>orderIds.has(item.order_id)),openings=projectOpenings.filter(item=>!onSite(item));
     const includedSources=new Set(projectOpenings.map(item=>byId.get(item.item_id)?.source_document_id));
     for(const item of allItems)if(seenItems.has(item.id)&&!openingsByItem.has(item.id))includedSources.add(item.source_document_id);
     const items=allItems.filter(item=>item.active&&includedSources.has(item.source_document_id));
@@ -92,7 +93,7 @@ function runningProjects(db,access,query={},all=false){
     const rejected=orders.length?orders.every(order=>orderStates.get(order.id)?.rejected):items.some(item=>seenItems.has(item.id))&&!items.some(item=>parts.get(item.id)?.size);
     if(query.exclude_rejected==='1'&&rejected)return null;
     const counts={items:items.length,specifications:items.filter(item=>item.system).length,measurement:0,materials:0,
-      manufacturing:0,qc:0,ordered:0,required:0,loaded:0,stale:0,maintenance:orders.filter(order=>order.kind==="maintenance"&&order.status!=="closed").length};
+      manufacturing:0,qc:0,ordered:0,required:0,loaded:0,stale:0,maintenance:orders.filter(order=>onSite(order)&&order.status!=="closed").length};
     for(const item of items){const approved=parts.get(item.id)||new Set();if(approved.has("measurement"))counts.measurement++;
       if(["profile","glass","accessories","finish"].every(key=>approved.has(key)))counts.materials++;}
     for(const opening of openings){
@@ -108,11 +109,14 @@ function runningProjects(db,access,query={},all=false){
     counts.installed=installations.filter(entry=>orderIds.has(entry.order_id)).reduce((sum,entry)=>sum+entry.quantity,0);
     const fullyOrdered=items.length>0&&items.every(item=>item.technical.quantity>0&&projectOpenings.filter(opening=>opening.item_id===item.id)
       .reduce((sum,opening)=>sum+opening.quantity,0)>=item.technical.quantity);
-    const completed=/^(مكتمل|مغلق|ملغي|completed|closed|cancelled)$/i.test(project.details.status||"")||fullyOrdered&&counts.ordered>0&&counts.installed===counts.ordered;
+    const onsiteComplete=orders.filter(onSite).every(order=>Boolean(parse(order.service_data,{}).completed_on));
+    const servicesOnlyComplete=orders.length>0&&orders.every(order=>onSite(order)&&Boolean(parse(order.service_data,{}).completed_on));
+    const completed=servicesOnlyComplete||/^(مكتمل|مغلق|ملغي|completed|closed|cancelled)$/i.test(project.details.status||"")||fullyOrdered&&counts.ordered>0&&counts.installed===counts.ordered&&onsiteComplete;
     const stage=rejected?'rejected':completed?"completed":counts.stale?"review":counts.maintenance&&!openings.length?"maintenance":
       !counts.items||counts.specifications<counts.items?"specifications":counts.measurement<counts.items?"measurement":counts.materials<counts.items?"materials":
       !counts.ordered||counts.manufacturing<counts.ordered?"manufacturing":counts.qc<counts.ordered?"qc":counts.required>0&&counts.loaded>=counts.required?"installation":"loading";
-    const active_stages=[stage];if(counts.delivered>counts.installed&&!active_stages.includes('installation'))active_stages.push('installation');
+    const manualStages=orders.filter(order=>order.status!=='closed'&&Object.entries(parse(order.service_data,{}).workflow_versions||{}).every(([id,version])=>byId.get(Number(id))?.version===version)).map(order=>parse(order.service_data,{}).workflow_stage).filter(key=>Object.hasOwn(stages,key));
+    const active_stages=[...new Set([...manualStages,stage])];if(counts.delivered>counts.installed&&!active_stages.includes('installation'))active_stages.push('installation');
     const responsibilities=Object.fromEntries(['specifications','measurement','materials','manufacturing','qc','loading','installation','maintenance'].map(key=>{
       const explicit=assigned.filter(row=>row.project_id===project.id&&orderIds.has(row.order_id)&&row.stage===key).flatMap(row=>(parse(row.data,{}).assignees||[]).map(person=>({...person,order:row.reference})));
       if(explicit.length)return [key,explicit];
@@ -120,7 +124,7 @@ function runningProjects(db,access,query={},all=false){
       if(['qc','measurement'].includes(key)){const inspection=inspections.find(row=>orderIds.has(data.openings.find(item=>item.id===row.order_item_id)?.order_id)&&row.stage===(key==='qc'?'pre_shipment':'survey'));return [key,inspection?.inspector_name?[{name:inspection.inspector_name,title:''}]:[]];}
       return [key,[]];
     }));
-    return {...project,counts,stage,active_stages,responsibilities,completed,has_rejected:rejected||orders.some(order=>orderStates.get(order.id)?.rejected),orders:orders.map(order=>({id:order.id,reference:order.reference,rejected:orderStates.get(order.id)?.rejected})),loading_percent:counts.required?round(Math.min(100,counts.loaded/counts.required*100)):0};
+    return {...project,counts,stage:!completed&&!rejected&&!counts.stale&&manualStages.length?manualStages[0]:stage,active_stages,responsibilities,completed,has_rejected:rejected||orders.some(order=>orderStates.get(order.id)?.rejected),orders:orders.map(order=>({id:order.id,reference:order.reference,rejected:orderStates.get(order.id)?.rejected})),loading_percent:counts.required?round(Math.min(100,counts.loaded/counts.required*100)):0};
   }).filter(item=>item&&(item.has_rejected||query.include_completed===true||query.include_completed==="1"||!item.completed));
   const selected=String(query.stages||'').split(',').filter(stage=>Object.hasOwn(stages,stage));
   const filtered=selected.length?records.filter(item=>item.active_stages.some(stage=>selected.includes(stage))):records;
@@ -145,7 +149,7 @@ function workQuantities(db,access,query={},all=false){
       width_mm:technical.width_mm??null,height_mm:technical.height_mm??null,
       estimated_area:[technical.quantity,technical.width_mm,technical.height_mm].every(value=>value!=null)?round(technical.quantity*technical.width_mm*technical.height_mm/1e6):null,...values};};
   if(mode!=="loading")for(const item of data.items.filter(item=>item.active))records.push(makeRow(item));
-  else for(const opening of data.openings.filter(item=>item.kind!=="maintenance"&&["released","shipped","closed"].includes(item.status))){
+  else for(const opening of data.openings.filter(item=>!onSite(item)&&["released","shipped","closed"].includes(item.status))){
     const selected=(data.loadsByOpening.get(opening.id)||[]).filter(load=>load.loading_date<=to),before={},after={},loaded={};
     for(const load of selected){after[load.kind]=(after[load.kind]||0)+load.quantity;
       if(from&&load.loading_date<from)before[load.kind]=(before[load.kind]||0)+load.quantity;
@@ -180,9 +184,9 @@ function managementReport(kind,data,options,branding){
     const ownerText=(item,key)=>owners.includes(key)?(item.responsibilities[key]||[]).map(person=>[person.name,person.title,person.order].filter(Boolean).join(' · ')).join(' / '):'';
     const selected=String(options.stages||'').split(',').filter(key=>Object.hasOwn(stages,key));
     body='<section>'+grid([[t('تاريخ التقرير','Report date'),today()],[t('المشروعات','Projects'),data.total],[t('المراحل','Stages'),selected.length?selected.map(key=>t(...stages[key])).join(' / '):t('تقرير عام — كل المراحل','General report — all stages')]])+'</section>'+
-      '<section class="loading"><table class="progress-table" style="table-layout:fixed"><colgroup><col style="width:22%"><col style="width:15%">'+Array.from({length:7},()=>'<col style="width:9%">').join('')+'</colgroup><thead>'+row([t('المشروع / العميل','Project / customer'),t('المرحلة الحالية','Current stage'),t('المواصفات','Specifications'),t('المقاسات','Measurements'),t('الخامات','Materials'),t('التصنيع','Manufacturing'),t('الفحص','QC'),t('التحميل','Loading'),t('التركيب','Installation')],'th')+'</thead><tbody>'+
+      '<section class="loading"><table class="progress-table" style="table-layout:fixed"><colgroup><col style="width:22%"><col style="width:15%">'+Array.from({length:7},()=>'<col style="width:9%">').join('')+'</colgroup><thead>'+stageHeader([t('المشروع / العميل','Project / customer'),t('المرحلة الحالية','Current stage'),t('المواصفات','Specifications'),t('المقاسات','Measurements'),t('الخامات','Materials'),t('التصنيع','Manufacturing'),t('الفحص','QC'),t('التحميل','Loading'),t('التركيب','Installation')])+'</thead><tbody>'+
       data.items.map(item=>row([item.code+' · '+item.name+' / '+item.customer+(item.orders?.length?'\n'+item.orders.map(order=>order.reference+(order.rejected?' ('+t(...stages.rejected)+')':'')).join(' / '):''),[t(...stages[item.stage]),item.details.status,ownerText(item,'maintenance')].filter(Boolean).join('\n'),
-        ...[['specifications',ratio(item.counts.specifications,item.counts.items)],['measurement',ratio(item.counts.measurement,item.counts.items)],['materials',ratio(item.counts.materials,item.counts.items)],['manufacturing',ratio(item.counts.manufacturing,item.counts.ordered)],['qc',ratio(item.counts.qc,item.counts.ordered)],['loading',item.counts.required?format(item.loading_percent)+'%':'—'],['installation',ratio(item.counts.installed,item.counts.ordered)]].map(([key,value])=>[value,ownerText(item,key)].filter(Boolean).join('\n'))])).join('').replaceAll('\n','<br>')+'</tbody></table></section><style>.progress-table td,.progress-table th{overflow-wrap:anywhere;vertical-align:top}.progress-table td{font-size:8pt}</style>';
+        ...[['specifications',ratio(item.counts.specifications,item.counts.items)],['measurement',ratio(item.counts.measurement,item.counts.items)],['materials',ratio(item.counts.materials,item.counts.items)],['manufacturing',ratio(item.counts.manufacturing,item.counts.ordered)],['qc',ratio(item.counts.qc,item.counts.ordered)],['loading',item.counts.required?format(item.loading_percent)+'%':'—'],['installation',ratio(item.counts.installed,item.counts.ordered)]].map(([key,value])=>[value,ownerText(item,key)].filter(Boolean).join('\n'))])).join('').replaceAll('\n','<br>')+'</tbody></table></section><style>@page{size:A4 landscape}.progress-table th{font-size:8pt}.progress-table td,.progress-table th{vertical-align:top}.progress-table th{vertical-align:middle;overflow-wrap:normal;word-break:normal;hyphens:none}.progress-table td{overflow-wrap:anywhere;font-size:8pt}</style>';
   }else{
     title=t("حصر كميات الأعمال","Work Quantity Takeoff");const loaded=data.mode==="loading";
     body='<section>'+grid([[t("النطاق","Scope"),loaded?t("التحميل المؤكد","Confirmed loading"):data.mode==="customer"?t("العميل","Customer"):t("المشروع بالكامل","Whole project")],

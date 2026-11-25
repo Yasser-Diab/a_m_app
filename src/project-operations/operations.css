@@ -98,3 +98,5 @@
 .ops-progress .pc-toolbar>.pc-field{max-inline-size:220px}
 @media(max-width:900px){.ops-progress-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-completed-check{grid-column:1/-1}}
 @media(max-width:560px){.ops-progress-filters{grid-template-columns:minmax(0,1fr)}.ops-stage-filter>.ops-stage-choices{min-inline-size:0;inline-size:100%;grid-template-columns:minmax(0,1fr)}}
+
+.ops-stage-confirmation{align-items:end}.ops-stage-confirmation>.pc-field{flex:1 1 240px}.ops-stage-confirmation>button{min-inline-size:150px}

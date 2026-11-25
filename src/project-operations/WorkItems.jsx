@@ -106,7 +106,7 @@ function SpecEditor({draft,change,catalogue,t,locale,nested=false}) {
     </div>
     {system&&<>
       <fieldset><legend>{t("الموقع والمقاسات والخامات","Location, measurements and materials")}</legend>
-        <div className="pc-form">{catalogue.common.map(input)}</div>
+        <div className="pc-form">{catalogue.common.filter(field=>!category?.hidden_common?.includes(field.key)).map(input)}</div>
       </fieldset>
       <fieldset><legend>{t("تفاصيل التكوين","Configuration details")}</legend><div className="pc-form">{specific.map(input)}</div></fieldset>
       {opening&&<>

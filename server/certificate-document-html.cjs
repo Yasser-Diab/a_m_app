@@ -266,6 +266,7 @@ function buildCertificateHtml(model) {
     h2 span { font-size: 8pt; font-weight: 400; margin-inline-start: 2mm; color:${reportColors.muted}; }
     table { width: 100%; table-layout: fixed; border: 0; border-collapse: collapse; font-size: 9pt; }
     th, td { padding:.9mm 1.5mm; vertical-align:top; text-align:start; border:0; box-shadow:none; outline:0; }
+    h1,h2,h3,thead th { word-break:normal;overflow-wrap:normal;hyphens:none; }
     thead th { background:${reportColors.header}; border-block-end:1px solid ${reportColors.headerLine}; color:${reportColors.text}; font-weight:700; font-size:8pt; overflow-wrap:normal; }
     table .number { font-variant-numeric: tabular-nums; text-align: end; }
     table td.number, .finance td bdi { white-space:nowrap; overflow-wrap:normal; font-size:var(--value-size,9pt); }

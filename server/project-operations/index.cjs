@@ -187,7 +187,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   endpoint("post","/reports/:kind/pdf","ops_export",async(req,access,_,res)=>{
     const data=managementData(req.params.kind,access,req.body,true);
     const html=management.managementReport(req.params.kind,data,req.body,branding());
-    const pdf=await renderPdf(html,{report_language:req.body.locale==="ar"?"ar":"en",prepared_by:access.user.display_name||access.user.username});
+    const pdf=await renderPdf(html,{landscape:req.params.kind==="progress",report_language:req.body.locale==="ar"?"ar":"en",prepared_by:access.user.display_name||access.user.username});
     const name=(req.params.kind==="progress"?"Current Work Summary":"Work Quantity Takeoff")+" - "+new Date().toISOString().slice(0,10)+".pdf";
     res.set("Cache-Control","no-store").set("Access-Control-Expose-Headers","Content-Disposition").attachment(name).type("application/pdf").send(pdf);
   });
@@ -312,6 +312,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
   get(base+'/orders/:orderId/installation',(req,_,id)=>require('./lifecycle.cjs').installation(db,order(req,id)));
   patch(base+'/orders/:orderId/installation','ops_edit',(req,access,id)=>require('./lifecycle.cjs').saveInstallation(db,order(req,id),req.body,access.user));
   patch(base+'/orders/:orderId/responsibilities','ops_edit',(req,access,id)=>require('./lifecycle.cjs').assign(db,order(req,id),req.body,access.user));
+  post(base+'/orders/:orderId/confirm-stage','ops_edit',(req,access,id)=>require('./lifecycle.cjs').confirmStage(db,order(req,id),req.body,access.user));
   post(base+'/orders/:orderId/reopen','ops_release',(req,access,id)=>require('./lifecycle.cjs').reopen(db,order(req,id),req.body,access.user));
   post(base+"/orders/:orderId/loading","ops_load",(req,access,id)=>production.loadBatch(db,order(req,id),req.body,access.user));
   post(base+'/orders/:orderId/shipment-preparation','ops_load',(req,access,id)=>production.shipmentPreparation(db,order(req,id),access.user));

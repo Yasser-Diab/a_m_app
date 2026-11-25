@@ -98,7 +98,7 @@ async function main() {
     assert.equal(initial.commercial.quantity,100);
     const originalRecord=db.get("SELECT * FROM work_items WHERE id=?",[sourceId]);
     const cat=await api(ops+"/catalogue");
-    assert.equal(cat.categories.reduce((sum,row)=>sum+row.systems.length,0),180);
+    assert.equal(cat.categories.filter(row=>row.id!=='maintenance').reduce((sum,row)=>sum+row.systems.length,0),180);
     const feature=(category,system,key)=>fieldsFor(category,configuration(db,category,system),{}).some((field)=>field.key===key);
     assert.ok(feature("windows","windows-8","tracks"));
     assert.equal(feature("windows","windows-8","hinge"),false);

@@ -9,7 +9,7 @@ import ProjectSignatures from "./ProjectSignatures.jsx";
 import ReportEditor from './ReportEditor.jsx';
 import SourceRefresh from './SourceRefresh.jsx';
 import LoadingExtras from './LoadingExtras.jsx';
-import {openingDescription} from './terminology.js';
+import {openingDescription,onSiteMaintenance,factoryMaintenance} from './terminology.js';
 
 const checkLabels={measurements:["المقاسات","Measurement conformity"],profile:["القطاعات","Profile conformity"],
   finish:["التشطيب","Finish"],glass:["الزجاج","Glass"],opening:["اتجاه الفتح والمقابض","Opening and handles"],
@@ -45,13 +45,13 @@ export default function Production(props) {
     <Table headers={[t("رقم الأمر","Order no."),t("الفاتورة / عرض السعر","Invoice / quotation"),t("نوع العمل","Work type"),t("الحالة","Status"),t("موعد التسليم","Required by")]}
       empty={t("لا توجد أوامر إنتاج.","No production orders.")}
       rows={(orders.data?.items||[]).map((row)=>[row.id,[<button type="button" className="pc-name" onClick={()=>setOrder(row.id)}>
-        {row.reference}</button>,<bdi>{row.source_reference?(row.source_type==='invoice'?t('فاتورة','Invoice'):t('عرض سعر','Quotation'))+' '+row.source_reference:'—'}{row.source_title?' · '+row.source_title:''}</bdi>,row.kind==="maintenance"?t("صيانة","Maintenance"):t("تصنيع","Manufacturing"),
-        row.completed_on?t("مكتمل","Completed"):row.kind==="maintenance"?
+        {row.reference}</button>,<bdi>{row.source_reference?(row.source_type==='invoice'?t('فاتورة','Invoice'):t('عرض سعر','Quotation'))+' '+row.source_reference:'—'}{row.source_title?' · '+row.source_title:''}</bdi>,row.kind==="maintenance"?(row.maintenance_mode==='factory'?t("صيانة بالمصنع","Factory maintenance"):t("صيانة بالموقع","On-site maintenance")):t("تصنيع","Manufacturing"),
+        row.completed_on?t("مكتمل","Completed"):row.kind==="maintenance"&&row.maintenance_mode!=='factory'?
           (row.status==="draft"?t("مفتوح","Open"):t("ملغى","Cancelled")):display(states,row.status,t),
         <bdi>{row.required_date||"—"}</bdi>]])}/>
     <Page data={orders.data} onPage={orders.setPage} t={t}/>
     {create&&<CreateOrder {...props} maintenance={create==="maintenance"} close={()=>setCreate("")} onCreated={(row)=>{setCreate("");setOrder(row.id);}}/>}
-    {current&&(current.kind==="maintenance"?<MaintenanceDetails {...props} order={current} key={current.id}/>:
+    {current&&(onSiteMaintenance(current)?<MaintenanceDetails {...props} order={current} key={current.id}/>:
       <OrderDetails {...props} order={current} key={current.id}/>)}
   </>;
 }
@@ -59,18 +59,19 @@ export default function Production(props) {
 function CreateOrder({request,path,t,reload,close,onCreated,maintenance,ctx,preferred,onPrepareSource}) {
   const sources=[...new Map([...ctx.boqs,...ctx.linked_boqs].map(source=>[source.id,source])).values()].sort((a,b)=>b.id-a.id);
   const [sourceId,setSource]=useState(()=>String(sources.find(source=>source.id===preferred?.id)?.id||sources[0]?.id||''));
+  const [maintenanceMode,setMaintenanceMode]=useState('site');
   const linked=ctx.linked_boqs.some(source=>String(source.id)===sourceId);
-  const list=useResource(request,linked?path+'/order-items'+queryString({boq_id:sourceId,kind:maintenance?'maintenance':'manufacturing'}):null);
+  const list=useResource(request,linked?path+'/order-items'+queryString({boq_id:sourceId,kind:maintenance?'maintenance':'manufacturing',maintenance_mode:maintenance?maintenanceMode:undefined}):null);
   const sourceOrders=useResource(request,linked?path+'/orders'+queryString({source_document_id:sourceId}):null);
   const existing=!maintenance&&sourceOrders.data?.items.find(order=>String(order.source_document_id)===sourceId&&order.kind==='manufacturing');
   const [search,setSearch]=useState(''),[selected,setSelected]=useState({});
   const initialized=useRef(null);
   const eligible=(list.data?.items||[]).filter(item=>item.active&&(maintenance||item.system)&&item.available_quantity>0);
   useEffect(()=>{
-    if(!list.data||initialized.current===sourceId)return;
-    initialized.current=sourceId;
+    if(!list.data||initialized.current===sourceId+':'+maintenanceMode)return;
+    initialized.current=sourceId+':'+maintenanceMode;
     setSelected(maintenance?{}:Object.fromEntries(eligible.map(item=>[item.id,item.available_quantity])));
-  },[list.data,sourceId,maintenance]);
+  },[list.data,sourceId,maintenance,maintenanceMode]);
   const [commandKey,setCommandKey]=useState(newKey),[required,setRequired]=useState(''),[instructions,setInstructions]=useState(''),[assignee,setAssignee]=useState('');
   const team=useResource(request,maintenance?path+'/people':null);
   const action=useAction(request,result=>{onCreated(result);reload();});
@@ -83,8 +84,9 @@ function CreateOrder({request,path,t,reload,close,onCreated,maintenance,ctx,pref
   return <Dialog t={t} wide title={maintenance?t('أمر صيانة جديد','New maintenance order'):t('أمر تشغيل جديد','New work order')} onClose={close}>
     <form className="pc-stack" onSubmit={event=>{
       event.preventDefault();action.run(path+'/orders','POST',{command_key:commandKey,source_document_id:Number(sourceId),include_all:!maintenance&&count===eligible.length&&!unconfigured&&eligible.every(item=>Number(selected[item.id])===Number(item.technical.quantity)),required_date:required,
-        kind:maintenance?'maintenance':'manufacturing',instructions,assignee_id:assignee,items:Object.entries(selected).map(([item_id,quantity])=>({item_id,quantity}))});
+        kind:maintenance?'maintenance':'manufacturing',maintenance_mode:maintenance?maintenanceMode:undefined,instructions,assignee_id:assignee,items:Object.entries(selected).map(([item_id,quantity])=>({item_id,quantity}))});
     }}>
+      {maintenance&&<><Pick label={t('مكان تنفيذ الصيانة','Maintenance location')} required placeholder="" value={maintenanceMode} items={[["site",t('في الموقع — بدون تصنيع أو تحميل','On site — no manufacturing or loading')],["factory",t('بالمصنع — تجهيز وفحص وتحميل وإعادة تسليم','Factory — processing, QC, loading and return delivery')]]} onChange={value=>{setMaintenanceMode(value);setSelected({});setCommandKey(newKey());initialized.current=null;}}/><p className="pc-caption">{t('حدد مكان الصيانة في جدول المواصفات لكل بند. تظهر هنا البنود المطابقة للمكان المختار.','Set the maintenance location on each specification line. This list shows items matching the selected location.')}</p></>}
       <Pick label={t('الفاتورة / عرض السعر لهذا الأمر','Invoice / quotation for this order')} value={sourceId} required placeholder=""
         onChange={id=>{if(id===sourceId)return;setSource(id);setCommandKey(newKey());setSelected({});setSearch('');initialized.current=null;}}
         items={sources.map(source=>[source.id,(source.document_type==='invoice'?t('فاتورة','Invoice'):t('عرض سعر','Quotation'))+' '+source.operation_no+(source.title?' · '+source.title:'')])}/>
@@ -98,7 +100,7 @@ function CreateOrder({request,path,t,reload,close,onCreated,maintenance,ctx,pref
           <Text label={t('أعمال الصيانة المطلوبة','Maintenance instructions')} value={instructions} onChange={setInstructions}/></>}
         <Text label={t('بحث في البنود','Find work items')} value={search} onChange={setSearch}/>
       </div>
-      {unconfigured>0&&<p>{t(`${unconfigured} بند يحتاج تحديد نوع الفتح قبل إدراجه في أمر التصنيع.`,`${unconfigured} items need an opening type before inclusion in a manufacturing order.`)}{' '}
+      {!maintenance&&unconfigured>0&&<p>{t(`${unconfigured} بند يحتاج تحديد نوع الفتح قبل إدراجه في أمر التصنيع.`,`${unconfigured} items need an opening type before inclusion in a manufacturing order.`)}{' '}
         {onPrepareSource&&<button type="button" onClick={()=>onPrepareSource(sources.find(source=>String(source.id)===sourceId))}>{t('تجهيز المواصفات','Prepare specifications')}</button>}</p>}
       <div className="pc-toolbar"><strong role="status">{t(`المحدد: ${count} بند / ${total} فتحة`,`Selected: ${count} items / ${total} openings`)}</strong>
         <button type="button" onClick={()=>setSelected(current=>({...current,...Object.fromEntries(visible.map(item=>[item.id,current[item.id]??item.available_quantity]))}))}>{t('تحديد كل نتائج البحث','Select all matching items')}</button>
@@ -124,7 +126,7 @@ function MaintenanceDetails({order,path,request,t,can,reload,...props}) {
   const opened=order.status==="draft";
   return <section className="ops-section pc-stack">
     <div className="pc-toolbar">
-      <h3><bdi>{order.reference}</bdi></h3>
+      <h3><bdi>{order.reference}</bdi>{factoryMaintenance(order)&&<> · {t("صيانة بالمصنع","Factory maintenance")}</>}</h3>
       <span className="pc-chip">{service.completed_on?t("مكتمل","Completed"):opened?t("مفتوح","Open"):t("ملغى","Cancelled")}</span>
       {opened&&can("edit")&&<button type="button" className="primary" onClick={()=>{setNotes("");setDialog("complete");}}>
         {t("إنهاء الصيانة","Complete maintenance")}</button>}
@@ -133,9 +135,10 @@ function MaintenanceDetails({order,path,request,t,can,reload,...props}) {
       {can("export")&&<button type="button" onClick={()=>setDialog("report")}>{t("تقرير الصيانة","Maintenance report")}</button>}
     </div>
     {!opened&&can('release')&&<button type="button" onClick={()=>{const correction=order.edit_window?.correction_required;const reason=window.prompt(correction?t('سبب مستند التصحيح','Correction document reason'):t('سبب إعادة الفتح','Reopening reason'));if(reason)action.run(endpoint+'/reopen','POST',{correction,reason});}}>{order.edit_window?.correction_required?t('إنشاء تصحيح وإعادة فتح','Create correction and reopen'):t('إعادة فتح للتعديل','Reopen for editing')}</button>}
+    <OrderLifecycle {...{order,endpoint,request,t,can,reload}} revision={props.revision}/>
     <dl className="ops-project-meta">
       {[[t("مسؤول الصيانة","Assigned to"),service.assignee?.name],[t("موعد التسليم","Required by"),order.required_date],
-        [t("أعمال الصيانة المطلوبة","Instructions"),service.instructions],[t("تاريخ الإنهاء","Completed on"),service.completed_on],
+        [t("مكان الصيانة","Maintenance location"),t("في الموقع","On site")],[t("أعمال الصيانة المطلوبة","Instructions"),service.instructions],[t("تاريخ الإنهاء","Completed on"),service.completed_on],
         [t("ملاحظات الإنهاء","Completion notes"),service.completion_notes]].filter(([,value])=>value)
         .map(([label,value])=><div key={label}><dt>{label}</dt><dd><bdi>{value}</bdi></dd></div>)}
     </dl>
@@ -180,11 +183,15 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
       {can("release")&&!["closed","shipped"].includes(order.status)&&<button type="button" onClick={()=>setDialog("close")}>{t("إغلاق الأمر","Close order")}</button>}
       {can("qc")&&order.status!=="closed"&&<button type="button" onClick={()=>setDialog("qc")}>{t("تسجيل فحص","Record inspection")}</button>}
       {can("load")&&order.status==="released"&&<button type="button" onClick={()=>setDialog("load")}>{t("تسجيل التحميل","Record loading")}</button>}
-      {can("export")&&<><button type="button" onClick={()=>setDialog("manufacturing")}>{t("أمر تصنيع / طلب خامات","Manufacturing order / materials")}</button>
+      {can("export")&&<><button type="button" onClick={()=>setDialog("manufacturing")}>{factoryMaintenance(order)?t("أمر صيانة بالمصنع / طلب خامات","Factory maintenance order / materials"):t("أمر تصنيع / طلب خامات","Manufacturing order / materials")}</button>
         <button type="button" onClick={()=>setDialog("loadingReport")}>{t("أمر تحميل","Loading order")}</button>
         <button type="button" onClick={()=>setDialog("approvalReport")}>{t("تقرير الاعتمادات","Approval status report")}</button></>}
     </div>
     {['closed','shipped'].includes(order.status)&&can('release')&&<div className="pc-toolbar"><span>{order.edit_window?.editable?t('التعديل متاح حتى ','Editable until ')+order.edit_window.editable_until:t('انتهت مهلة التعديل؛ يلزم مستند تصحيح','Editing window expired; a correction document is required')}</span><button type="button" onClick={()=>{const correction=order.edit_window?.correction_required;const reason=window.prompt(correction?t('سبب مستند التصحيح','Correction document reason'):t('سبب إعادة الفتح','Reason for reopening'));if(reason)action.run(endpoint+'/reopen','POST',{correction,reason});}}>{order.edit_window?.correction_required?t('إنشاء تصحيح وإعادة فتح','Create correction and reopen'):t('إعادة فتح للتعديل','Reopen for editing')}</button></div>}
+    {factoryMaintenance(order)&&(order.service?.assignee?.name||order.service?.instructions)&&<dl className="ops-project-meta">
+      {[[t('مسؤول الصيانة','Assigned technician'),order.service.assignee?.name],[t('أعمال الصيانة المطلوبة','Maintenance instructions'),order.service.instructions]].filter(([,value])=>value)
+        .map(([label,value])=><div key={label}><dt>{label}</dt><dd><bdi>{value}</bdi></dd></div>)}
+    </dl>}
     <OrderLifecycle {...{order,endpoint,request,t,can,reload,revision}}/>
     {order.source_document_id&&<SourceRefresh {...{ctx,path,request,can,t,reload}} documentId={order.source_document_id}/>}
     <ErrorMessage error={action.error||people.error}/>
@@ -235,7 +242,7 @@ function OrderDetails({order,path,t,request,can,reload,revision,uiLanguage,apiBa
     {dialog?.historyReport&&<Dialog t={t} title={dialog.reference} onClose={()=>setDialog(null)}><PdfOutput {...{t,can,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport}} kind="manufacturing" filters={{}} endpoint={'/api/project-operations'+endpoint+'/history/'+dialog.historyReport+'/pdf'}/></Dialog>}
     {dialog?.shipmentReport&&<Dialog t={t} title={dialog.reference} onClose={()=>setDialog(null)}><PdfOutput {...{t,can,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport}} kind="loading" filters={{}} endpoint={'/api/project-operations'+endpoint+'/shipments/'+dialog.shipmentReport+'/pdf'}/></Dialog>}
     {["manufacturing","loadingReport","approvalReport"].includes(dialog)&&<Report {...{endpoint,t,uiLanguage,apiBase,session,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}}
-      reference={order.reference} loading={dialog==="loadingReport"} approvals={dialog==="approvalReport"}
+      reference={order.reference} workshop={factoryMaintenance(order)} loading={dialog==="loadingReport"} approvals={dialog==="approvalReport"}
       people={people.data||[]} close={()=>setDialog(null)}/>}
     {dialog==="close"&&<Dialog t={t} title={t("إغلاق الأمر","Close production order")} onClose={()=>setDialog(null)}>
       <form className="pc-stack" onSubmit={(event)=>{event.preventDefault();decide("closed");}}>
@@ -319,7 +326,7 @@ function Assignments({people,values,set,t,required=false}) {
     required={required&&key==="loading"} items={optionsForPeople}/>)}</div>;
 }
 
-export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenance,approvals,people,close,apiBase,session,reference,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}) {
+export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenance,workshop,approvals,people,close,apiBase,session,reference,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}) {
   const [reviewApprovals,setReviewApprovals]=useState(false);
   const [draft,setDraft]=useState({classification:"materials",drawings:true,measurement_watermark:false,people:{},locale:uiLanguage});
   const [pdf,setPdf]=useState(null);
@@ -345,7 +352,7 @@ export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenan
   useEffect(()=>()=>{if (pdf) URL.revokeObjectURL(pdf.url);},[pdf]);
   const set=(key,value)=>{setDraft({...draft,[key]:value});setPdf(null);setError(null);};
   const title=approvals?t("حالة الاعتمادات","Approval Status"):maintenance?t("تقرير الصيانة","Maintenance Report"):loading?t("أمر تحميل","Loading Order"):
-    t("أمر تصنيع / طلب خامات","Manufacturing Order / Material Requisition");
+    workshop?t("أمر صيانة بالمصنع / طلب خامات","Factory Maintenance Order / Material Requisition"):t("أمر تصنيع / طلب خامات","Manufacturing Order / Material Requisition");
   const kind=approvals?"approvals":maintenance?"maintenance":loading?"loading":"manufacturing";
   const fileName=pdf?.filename||reference+" - "+kind+".pdf";
   async function preview(event) {
@@ -395,7 +402,7 @@ export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenan
           items={[["ar",t("العربية","Arabic")],["en",t("الإنجليزية","English")]]}/>
         {!loading&&!maintenance&&!approvals&&<Pick label={t("نوع التقرير","Report type")} value={draft.classification} required
           onChange={(value)=>set("classification",value)} items={[
-            ["materials",t("طلب خامات","Material requisition")],["manufacturing",t("أمر تصنيع","Manufacturing order")],
+            ["materials",t("طلب خامات","Material requisition")],["manufacturing",workshop?t("أمر صيانة بالمصنع","Factory maintenance order"):t("أمر تصنيع","Manufacturing order")],
           ]}/>}
       </div>
       {loading&&<div className="pc-stack">

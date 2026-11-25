@@ -4,6 +4,7 @@ const {createHash}=require('node:crypto');
 const {nextReference}=require("./references.cjs");
 const {configuration,approvalParts,loadingQuantities,frameQuantity,screenQuantity,number} = require("./specifications.cjs");
 const {openingDescription}=require('./customer-defaults.cjs');
+const {onSite,factory,mode:maintenanceMode}=require('./maintenance.cjs');
 
 const qcStages = ["survey","receipt","cutting","assembly","glazing","pre_shipment","installation","handover"];
 const qcChecks = ["measurements","profile","finish","glass","opening","accessories","fixing","packaging"];
@@ -44,7 +45,7 @@ function order(db,projectId,id) {
 function orderPage(db,projectId,query) {
   const {page,limit,offset}=pageOptions(query);
   const source=idOf(query.source_document_id),params=[projectId,source,source];
-  const items=db.all(`SELECT o.id,o.reference,o.status,o.kind,o.required_date,o.source_document_id,
+  const items=db.all(`SELECT o.id,o.reference,o.status,o.kind,o.required_date,o.source_document_id,json_extract(o.service_data,'$.mode') AS maintenance_mode,
     d.operation_no AS source_reference,d.document_type AS source_type,d.title AS source_title,json_extract(o.service_data,'$.completed_on') AS completed_on
     FROM ops_orders o LEFT JOIN documents d ON d.id=o.source_document_id WHERE o.project_id=? AND (? IS NULL OR o.source_document_id=?)
     ORDER BY o.id DESC LIMIT ? OFFSET ?`,[...params,limit,offset]);
@@ -81,7 +82,12 @@ function addOrder(db,projectId,body,user) {
   if (!Array.isArray(body.items) || !body.items.length) fail(400,"Select at least one BOQ item");
   const kind=body.kind==="maintenance"?"maintenance":"manufacturing";
   const maintenance=kind==="maintenance";
+  const mode=maintenance?(body.maintenance_mode||'site'):null;
+  if(maintenance&&!['site','factory'].includes(mode))fail(400,'Select on-site or factory maintenance');
+  const workshop=maintenance&&mode==='factory';
   const prepared=body.items.map(entry=>({entry,item:getItem(db,projectId,idOf(entry.item_id))}));
+  if(!maintenance&&prepared.some(({item})=>item.category==='maintenance'))fail(400,'Create a maintenance order for maintenance work items');
+  if(maintenance&&prepared.some(({item})=>item.category==='maintenance'&&maintenanceMode(item.technical)!==mode))fail(400,'Choose maintenance items with the same on-site or factory location');
   const sources=new Set(prepared.map(({item})=>item.source_document_id).filter(Boolean));
   const source=idOf(body.source_document_id)||(sources.size===1?[...sources][0]:null);
   if(body.source_document_id!=null&&(!source||sources.size!==1||!sources.has(source)))fail(400,'Choose openings from the selected invoice or quotation');
@@ -93,7 +99,7 @@ function addOrder(db,projectId,body,user) {
   }
   let sourceScope='selected';
   if(!maintenance&&body.include_all===true){
-    const active=itemPage(db,projectId,{boq_id:source,all:'1'}).items.filter(item=>item.active);
+    const active=itemPage(db,projectId,{boq_id:source,all:'1'}).items.filter(item=>item.active&&item.category!=='maintenance');
     const counts=new Map(prepared.map(({entry,item})=>[item.id,Number(entry.quantity)]));
     if(!source||active.length!==prepared.length||active.some(item=>!item.system||counts.get(item.id)!==Number(item.technical.quantity)))
       fail(409,'The source openings changed. Review all openings before creating the order');
@@ -103,14 +109,14 @@ function addOrder(db,projectId,body,user) {
   const requestedPerson=idOf(body.assignee_id);
   const assignee=maintenance&&requestedPerson?people(db,projectId).find(({id})=>id===requestedPerson):null;
   if (maintenance&&requestedPerson&&!assignee) fail(400,"Select a member of this project’s team");
-  const service=maintenance?{instructions:str(body.instructions,3000),assignee}:null;
+  const service=maintenance?{mode,instructions:str(body.instructions,3000),assignee}:null;
   if (db.get("SELECT 1 FROM ops_orders WHERE project_id=? AND reference=? COLLATE NOCASE",[projectId,reference]))
     fail(409,"An order already uses this reference");
   const id=db.run("INSERT INTO ops_orders(project_id,source_document_id,source_scope,reference,required_date,created_by,command_key,kind,service_data) VALUES (?,?,?,?,?,?,?,?,?)",
     [projectId,source,sourceScope,reference,date(body.required_date,true),user.id,commandKey,kind,encode(service||{})]).lastInsertRowid;
   const used=new Set();
   for (const {entry,item} of prepared) {
-    if (!item.active || (!maintenance&&!item.system) || used.has(item.id)) fail(400,"Select distinct eligible BOQ items");
+    if (!item.active || ((!maintenance||workshop)&&!item.system) || used.has(item.id)) fail(400,"Select distinct eligible BOQ items");
     const quantity=number(entry.quantity,maintenance?"maintenance quantity":"production quantity",{integer:true,positive:true});
     if (!quantity) fail(400,"Enter the quantity for "+item.code);
     if (!maintenance) {
@@ -119,8 +125,8 @@ function addOrder(db,projectId,body,user) {
       if (!item.technical.quantity || reserved+quantity>item.technical.quantity)
         fail(400,"Production quantity exceeds the unassigned openings for " + item.code);
     }
-    const system=maintenance?null:configuration(db,item.category,item.system);
-    const quantities=maintenance?{}:loadingQuantities(item.category,system,item.technical,quantity);
+    const system=item.system?configuration(db,item.category,item.system):null;
+    const quantities=maintenance&&!workshop?{}:loadingQuantities(item.category,system,item.technical,quantity);
     db.run("INSERT INTO ops_order_items(order_id,item_id,quantity,quantities,specification) VALUES (?,?,?,?,?)",
       [id,item.id,quantity,encode(quantities),encode({...item,original:undefined,
         system_label:system?{ar:system.ar,en:system.en}:null})]);
@@ -134,7 +140,8 @@ function availableItems(db,projectId,query={}){
   const result=itemPage(db,projectId,{...query,all:'1'}),maintenance=query.kind==='maintenance';
   const reserved=new Map(db.all(`SELECT oi.item_id,SUM(oi.quantity) AS quantity FROM ops_order_items oi JOIN ops_orders o ON o.id=oi.order_id
     WHERE o.project_id=? AND o.kind='manufacturing' GROUP BY oi.item_id`,[projectId]).map(row=>[row.item_id,Number(row.quantity)]));
-  return {...result,items:result.items.map(item=>({...item,reserved_quantity:reserved.get(item.id)||0,
+  const eligible=result.items.filter(item=>maintenance?(item.category!=='maintenance'||!query.maintenance_mode||maintenanceMode(item.technical)===query.maintenance_mode):item.category!=='maintenance');
+  return {...result,total:eligible.length,items:eligible.map(item=>({...item,reserved_quantity:reserved.get(item.id)||0,
     available_quantity:maintenance?(Number(item.technical.quantity)||1):Math.max(0,(Number(item.technical.quantity)||0)-(reserved.get(item.id)||0))}))};
 }
 
@@ -214,7 +221,7 @@ function orderEditWindow(db,current) {
 function reviewStage(db,current,body,access) {
   require("../document-edit-window.cjs").check(db,"order",current.id,orderEditWindow(db,current).first_locked_at);
   const stage=str(body.stage);
-  if (!orderStages.includes(stage)||typeof body.approved!=="boolean"||current.kind==="maintenance")
+  if (!orderStages.includes(stage)||typeof body.approved!=="boolean"||onSite(current))
     fail(400,"Choose a manufacturing approval stage");
   if (current.status==="closed") fail(409,"This order is closed");
   if(body.order_item_ids!=null&&!Array.isArray(body.order_item_ids))fail(400,'Select valid order items');
@@ -230,6 +237,7 @@ function reviewStage(db,current,body,access) {
     const item=getItem(db,current.project_id,row.item_id);
     if (approved&&item.version!==row.specification.version) fail(409,"Review the changed specifications before approving",{approval_required:true});
     if (approved&&stage==="manufacturing") {
+      if(factory(current)&&item.category==='maintenance'&&maintenanceMode(item.technical)!=='factory')fail(409,'This item is now on-site maintenance. Review its work order route');
       fitForManufacturing(db,item);
       if (latestInspection(inspections(db,current.id),row,"survey")?.release!=="approved")
         fail(409,"Approve measurements before manufacturing");
@@ -256,14 +264,15 @@ function reviewStage(db,current,body,access) {
 
 function fitForManufacturing(db,item) {
   const specification=item.technical;
-  if (!specification.quantity || !item.manufacturing_dimensions || !specification.width_mm || !specification.height_mm ||
+  if ((item.category!=="maintenance"||configuration(db,item.category,item.system)?.tags.includes("glass"))&&(!specification.quantity || !item.manufacturing_dimensions || !specification.width_mm || !specification.height_mm ||
       (item.category==="windows" || item.category==="doors") && specification.subframe &&
-        Object.values(specification.subframe.sides).some(({width,depth})=>!width || !depth))
+        Object.values(specification.subframe.sides).some(({width,depth})=>!width || !depth)))
     fail(409,"Complete measured dimensions and any sub-frame deductions for " + item.code);
   const sliding=["windows","doors"].includes(item.category)&&configuration(db,item.category,item.system)?.tags.includes("sliding");
   if (sliding && Number(specification.leaves)>=2 &&
     (!specification.lock_left||!specification.lock_right||Number(specification.leaves)>2&&!specification.central_lock_handle))
     fail(409,"Enter the lock types for each applicable position on "+item.code);
+  if(item.category==='maintenance'){if(maintenanceMode(specification)!=='factory')fail(409,'On-site maintenance does not require manufacturing release');loadingQuantities(item.category,configuration(db,item.category,item.system),specification,specification.quantity||1);}
   const approved=new Set(itemApprovals(db,item).map(({part})=>part));
   if (approvalParts.some((part)=>!approved.has(part))) fail(409,"Record the required manufacturing approvals for " + item.code);
 }
@@ -271,7 +280,7 @@ function fitForManufacturing(db,item) {
 function updateOrderStatus(db,current,body,user) {
   const status=str(body.status);
   if (status===current.status) return current;
-  if (current.kind==="maintenance"&&status!=="closed") fail(409,"Use Complete maintenance to finish a service order");
+  if (onSite(current)&&status!=="closed") fail(409,"Use Complete maintenance to finish a service order");
   const rows=orderItems(db,current.id);
   if (status==="released" && current.status==="draft") {
     const qc=inspections(db,current.id);
@@ -292,7 +301,7 @@ function updateOrderStatus(db,current,body,user) {
   } else if (status==="closed" && !["draft","released","shipped"].includes(current.status)) {
     fail(409,"This order is already closed");
   } else if (status!=="closed") fail(409,"This production status transition is unavailable");
-  if(status==='closed'&&current.kind!=='maintenance'&&current.status==='shipped'&&!require('./lifecycle.cjs').installation(db,current).complete)fail(409,'Record completed installation before closing this delivered work order');
+  if(status==='closed'&&!onSite(current)&&current.status==='shipped'&&!require('./lifecycle.cjs').installation(db,current).complete)fail(409,'Record completed installation before closing this delivered work order');
   const reason=str(body.reason,1000);
   if (status==="closed" && !reason) fail(400,"Enter the closing reason");
   db.run("UPDATE ops_orders SET status=? WHERE id=?",[status,current.id]);
@@ -302,7 +311,7 @@ function updateOrderStatus(db,current,body,user) {
 }
 
 function completeService(db,current,body,user) {
-  if (current.kind!=="maintenance") fail(400,"Select a maintenance order");
+  if (!onSite(current)) fail(400,"Complete factory maintenance through QC, delivery and installation");
   const service=parse(current.service_data,{});
   if (service.completed_on) return orderDetails(db,current);
   if (current.status!=="draft") fail(409,"This maintenance order has been closed");
@@ -316,7 +325,7 @@ function completeService(db,current,body,user) {
 
 function refreshDraftOrder(db,current,user) {
   require("../document-edit-window.cjs").check(db,"order",current.id,orderEditWindow(db,current).first_locked_at);
-  if (!["draft","released"].includes(current.status)||current.kind==="maintenance"||
+  if (!["draft","released"].includes(current.status)||onSite(current)||
     db.get("SELECT 1 FROM ops_loads WHERE order_id=?",[current.id])) fail(409,"Refresh specifications before loading begins");
   const previous=orderItems(db,current.id);
   for (const row of previous) {
@@ -336,7 +345,7 @@ function refreshDraftOrder(db,current,user) {
 }
 
 function inspect(db,current,body,access) {
-  if (current.kind==="maintenance") fail(409,"Record service findings with the maintenance completion notes");
+  if (onSite(current)) fail(409,"Record service findings with the maintenance completion notes");
   if (current.status==="closed") fail(409,"This production order is closed");
   const item=orderItems(db,current.id).find(({id})=>id===idOf(body.order_item_id));
   if (!item) fail(404,"Order item not found");
@@ -381,7 +390,7 @@ function loadingParts(db,current,cutoff=null){
 }
 
 function shipmentPreparation(db,current,user){
-  if(current.kind==='maintenance'||current.status!=='released')fail(409,'Release the manufacturing order before confirming a shipment');
+  if(onSite(current)||current.status!=='released')fail(409,'Release the manufacturing order before confirming a shipment');
   const loading=loadingOrder(db,current,user);
   return {...orderDetails(db,current),loading_reference:loading.reference,loading_transport:loading};
 }
@@ -417,7 +426,7 @@ function verifyShipment(db,orderId,items) {
 }
 
 function loadBatch(db,current,input,user) {
-  if (current.kind==="maintenance") fail(409,"Loading applies to manufacturing orders");
+  if (onSite(current)) fail(409,"Loading applies to manufacturing orders");
   const commandKey=str(input.command_key,100)||null;
   const prior=commandKey&&db.get("SELECT id,reference FROM ops_loads WHERE order_id=? AND command_key=?",[current.id,commandKey]);
   if (prior) return {...prior,balances:loadingBalances(db,current.id)};
@@ -484,16 +493,19 @@ function orderDetails(db,current) {
     [current.id,loads[0]?.id||0]);
   const loadingReference=transport?.reference;
   const items=orderItems(db,current.id);
+  const service=parse(current.service_data,{});
+  const workflowStale=Boolean(service.workflow_versions&&db.all('SELECT i.id,i.version FROM ops_items i JOIN ops_order_items oi ON oi.item_id=i.id WHERE oi.order_id=?',[current.id])
+    .some(item=>service.workflow_versions[item.id]!==item.version));
   const source=current.source_document_id?db.get('SELECT id,operation_no,document_type,title,status FROM documents WHERE id=?',[current.source_document_id]):null;
   return {...current,reference:require("../document-edit-window.cjs").info(db,"order",current.id).active_reference||current.reference,source,coverage:orderCoverage(db,current,items),loading_settings:parse(current.loading_settings,{enabled:false,rows:[]}),loading_reference:loadingReference||null,
-    loading_transport:transport||{reference:null,vehicle_plate:'',driver_name:'',version:0},service:parse(current.service_data,{}),items,inspections:inspections(db,current.id),
+    loading_transport:transport||{reference:null,vehicle_plate:'',driver_name:'',version:0},service:{...service,workflow_stale:workflowStale},items,inspections:inspections(db,current.id),
     responsibilities:require("./lifecycle.cjs").assignments(db,current.id),edit_window:orderEditWindow(db,current),document_history:require("../document-edit-window.cjs").history(db,"order",current.id),
-    balances:loadingBalances(db,current.id),parts:loadingParts(db,current),loads:[...byBatch.values()],stage_approvals:current.kind==="maintenance"?[]:stageApprovals(db,current)};
+    balances:loadingBalances(db,current.id),parts:loadingParts(db,current),loads:[...byBatch.values()],stage_approvals:onSite(current)?[]:stageApprovals(db,current)};
 }
 
 function saveLoadingSettings(db,current,body,user){
   if(Number(body.version)!==current.loading_settings_version)fail(409,'The loading settings changed. Reopen this work order before saving');
-  if(current.kind==='maintenance')fail(400,'Loading applies to manufacturing orders');
+  if(onSite(current))fail(400,'Loading applies to manufacturing orders');
   if(typeof body.enabled!=='boolean'||!Array.isArray(body.rows))fail(400,'Enter loading rows with a label, unit and quantity');
   const rows=require('./loading-parts.cjs').cleanExtraRows(db,current,body.rows,orderItems(db,current.id));
   if(!body.enabled&&require('./loading-parts.cjs').extraBalances(db,current,orderItems(db,current.id)).some(row=>row.loaded>0))fail(409,'Keep confirmed additional loading parts visible');
@@ -515,7 +527,7 @@ function loadingOrder(db,current,user) {
 }
 
 function loadingTransport(db,current,user,reference){
-  if(current.kind==='maintenance')fail(400,'Loading applies to manufacturing orders');
+  if(onSite(current))fail(400,'Loading applies to manufacturing orders');
   const row=reference?db.get('SELECT * FROM ops_loading_orders WHERE order_id=? AND (reference=? OR previous_reference=?)',[current.id,reference,reference]):loadingOrder(db,current,user);
   if(!row)fail(404,'Loading order not found');
   return {reference:row.reference,vehicle_plate:row.vehicle_plate,driver_name:row.driver_name,version:row.version};
@@ -532,12 +544,12 @@ function saveLoadingTransport(db,current,body,user){
 }
 
 function prepareOutput(db,current,options,user) {
-  if (current.status==="draft"&&current.kind!=="maintenance"&&orderItems(db,current.id).some((row)=>
+  if (current.status==="draft"&&!onSite(current)&&orderItems(db,current.id).some((row)=>
     getItem(db,current.project_id,row.item_id).version!==row.specification.version)) {
     refreshDraftOrder(db,current,user);
     current=order(db,current.project_id,current.id);
   }
-  if (options.kind==="loading"&&current.kind!=="maintenance"){
+  if (options.kind==="loading"&&!onSite(current)){
     const loading=options.loading_reference?db.get('SELECT * FROM ops_loading_orders WHERE order_id=? AND (reference=? OR previous_reference=?)',[current.id,options.loading_reference,options.loading_reference]):loadingOrder(db,current,user);
     if(!loading)fail(404,'Loading order not found');
     current={...current,loading_reference:loading.reference,loading_previous_reference:loading.previous_reference,loading_after_load_id:loading.after_load_id};

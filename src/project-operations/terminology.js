@@ -1,8 +1,11 @@
 import values from "../../server/project-operations/translations.json";
+export const onSiteMaintenance=order=>order.kind==='maintenance'&&order.service?.mode!=='factory';
+export const factoryMaintenance=order=>order.kind==='maintenance'&&order.service?.mode==='factory';
 export const openingDescription=item=>item?.opening_description||item?.commercial?.description||item?.description||item?.technical?.tag||item?.code||'';
 export const partMeasurementAvailable=(field,tags,technical)=>!(field.requiresFixed||field.panelBasis)||
   (tags.has('fixed_panel')||tags.has('fixed'))&&(!field.panelBasis||technical.panel_measurement_basis===field.panelBasis);
-export const openingDefaults=(category,technical={})=>["windows","doors"].includes(category)?{viewing:"Inside",perimeter:["right","left","top","bottom"],...technical}:technical;
+export const openingDefaults=(category,technical={})=>["windows","doors"].includes(category)?{viewing:"Inside",perimeter:["right","left","top","bottom"],...technical}:category==='maintenance'?{maintenance_mode:'On site',...technical}:technical;
+export const commonAvailable=(category,key)=>!category?.hidden_common?.includes(key)||category.fields?.some(field=>field.key===key);
 export const hasTrim=(key,technical)=>!["trim_type","trim_size_cm"].includes(key)||Array.isArray(technical.perimeter)&&technical.perimeter.length>0;
 export const technicalText=(value,locale)=>values[value]?.[locale==="ar"?0:1]??value;
 export const coatingValue=(value)=>({"Inside":"للداخل","Outside":"للخارج","Inward":"للداخل","Outward":"للخارج",
@@ -23,6 +26,7 @@ export function perimeterText(value,locale) {
 }
 export function configurationTags(system,technical={}) {
   const tags=new Set(system?.tags||[]);
+  if(technical.maintenance_mode==='Factory')tags.add('factory');
   if (Number(technical.fixed_panels)>0) tags.add("fixed_panel");
   if(Number(technical.top_fixed_height)>0||Number(technical.bottom_fixed_height)>0||/upper|lower|علوي|سفلي/i.test(technical.tilt_fixed||""))tags.add("fixed_panel");
   if (/double|triple|دبل|مزدوج|ثلاثي/i.test(technical.glazing||"")) tags.add("insulated");
