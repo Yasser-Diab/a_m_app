@@ -4040,6 +4040,7 @@ function resetLocalCompanyAccount(database, { dataDir, dbPath, chatUploadDir } =
     BEGIN TRANSACTION;
     DELETE FROM cert_pdf_artifacts;
     DELETE FROM cert_audit;
+    DELETE FROM report_logo_profiles;
     DELETE FROM inspection_attachments;
     DELETE FROM inspection_artifacts;
     DELETE FROM inspection_events;
@@ -7109,6 +7110,7 @@ function renderReportHtmlV2(data) {
       </div>
       ${reportDateBlock(data, branding)}
     </header>
+    ${require("./report-logos.cjs").html(data.report_logo_set)}
     <section class="info-band">
       ${headerInfo.map(([label, value]) => `<div class="info-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
     </section>
@@ -7769,6 +7771,7 @@ function buildReportData(database, query, type, certificateAccess) {
     selected_projects: selectedProjects,
     project_selection_count: selectedProjects.length,
     signatures: (()=>{if(!['price_offer','invoice'].includes(type))return [];const kind=type==='invoice'?'invoice':'quotation';const projectSignatures=database.get("SELECT o.details FROM ops_projects o JOIN cert_projects p ON p.id=o.project_id WHERE p.customer_id=? AND p.name=?",[document?.party_id||first.party_id,document?.project||first.project]);return JSON.parse(projectSignatures?.details||'{}').report_signatures?.[kind]??require('./signature-directory.cjs').defaults(database,kind);})(),
+    report_logo_set:type==="offer"?require("./report-logos.cjs").report(database,certificateAccess,document,query):null,
     branding: reportBranding(database),
     show_dimensions: hasReportDimensions(rows),
     dimension_unit: dimensionUnit,
@@ -8007,6 +8010,9 @@ function reportOutputDir(type, fallbackDir) {
 }
 
 function writePdf(html, outputPath, data = {}) {
+  const pageSetup=require("./report-page-setup.cjs").current();
+  require("./report-page-setup.cjs").publish(pageSetup||require("./report-page-setup.cjs").inferred(html,Boolean(data.landscape)));
+  if(!data.inspection_layout)html=require("./report-page-setup.cjs").html(html,pageSetup);
   const tmpDir = path.join(path.dirname(outputPath), ".tmp");
   fs.mkdirSync(tmpDir, { recursive: true });
   const htmlPath = path.join(tmpDir, `report_${Date.now()}.html`);
@@ -8018,7 +8024,7 @@ function writePdf(html, outputPath, data = {}) {
   const footerContact = brandingFooterContact(branding);
   const footerCenterContact = branding.website || footerContact;
   const locale = reportLocaleFrom(data.report_language);
-  const footerMeta = {...footerMetadata(data,branding,APP_VERSION),footerContact:footerCenterContact,landscape:Boolean(data.landscape),inspectionLayout:data.inspection_layout===true};
+  const footerMeta = {...footerMetadata(data,branding,APP_VERSION),footerContact:footerCenterContact,landscape:Boolean(data.landscape),inspectionLayout:data.inspection_layout===true,pageSetup};
   if (
     electronRuntime &&
     typeof electronRuntime === "object" &&
@@ -8052,6 +8058,7 @@ function writePdf(html, outputPath, data = {}) {
             left: 0.35,
             right: 0.35,
           },
+          ...(!footerMeta.inspectionLayout?require("./report-page-setup.cjs").printOptions(pageSetup):{}),
         });
         fs.mkdirSync(path.dirname(outputPath), { recursive: true });
         fs.writeFileSync(outputPath, pdf);
@@ -8568,6 +8575,7 @@ async function createServer(options = {}) {
     ensureCommercialSettings(database);
     initializeCertificates(database);
     initializeOperations(database);
+    require("./report-logos.cjs").initialize(database);
     database.exec(`PRAGMA user_version = ${DATABASE_SCHEMA_VERSION}`);
     ensureChatColumns(database);
   });
@@ -8582,9 +8590,10 @@ async function createServer(options = {}) {
   app.use(cors({
     origin: true,
     exposedHeaders: ["Content-Disposition", "X-Certificate-Page-Count",
-      "X-Certificate-Detail-Pages", "X-Certificate-Has-Cover"],
+      "X-Certificate-Detail-Pages", "X-Certificate-Has-Cover", "X-Report-Page-Setup"],
   }));
   app.use(express.json({ limit: "32mb" }));
+  app.use(require("./report-page-setup.cjs").middleware);
 
   const managerGatewayOptions = {
     appVersion: APP_VERSION,
@@ -9727,6 +9736,7 @@ async function createServer(options = {}) {
     });
   });
 
+  require("./report-logos.cjs").register(app,database);
   app.get("/api/commercial-projects", (req, res) => {
     const partyId = Number(req.query.party_id);
     const customer = normalizeText(req.query.customer);

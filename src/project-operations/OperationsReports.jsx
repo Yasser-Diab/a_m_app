@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from "react";
+import {ReportPageSetup,ReportPdfPreview,useReportPageSetup,pageSetupFromResponse} from "../report-page-setup.jsx";
 import {queryString,useDebounce,useResource,localDate} from "../certificates/shared.jsx";
 import {DimensionPair,ErrorMessage,Page,Pick,Table,Text,display,panelNames,quantity} from "./shared.jsx";
 
@@ -10,6 +11,8 @@ const unit=(name,locale)=>locale==="ar"?({"m²":"م²","l.m":"م.ط",Pcs:"عدد
 export function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNativeReport,shareNativeReport,disabled,endpoint,reportType='project-operations'}) {
   const [pdf,setPdf]=useState(null),[error,setError]=useState(null),[busy,setBusy]=useState(false);
   const [reportLanguage,setReportLanguage]=useState(uiLanguage);
+  const [pageSetup,setPageSetup]=useReportPageSetup("operations:"+(endpoint||kind)),[detected,setDetected]=useState(null);
+  const setupKey=JSON.stringify(pageSetup),fresh=pdf?.setupKey===setupKey;
   const abort=useRef(null),frame=useRef(null);
   const filterKey=JSON.stringify(filters);
   useEffect(()=>{abort.current?.abort();setPdf(null);setBusy(false);},[filterKey,endpoint]);
@@ -19,12 +22,12 @@ export function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNat
     abort.current?.abort();const controller=new AbortController();abort.current=controller;setBusy(true);setError(null);
     try{
       const response=await fetch(`${apiBase.replace(/\/$/,"")}${endpoint||`/api/project-operations/reports/${kind}/pdf`}`,{method:"POST",signal:controller.signal,
-        headers:{"Content-Type":"application/json",Authorization:`Bearer ${session}`},body:JSON.stringify({...filters,locale:reportLanguage})});
+        headers:{"Content-Type":"application/json",Authorization:`Bearer ${session}`},body:JSON.stringify({...filters,locale:reportLanguage,page_setup:pageSetup})});
       if(!response.ok)throw new Error((await response.json().catch(()=>null))?.error||`HTTP ${response.status}`);
       const blob=await response.blob(),disposition=response.headers.get("content-disposition")||"";
       const encoded=disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
       const name=encoded?decodeURIComponent(encoded):disposition.match(/filename="([^"]+)"/)?.[1]||kind+".pdf";
-      if(!controller.signal.aborted)setPdf({blob,name,url:URL.createObjectURL(blob)});
+      if(!controller.signal.aborted)setPdf({blob,name,url:URL.createObjectURL(blob),setupKey,detected:pageSetupFromResponse(response)});
     }catch(cause){if(!controller.signal.aborted)setError(cause);}finally{if(!controller.signal.aborted)setBusy(false);}
   }
   async function output(print=false){
@@ -34,7 +37,7 @@ export function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNat
       else if(!print&&window.priceOfferDesktop?.saveReportFile)await window.priceOfferDesktop.saveReportFile({bytes,fileName:pdf.name,format:"pdf",reportType});
       else if(print&&shareNativeReport)await shareNativeReport(pdf.blob,pdf.name);
       else if(!print&&saveNativeReport)await saveNativeReport(pdf.blob,pdf.name,{reportType});
-      else if(print){frame.current?.contentWindow?.focus();frame.current?.contentWindow?.print();}
+      else if(print){if(frame.current?.contentWindow){frame.current.contentWindow.focus();frame.current.contentWindow.print();}else window.open(pdf.url,"_blank","noopener");}
       else{const link=document.createElement("a");link.href=pdf.url;link.download=pdf.name;link.click();}
     }catch(cause){setError(cause);}
   }
@@ -42,10 +45,10 @@ export function PdfOutput({kind,filters,apiBase,session,t,uiLanguage,can,saveNat
     <Pick label={t("لغة التقرير","Report language")} value={reportLanguage} placeholder="" items={[["ar","العربية"],["en","English"]]}
       onChange={value=>{abort.current?.abort();setBusy(false);setReportLanguage(value);setPdf(null);}}/>
     {can("export")&&<button type="button" disabled={busy||disabled} onClick={preview}>{busy?t("جارٍ إعداد PDF…","Preparing PDF…"):t("معاينة PDF","PDF Preview")}</button>}
-    {pdf&&<><button type="button" onClick={()=>output()}>{t("تنزيل PDF","Download PDF")}</button>
-      <button type="button" onClick={()=>output(true)}>{t("فتح للطباعة","Open for printing")}</button>
+    {pdf&&<><button type="button" disabled={!fresh} onClick={()=>output()}>{t("تنزيل PDF","Download PDF")}</button>
+      <button type="button" disabled={!fresh} onClick={()=>output(true)}>{t("فتح للطباعة","Open for printing")}</button>
       <button type="button" onClick={()=>setPdf(null)}>{t("إغلاق المعاينة","Close preview")}</button></>}
-  </div><ErrorMessage error={error}/>{pdf&&!shareNativeReport&&<iframe ref={frame} className="ops-preview pc-preview" title={t("معاينة التقرير","Report preview")} src={pdf.url}/>}</div>;
+  </div><ReportPageSetup value={pageSetup} onChange={setPageSetup} detected={pdf?.detected||detected} t={t} disabled={busy}/>{pdf&&!fresh&&<p role="status">{t("حدّث المعاينة لتطبيق إعدادات الصفحة الجديدة قبل التنزيل.","Refresh the preview to apply the new page settings before downloading.")}</p>}<ErrorMessage error={error}/>{pdf&&<ReportPdfPreview blob={pdf.blob} url={pdf.url} setup={pageSetup||pdf.detected} onSetupChange={setPageSetup} onDetected={setDetected} t={t}/>}{pdf&&!shareNativeReport&&<iframe className="report-print-frame" ref={frame} src={pdf.url} title={t("نسخة الطباعة","Print copy")} aria-hidden="true" tabIndex={-1}/>}</div>;
 }
 
 export function RunningProjects(props){

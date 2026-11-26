@@ -1,3 +1,4 @@
+import {ReportPageSetup,ReportPdfPreview,useReportPageSetup,pageSetupFromResponse} from "../report-page-setup.jsx";
 import OrderLifecycle from './OrderLifecycle.jsx';
 import ApprovalReview from './ApprovalReview.jsx';
 import {useEffect,useRef,useState} from "react";
@@ -328,6 +329,8 @@ function Assignments({people,values,set,t,required=false}) {
 
 export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenance,workshop,approvals,people,close,apiBase,session,reference,saveNativeReport,shareNativeReport,ctx,path,request,can,reload}) {
   const [reviewApprovals,setReviewApprovals]=useState(false);
+  const [pageSetup,setPageSetup]=useReportPageSetup("order:"+endpoint),[detected,setDetected]=useState(null);
+  const setupKey=JSON.stringify(pageSetup);
   const [draft,setDraft]=useState({classification:"materials",drawings:true,measurement_watermark:false,people:{},locale:uiLanguage});
   const [pdf,setPdf]=useState(null);
   const [error,setError]=useState(null);
@@ -364,14 +367,14 @@ export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenan
       await saveTransport();
       const response=await fetch(`${apiBase.replace(/\/$/,"")}/api/project-operations${endpoint}/pdf`,{
         method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session}`},signal:controller.signal,
-        body:JSON.stringify({...draft,kind}),
+        body:JSON.stringify({...draft,kind,page_setup:pageSetup}),
       });
       if (!response.ok) throw new Error((await response.json().catch(()=>null))?.error || `HTTP ${response.status}`);
       const blob=await response.blob();
       const disposition=response.headers.get("content-disposition")||"";
       const encoded=disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
       const filename=encoded?decodeURIComponent(encoded):disposition.match(/filename="([^"]+)"/)?.[1];
-      if (!controller.signal.aborted) setPdf({blob,url:URL.createObjectURL(blob),filename});
+      if (!controller.signal.aborted) setPdf({blob,url:URL.createObjectURL(blob),filename,setupKey,detected:pageSetupFromResponse(response)});
     } catch(cause) {if (!controller.signal.aborted) setError(cause);}
     finally {if (!controller.signal.aborted) setBusy(false);}
   }
@@ -382,7 +385,7 @@ export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenan
         if (window.priceOfferDesktop?.openReportPreview)
           await window.priceOfferDesktop.openReportPreview({bytes:new Uint8Array(await pdf.blob.arrayBuffer()),fileName});
         else if (shareNativeReport) await shareNativeReport(pdf.blob,fileName);
-        else if (frame.current?.contentWindow) {frame.current.contentWindow.focus();frame.current.contentWindow.print();}
+        else if(frame.current?.contentWindow){frame.current.contentWindow.focus();frame.current.contentWindow.print();}else window.open(pdf.url,"_blank","noopener");
       } else if (window.priceOfferDesktop?.saveReportFile)
         await window.priceOfferDesktop.saveReportFile({bytes:new Uint8Array(await pdf.blob.arrayBuffer()),fileName,format:"pdf",reportType:"project-operations"});
       else if (saveNativeReport) await saveNativeReport(pdf.blob,fileName);
@@ -424,9 +427,10 @@ export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenan
       <div className="pc-toolbar">
         {!approvals&&<button type="button" disabled={loading&&!transport} onClick={async()=>{try{await saveTransport();setEditingReport(true);setPdf(null);setReportSaved(false);}catch(cause){setError(cause);}}}>{t('تحرير قبل التصدير','Edit before export')}</button>}
         <button className="primary" type="submit" disabled={loading&&!transport}>{t("معاينة","Preview")}</button>
-        <button type="button" disabled={!pdf} onClick={()=>output(false)}>{t("تنزيل PDF","Download PDF")}</button>
-        <button type="button" disabled={!pdf} onClick={()=>output(true)}>{t("فتح للطباعة","Open for printing")}</button>
+        <button type="button" disabled={!pdf||pdf.setupKey!==setupKey} onClick={()=>output(false)}>{t("تنزيل PDF","Download PDF")}</button>
+        <button type="button" disabled={!pdf||pdf.setupKey!==setupKey} onClick={()=>output(true)}>{t("فتح للطباعة","Open for printing")}</button>
       </div>
+      <ReportPageSetup value={pageSetup} onChange={setPageSetup} detected={pdf?.detected||detected} t={t}/>
       </fieldset>
       <ErrorMessage error={error}/>
       {error&&can('release')&&<button type="button" onClick={()=>setReviewApprovals(true)}>{t('مراجعة التعديلات وتجديد الاعتمادات','Review changes and renew approvals')}</button>}
@@ -435,6 +439,6 @@ export function Report({endpoint,t,uiLanguage,loading,loadingReference,maintenan
     {reportSaved&&<p role="status">{t('تم حفظ تعديلات التقرير لهذا المستند.','Report edits saved for this document.')}</p>}
     {editingReport&&<ReportEditor endpoint={endpoint} request={request} options={{...draft,kind}} t={t} canEdit={can('edit')}
       onSaved={()=>{setEditingReport(false);setPdf(null);setReportSaved(true);}} onCancel={()=>setEditingReport(false)}/>}
-    {pdf&&!shareNativeReport&&<iframe ref={frame} title={title} className="ops-preview" src={pdf.url}/>}
+    {pdf&&pdf.setupKey!==setupKey&&<p role="status">{t("حدّث المعاينة لتطبيق الهوامش قبل التنزيل.","Refresh the preview to apply the margins before downloading.")}</p>}{pdf&&<ReportPdfPreview blob={pdf.blob} url={pdf.url} setup={pageSetup||pdf.detected} onSetupChange={setPageSetup} onDetected={setDetected} t={t}/>}{pdf&&!shareNativeReport&&<iframe className="report-print-frame" ref={frame} src={pdf.url} title={t("نسخة الطباعة","Print copy")} aria-hidden="true" tabIndex={-1}/>}
   </Dialog>;
 }

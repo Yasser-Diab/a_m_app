@@ -5,11 +5,13 @@ async function prepareOperationsPrint() {
   if(!groups.length&&!document.querySelector('.loading-transport,.loading-sheet'))return {groups:0,flowing:0};
   await document.fonts?.ready;
   await Promise.all([...document.images].map(image=>image.decode().catch(()=>{})));
-  document.body.style.width='186mm';
+  const custom=JSON.parse(document.body.dataset.pageSetup||'null');
+  document.body.style.width=custom?(custom.width-custom.margins.left-custom.margins.right)+'mm':'186mm';
   const ruler=document.createElement('div');
   // The native footer needs a real reserved margin; otherwise its white background clips the last row.
   ruler.style.cssText='position:absolute;visibility:hidden;height:265mm;width:1mm;pointer-events:none';
   document.body.append(ruler);
+  if(custom)ruler.style.height=(custom.height-custom.margins.top-custom.margins.bottom)+'mm';
   const pageHeight=ruler.getBoundingClientRect().height;ruler.remove();
   const style=document.createElement('style');
   style.textContent='.work-group.ops-flow-group,.shared-specifications.ops-flow-block{break-inside:auto!important;page-break-inside:auto!important}.loading-dispatch{break-inside:avoid;page-break-inside:avoid}';

@@ -13,6 +13,8 @@ import React, {
 import { createRoot } from "react-dom/client";
 import { createPortal, flushSync } from "react-dom";
 import ReportPreviewFrame from "./report-preview.jsx";
+import {useReportPageSetup} from "./report-page-setup.jsx";
+import ReportLogos from "./report-logos.jsx";
 import {SelectionStatus,TableSearchPanel as SmartTableSearchPanel} from "./table-tools.jsx";
 import {
   Activity,
@@ -8008,6 +8010,8 @@ function ReportWorkspace({
     context.workflowId || workflowId,
   );
   const workflow = WORKFLOWS[currentWorkflow];
+  const [reportPageSetup,setReportPageSetup]=useReportPageSetup("commercial:"+workflow.reportType);
+  const [showReportLogos,setShowReportLogos]=useState(null);
   const [partySearch, setPartySearch] = useState(context.partySearch || "");
   const [partySuggestOpen, setPartySuggestOpen] = useState(false);
   const [documentSearch, setDocumentSearch] = useState(
@@ -8465,6 +8469,8 @@ function ReportWorkspace({
       if (certificateFilter) query.set("certificate_no", certificateFilter);
       if (modernContractorCertificate) query.set("modern_certificate", "1");
     }
+    if(reportPageSetup)query.set("page_setup",JSON.stringify(reportPageSetup));
+    if(showReportLogos!==null)query.set("show_logos",showReportLogos?"1":"0");
     query.set("dimension_unit", dimensionUnit);
     query.set("subtotal_mode", subtotalMode);
     query.set("report_language", reportLanguage === "en" ? "en" : "ar");
@@ -9380,7 +9386,8 @@ function ReportWorkspace({
             </button>
           </div>
           <div className="preview-frame-wrap">
-            <ReportPreviewFrame key={previewKey} title="Export preview" url={previewUrl} session={currentUser?.certificate_session} t={t} />
+            {workflow.reportType==="offer"&&<ReportLogos api={api} documentId={selectedDocument?.id||documentId} t={t} onChange={setShowReportLogos}/>}
+            <ReportPreviewFrame key={previewKey} title="Export preview" url={previewUrl} session={currentUser?.certificate_session} t={t} pageSetup={reportPageSetup} onSetupChange={setReportPageSetup} showLogos={showReportLogos}/>
           </div>
         </section>
       )}
@@ -9389,6 +9396,7 @@ function ReportWorkspace({
 }
 
 function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage, uiLanguage = "ar" }) {
+  const [reportPageSetup,setReportPageSetup]=useReportPageSetup("productive-quantities");
   const t = (ar, en) => (uiLanguage === "en" ? en || uiText(ar, "en") : ar);
   const now = new Date();
   const [period, setPeriod] = useState("month");
@@ -9425,6 +9433,7 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage, uiLa
   const loadPeriodWorkTypes = useCallback(async () => {
     try {
       const query = new URLSearchParams({ period, year });
+    if(reportPageSetup)query.set("page_setup",JSON.stringify(reportPageSetup));
       if (period === "month") query.set("month", month);
       const data = await api.request(
         `/api/productive-quantities?${query.toString()}`,
@@ -9450,7 +9459,7 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage, uiLa
       if (workType) query.append("work_type", workType);
     });
     return query;
-  }, [month, period, workTypes, year]);
+  }, [month, period, workTypes, year,reportPageSetup]);
 
   const loadRows = useCallback(async () => {
     setBusy(true);
@@ -9666,7 +9675,7 @@ function ProductiveQuantitiesView({ api, apiBase, lookups = {}, setMessage, uiLa
               </button>
             </div>
             <div className="preview-frame-wrap">
-              <iframe title="Productive quantities preview" src={previewUrl} />
+              <ReportPreviewFrame title="Productive quantities preview" url={previewUrl} t={t} pageSetup={reportPageSetup} onSetupChange={setReportPageSetup}/>
             </div>
           </section>
         )}

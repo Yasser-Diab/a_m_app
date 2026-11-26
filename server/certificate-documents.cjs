@@ -317,9 +317,10 @@ function registerCertificateDocumentRoutes(router, { database, authorize, docume
 
   async function draftPdf(req, row, variant) {
     const draft = await documentFor(req, row);
-    const key = createHash('sha256').update(JSON.stringify([draft, variant])).digest('hex');
+    const key = createHash('sha256').update(JSON.stringify([draft, variant,require("./report-page-setup.cjs").current()])).digest('hex');
     if (!previews.has(key)) {
-      const model = buildCertificateDocument(draft, { variant });
+      const model = {...buildCertificateDocument(draft, { variant }),pageSetup:require("./report-page-setup.cjs").current()};
+      require("./report-page-setup.cjs").publish(model.pageSetup||require("./report-page-setup.cjs").normalize({paper:model.paper,orientation:model.landscape?"landscape":"portrait",margins:{top:8,right:13,bottom:9,left:13}}));
       const promise = renderCertificatePdf(model).then((rendered) => ({ ...rendered, model }))
         .finally(() => previews.delete(key));
       previews.set(key, promise);
@@ -338,7 +339,7 @@ function registerCertificateDocumentRoutes(router, { database, authorize, docume
           throw documentError(failed ? 409 : 425, failed ? 'Certificate PDF failed. An issuer can retry rendering.' : 'Certificate PDF is still processing.');
         }
         setPagination(res, JSON.parse(artifact.pagination_json));
-        return sendDocument(res, artifact.pdf, JSON.parse(artifact.document_json), 'pdf', disposition);
+        return sendDocument(res, await require('./report-page-setup.cjs').fitPdf(artifact.pdf), JSON.parse(artifact.document_json), 'pdf', disposition);
       }
       const { buffer, model, ...pagination } = await draftPdf(req, row, variant);
       recheck(req, row);

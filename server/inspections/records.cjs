@@ -82,4 +82,14 @@ function action(db,access,id,body){const old=get(db,access,id);if(Number(body.ve
 }
 function attach(db,access,id,body){const old=get(db,access,id);if(Number(body.version)!==old.version)fail(409,'The inspection changed. Reload before attaching');const asset=require('./assets.cjs').get(db,access,body.asset_id,old.project_id);if(!asset.project_id||asset.project_id!==old.project_id)fail(400,'Upload inspection attachments to this project');const category=['attachment','drawing','test_certificate','material_approval','returned'].includes(body.category)?body.category:'attachment';
  db.run('INSERT OR IGNORE INTO inspection_attachments VALUES(?,?,?)',[old.id,asset.id,category]);event(db,access,old,'attachment_added');db.run('UPDATE inspection_requests SET version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?',[old.id]);return get(db,access,id);}
-module.exports={stages,resolvedProfile,profile,saveProfile,primitiveMap,cleanData,checkedRows,get,list,event,create,save,action,attach,validated};
+function removeAttachment(db,access,id,body){
+ const old=get(db,access,id);if(Number(body.version)!==old.version)fail(409,'The inspection changed. Reload before removing attachments');ensureEditable(db,old,body);
+ const attached=db.get('SELECT 1 FROM inspection_attachments WHERE request_id=? AND asset_id=?',[old.id,str(body.asset_id,100)]);if(!attached)fail(404,'Attachment not found on this inspection');
+ event(db,access,old,'attachment_removed',body.reason);
+ db.run('DELETE FROM inspection_attachments WHERE request_id=? AND asset_id=?',[old.id,body.asset_id]);
+ const data={...old.data,action_code:'',response_comments:'',reviewer:'',reviewer_title:'',response_date:''};
+ const rows=old.rows.map(({accepted,...row})=>row);
+ db.run("UPDATE inspection_requests SET status='draft',data=?,rows=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?",[encode(data),encode(rows),old.id]);
+ return get(db,access,id);
+}
+module.exports={stages,resolvedProfile,profile,saveProfile,primitiveMap,cleanData,checkedRows,get,list,event,create,save,action,attach,removeAttachment,validated};

@@ -454,7 +454,7 @@ async function appendDrawings(buffer,drawings) {
   const output=await PDFDocument.load(buffer);
   for (const {name,content} of drawings) {
     try {
-      const source=await PDFDocument.load(content);
+      const source=await PDFDocument.load(await require('../report-page-setup.cjs').fitPdf(content));
       for (const page of await output.copyPages(source,source.getPageIndices())) {
         page.node.delete(PDFName.of("Annots"));
         page.node.delete(PDFName.of("AA"));

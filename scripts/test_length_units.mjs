@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {storageLengthUnit,convertLength,lengthLabel} from '../src/project-operations/length-units.mjs';
+assert.equal(storageLengthUnit('width_mm'),'mm');assert.equal(storageLengthUnit('trim_size_cm'),'cm');
+assert.equal(storageLengthUnit('track_length',{en:'Track length (m)'}),'m');assert.equal(storageLengthUnit('quantity',{en:'Count'}),null);
+for(const from of ['mm','cm','m'])for(const to of ['mm','cm','m'])for(const value of [0,.25,1,17.5,355,1234.56789])assert.ok(Math.abs(Number(convertLength(convertLength(value,from,to),to,from))-value)<1e-7);
+assert.equal(convertLength(3550,'mm','cm'),355);assert.equal(convertLength('355','cm','mm'),'3550');assert.equal(convertLength('2.2','m','mm'),'2200');
+assert.equal(convertLength(6,'mm','cm'),.6);assert.equal(convertLength(12,'cm','m'),.12);assert.equal(convertLength('200 × 300','mm','cm'),'20 × 30');
+assert.equal(convertLength('Custom size','mm','cm'),'Custom size');assert.equal(convertLength('','mm','cm'),'');
+assert.equal(lengthLabel('عرض الفتحة مم','cm','ar'),'عرض الفتحة (سم)');assert.equal(lengthLabel('Width (mm)','m','en'),'Width (m)');
+console.log('Length selectors preserve physical values across mm/cm/m, decimal precision, dimension pairs and non-length fields.');

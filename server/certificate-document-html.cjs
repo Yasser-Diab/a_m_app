@@ -196,7 +196,8 @@ function buildCertificateHtml(model) {
     ...(model.showSummaryProgress ? [{key:'cumulative_progress',label:labels.cumulative_progress,weight:14,kind:'percent'}] : []),
     ...moneyKeys.map((key) => ({ key, label: labels[key], weight: 18, kind: 'money' }))];
   const size = paper === 'Letter' ? [215.9, 279.4] : [210, 297];
-  const [width, height] = landscape ? size.toReversed() : size;
+  const [width, height] = model.pageSetup?[model.pageSetup.width,model.pageSetup.height]:landscape ? size.toReversed() : size;
+  const margins=model.pageSetup?.margins||{top:8,right:13,bottom:9,left:13};
   const style = model.style || {};
   const summaries = (model.summarySections?.length ? model.summarySections : [
     {id:'cover',title:labels.cover,rows:coverRows,textColumns:coverTextColumns},
@@ -214,13 +215,13 @@ function buildCertificateHtml(model) {
     * { box-sizing: border-box; }
     :root { --brand:${style.companyNameColor || reportColors.text}; --line:${style.lineColor || '#265e68'};
       --heading:${style.headingFont || 'Arial,Tahoma,sans-serif'}; --heading-body:${style.bodyFont || 'Arial,Tahoma,sans-serif'};
-      --body-font:Arial,Tahoma,sans-serif; --report-width:${width - 26}mm;
+      --body-font:Arial,Tahoma,sans-serif; --report-width:${width - margins.left - margins.right}mm;
       --building-band:${reportColors.building}; --unit-band:${reportColors.unit};
       --work-band:color-mix(in srgb,var(--building-band),var(--unit-band)); --opposite-x:-1px; }
     :root[dir="rtl"] { --opposite-x:1px; }
     html, body { margin: 0; padding: 0; background: white; color: ${reportColors.text}; }
     body { font: 10pt/1.36 var(--body-font); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    .sheet { position: relative; isolation: isolate; width: ${width}mm; height: ${height - 0.6}mm; padding: 8mm 13mm 9mm; display: flex; flex-direction: column; }
+    .sheet { position: relative; isolation: isolate; width: ${width}mm; height: ${height - 0.6}mm; padding: ${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm; display: flex; flex-direction: column; }
     .sheet + .sheet { break-before: page; }
     header, h1, h2, th, td, footer { overflow-wrap: anywhere; }
     .issuer { display:flex; align-items:center; gap:3mm; border-block-end:1.4pt solid var(--line); padding-block-end:1.5mm; }

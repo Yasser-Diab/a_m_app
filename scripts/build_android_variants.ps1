@@ -110,9 +110,7 @@ function Set-AndroidVariantIcon {
   if (-not (Test-Path -LiteralPath $iconSource)) {
     throw "Missing Android icon for $($Variant.name): $iconSource"
   }
-  Get-ChildItem -LiteralPath (Join-Path $root "android\app\src\main\res") -Recurse -File |
-    Where-Object { $_.Name -in @("ic_launcher.png", "ic_launcher_round.png", "ic_launcher_foreground.png") } |
-    ForEach-Object { Copy-Item -LiteralPath $iconSource -Destination $_.FullName -Force }
+  & (Join-Path $PSScriptRoot "generate_android_icons.ps1") -Root $root -Icon $iconSource
 }
 
 function Convert-CapacitorAssetsToRegularFiles {

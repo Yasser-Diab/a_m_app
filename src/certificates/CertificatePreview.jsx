@@ -1,3 +1,4 @@
+import {ReportPageSetup,ReportPdfPreview,pageSetupQuery,pageSetupFromResponse} from "../report-page-setup.jsx";
 import { useEffect, useRef, useState } from "react";
 import { Download, ExternalLink, Printer } from "lucide-react";
 import { certificateApi, Dialog, Field, Problem, queryString, ReportGroupingChecks } from "./shared.jsx";
@@ -30,6 +31,7 @@ async function fetchOutput({ apiBase, session, certificate, resource, variant, o
   return {
     blob, filename: outputFileName(response, fallback),
     pages: response.headers.get("X-Certificate-Page-Count"),
+    detected:pageSetupFromResponse(response),
     hasCover: response.headers.get("X-Certificate-Has-Cover") === "1",
   };
 }
@@ -42,6 +44,9 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
   const [error, setError] = useState(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [downloaded, setDownloaded] = useState(null);
+  const [detected,setDetected]=useState(null);
+  const pageSetup=options.page_setup?JSON.parse(options.page_setup):null;
+  const setPageSetup=value=>{setError(null);setOptions(old=>({...old,page_setup:value?JSON.stringify(value):undefined}));};
   const output = loaded?.variant === variant && loaded.options === options ? loaded : null;
   const grouping = {...certificate.report_options,...Object.fromEntries(Object.entries(options).map(([key,value]) => [key,value === "1"]))};
 
@@ -87,7 +92,7 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
     if (!output) return;
     try {
       const printable = frame.current?.contentWindow;
-      if (!printable) throw new Error("Preview unavailable");
+      if (!printable) {void openNative();return;}
       printable.focus(); printable.print();
     } catch { void openNative(); }
   }
@@ -118,9 +123,6 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
         <option value="detail">{t("التفاصيل فقط", "Details only")}</option><option value="cover">{t("ملخص وتفاصيل", "Summary and details")}</option>
         <option value="multi">{t("ملخصات منفصلة وتفاصيل", "Separate summaries and details")}</option>
       </select></Field>
-      <Field label={t("مقاس الورق", "Paper size")}><select value={options.paper || ""} onChange={(event) => { setError(null); setOptions({ ...options, paper: event.target.value }); }}>
-        <option value="">{t("الافتراضي", "Default")}</option><option value="A4">A4</option><option value="Letter">Letter</option>
-      </select></Field>
       <Field label={t("علامة حالة الاعتماد", "Approval watermark")}><select value={options.watermark ?? "1"} onChange={(event) => {
         setError(null);
         setOptions({ ...options, watermark: event.target.value });
@@ -139,6 +141,7 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
         'ملخص لأنواع الأعمال وآخر للمباني؛ يبدأ كل ملخص محدد في صفحة جديدة.',
         'Work types and buildings have separate summaries; each selected summary starts on a new page.')}</small>}
     </div>
+    <ReportPageSetup value={pageSetup} onChange={setPageSetup} detected={output?.detected||detected} t={t}/>
     <div className="pc-toolbar pc-output-actions">
       {output?.pages && <span className="pc-chip">{t("الصفحات", "Pages")} <bdi>&nbsp;{output.pages}</bdi></span>}
       {output?.hasCover && <span className="pc-chip">{t("يتضمن صفحة ملخص", "Includes summary cover")}</span>}
@@ -151,6 +154,6 @@ export default function CertificatePreview({ certificate, apiBase, session, canI
     <Problem error={error} t={t} />
     {downloaded && <p role="status"><bdi>{downloaded}</bdi></p>}
     {!output && !error && <p role="status">{t("جارٍ إعداد المعاينة…", "Preparing preview…")}</p>}
-    {output && !shareNativeReport && <iframe className="pc-preview" title={t("مستند المستخلص", "Certificate document")} ref={frame} src={output.url} />}
+    {output && <ReportPdfPreview blob={output.blob} url={output.url} setup={pageSetup||output.detected} onSetupChange={setPageSetup} onDetected={setDetected} t={t}/>}{output&&!shareNativeReport&&<iframe className="report-print-frame" ref={frame} src={output.url} title={t("نسخة الطباعة","Print copy")} aria-hidden="true" tabIndex={-1}/>}
   </Dialog>;
 }

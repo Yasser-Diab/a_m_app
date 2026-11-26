@@ -11,6 +11,7 @@ import {technicalText,fieldOptions,configurationTags,perimeterText,hasTrim,partM
 import {ColumnFilter,SelectionStatus,TableSearchPanel,SearchMatchText} from '../table-tools.jsx';
 import {tableReplacementCandidates,offsetIndex} from '../table-tools.mjs';
 
+import {storageLengthUnit,convertLength,lengthLabel} from './length-units.mjs';
 const mainKeys=["opening_description","tag","category","system","quantity","width_mm","height_mm","profile","color","infill","trim_type","trim_size_cm"];
 const special={
   opening_description:{ar:"وصف الفتحة",en:"Opening description"},
@@ -50,6 +51,8 @@ function optionPairs(row,key,field,catalogue,locale,t) {
 
 export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,can,request,path,reload,openItem,pageKey,pagination,fullscreen=false,onFullscreenChange,loading=false,loadError,ctx}) {
   const [patches,setPatches]=useState({});
+  const [lengthUnits,setLengthUnits]=useState(()=>{try{return JSON.parse(localStorage.getItem('operationsLengthUnitsV1'))||{};}catch{return {};}});
+  useEffect(()=>{localStorage.setItem('operationsLengthUnitsV1',JSON.stringify(lengthUnits));},[lengthUnits]);
   const [selected,setSelected]=useState(null);
   const [editing,setEditing]=useState(null);
   const [additional,setAdditional]=useState([]);
@@ -59,7 +62,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
   const [searchOpen,setSearchOpen]=useState(false),[searchText,setSearchText]=useState(''),[searchIndex,setSearchIndex]=useState(0);
   const [sort,setSort]=useState(null),[contextMenu,setContextMenu]=useState(null);
   const [widths,setWidths]=useState(()=>{try{return JSON.parse(localStorage.getItem('operationsGridWidthsV1'))||{};}catch{return {};}});
-  const fieldList=useId(),cut=useRef(null),previousLayout=useRef(null),contextRoot=useRef(null);
+  const fieldList=useId(),cut=useRef(null),lengthClipboard=useRef(null),previousLayout=useRef(null),contextRoot=useRef(null);
   const [viewport,setViewport]=useState({top:0,height:600}),[heightTick,setHeightTick]=useState(0);
   const scroll=useRef(null),heights=useRef(new Map()),pendingFocus=useRef(null),fullAnchor=useRef(null);
   const [remember,setRemember]=useState(true);
@@ -103,9 +106,13 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
     .sort(([,a],[,b])=>a[locale].localeCompare(b[locale],locale)),[definitions,columns,driverRows,catalogue,locale]);
   const definitionFor=(row,key)=>special[key]||catalogue.categories.find(category=>category.id===row.category)?.systems.find(system=>system.id===row.system)?.fields.find(field=>field.key===key)||
     catalogue.categories.find(category=>category.id===row.category)?.fields.find(field=>field.key===key)||definitions.get(key);
-  const names=(row,key)=>optionPairs(row,key,definitionFor(row,key),catalogue,locale,t);
+  const storageUnit=(key,row)=>storageLengthUnit(key,row?definitionFor(row,key):definitions.get(key));
+  const displayUnit=key=>['cm','mm','m'].includes(lengthUnits[key])?lengthUnits[key]:'cm';
+  const columnName=key=>storageUnit(key)?lengthLabel(definitions.get(key)[locale],displayUnit(key),locale):definitions.get(key)[locale];
+  const displayValue=(row,key)=>storageUnit(key,row)?convertLength(value(row,key),storageUnit(key,row),displayUnit(key)):value(row,key);
+  const names=(row,key)=>{const choices=optionPairs(row,key,definitionFor(row,key),catalogue,locale,t),unit=storageUnit(key,row);return unit?choices.map(([id,label])=>[convertLength(id,unit,displayUnit(key)),convertLength(label,unit,displayUnit(key))]):choices;};
   const show=(row,key)=>{
-    const stored=value(row,key);
+    const stored=displayValue(row,key);
     if (key==="perimeter") return perimeterText(stored,locale);
     if (Array.isArray(stored)) return stored.map((side)=>sides[side]?.[locale==="ar"?0:1]||side).join(", ");
     return names(row,key).find(([id])=>id===stored)?.[1]??technicalText(stored,locale)??"";
@@ -182,7 +189,8 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
   const select=(p,extend=false,reveal=true)=>{setSelected((old)=>({start:extend&&old?old.start:p,focus:p}));focus(p,reveal);};
   function normalize(row,key,raw) {
     if (missing(raw)) return "";
-    const type=definitionFor(row,key).type;
+    const type=definitionFor(row,key).type,unit=storageUnit(key,row);
+    if(unit){const text=String(raw),normalized=/[x×]/.test(text)?text.split(/([x×])/).map(part=>/[x×]/.test(part)?part:normalizeSmartNumericClipboardValue(part)).join(''):normalizeSmartNumericClipboardValue(raw);if(type!=='number'&&!/^[+\-\d.eEx×]+$/.test(normalized))return raw;return convertLength(normalized,displayUnit(key),unit);}
     if (type==="number") return normalizeSmartNumericClipboardValue(raw);
     if (type==="sides") return String(raw).split(/[,،]/).map((part)=>part.trim())
       .map((part)=>Object.entries(sides).find(([side,labels])=>side===part||labels.includes(part))?.[0]).filter(Boolean);
@@ -243,11 +251,13 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
       const values=records.slice(range.rowStart,range.rowEnd+1).map((row)=>
         columns.slice(range.colStart,range.colEnd+1).map((key)=>String(show(row,key)).replace(/[\t\r\n]/g," ")).join("\t"));
       event.clipboardData.setData("text/plain",values.join("\n"));
+      const units=records.slice(range.rowStart,range.rowEnd+1).map(row=>columns.slice(range.colStart,range.colEnd+1).map(key=>({value:value(row,key),unit:storageUnit(key,row)})));lengthClipboard.current={text:values.join('\n'),units};event.clipboardData.setData('application/x-easy-commercial-lengths',JSON.stringify(units));
       if(event.type==='cut')cut.current={text:values.join('\n'),cells:records.slice(range.rowStart,range.rowEnd+1).flatMap(row=>columns.slice(range.colStart,range.colEnd+1).map(key=>({id:row.id,key,value:value(row,key)})))};
       return;
     }
     const block=expandSmartClipboardGrid(parseSmartClipboardGrid(event.clipboardData.getData("text/plain")),range);
-    const cells=block.flatMap((line,ri)=>line.map((raw,ci)=>({p:{row:range.rowStart+ri,col:range.colStart+ci},raw})))
+    let sourceUnits=[];try{sourceUnits=expandSmartClipboardGrid(JSON.parse(event.clipboardData.getData('application/x-easy-commercial-lengths')||(lengthClipboard.current?.text===event.clipboardData.getData('text/plain')?JSON.stringify(lengthClipboard.current.units):'[]')),range);}catch{}
+    const cells=block.flatMap((line,ri)=>line.map((raw,ci)=>{const p={row:range.rowStart+ri,col:range.colStart+ci},source=sourceUnits[ri]?.[ci],target=records[p.row]&&storageUnit(columns[p.col],records[p.row]);return source?.unit&&target?{p,raw:convertLength(source.value,source.unit,target),typed:true}:{p,raw};}))
       .filter(({p})=>p.row<records.length&&p.col<columns.length);
     if (block.length&&block.length>records.length-range.rowStart) {
       setProblem(new Error(t("عدد الصفوف الملصقة أكبر من الصفوف المتاحة في هذه الصفحة.","The paste contains more rows than this page has available.")));
@@ -334,7 +344,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
   }
   const waiting=Object.keys(patches).length;
   const searchResults=useMemo(()=>!searchOpen||!searchText.trim()?[]:findSmartTableMatches({rows:records.map(row=>({_gridId:String(row.id),...Object.fromEntries(columns.map(key=>[key,show(row,key)]))})),columnOrder:columns,searchText})
-    .map(match=>({...match,replaceable:editable(records[match.rowIndex],match.columnKey)&&definitionFor(records[match.rowIndex],match.columnKey).type!=='sides'})),[searchOpen,searchText,records,columns,catalogue,locale,editAllowed,busy]);
+    .map(match=>({...match,replaceable:editable(records[match.rowIndex],match.columnKey)&&definitionFor(records[match.rowIndex],match.columnKey).type!=='sides'})),[searchOpen,searchText,records,columns,catalogue,locale,editAllowed,busy,lengthUnits]);
   const currentMatch=searchResults[Math.max(0,Math.min(searchIndex,searchResults.length-1))];
   const changeSearch=useCallback(text=>{setSearchText(text);setSearchIndex(0);},[]);
   const jump=(match,index)=>{setSearchIndex(index);select({row:match.rowIndex,col:columns.indexOf(match.columnKey)});};
@@ -362,7 +372,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
     if(kind==='new'){openItem('new');return;}
     try{
       if(kind==='paste'){const text=await navigator.clipboard.readText();clipboard({preventDefault(){},clipboardData:{getData:()=>text}},true);}
-      else{let text='';clipboard({type:kind,preventDefault(){},clipboardData:{setData:(_,value)=>{text=value;}}},false);await navigator.clipboard.writeText(text);}
+      else{let text='';clipboard({type:kind,preventDefault(){},clipboardData:{setData:(type,value)=>{if(type==='text/plain')text=value;}}},false);await navigator.clipboard.writeText(text);}
     }catch(error){setProblem(error);}
   }
   return <section className={`ops-spec-grid pc-stack${fullscreen?" ops-grid-full":""}`} aria-label={t("جدول مواصفات البنود","BOQ specification worksheet")}>
@@ -412,7 +422,8 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
         <colgroup><col style={{width:52}}/>{columns.map(key=><col key={key} style={{width:width(key)}}/>)}</colgroup>
         <thead><tr><th scope="col">#</th>
           {columns.map((key)=><th key={key} scope="col"><div className="ops-column-heading"><button type="button" className="pc-name" title={t('ترتيب','Sort')} onClick={()=>{setSort(sort?.key===key&&sort.direction===-1?null:{key,direction:sort?.key===key?-sort.direction:1});setSelected(null);}}>
-            {definitions.get(key)[locale]}{sort?.key===key?(sort.direction===1?' ↑':' ↓'):''}</button>
+            {columnName(key)}{sort?.key===key?(sort.direction===1?' ↑':' ↓'):''}</button>
+            {storageUnit(key)&&<select className="ops-length-unit" aria-label={t('وحدة ','Unit for ')+definitions.get(key)[locale]} title={t('وحدة الإدخال والعرض','Input and display unit')} value={displayUnit(key)} onPointerDown={event=>event.stopPropagation()} onChange={event=>{if(editing)commit(editing.p,editing.text,null,false);setLengthUnits(old=>({...old,[key]:event.target.value}));}}>{['cm','mm','m'].map(unit=><option key={unit} value={unit}>{unit}</option>)}</select>}
             <button type="button" aria-label={t('تصفية ','Filter ')+definitions.get(key)[locale]} aria-pressed={Boolean(filters[key])} onClick={event=>{const rect=event.currentTarget.getBoundingClientRect();setColumnMenu({key,position:{left:Math.max(8,Math.min(rect.left,window.innerWidth-295)),top:Math.min(rect.bottom,window.innerHeight-350)}});}}><Filter size={12}/></button></div>
             <span role="separator" aria-label={t('عرض عمود ','Width of ')+definitions.get(key)[locale]} className="ops-column-resize" onPointerDown={event=>resize(event,key)}/></th>)}</tr></thead>
         <tbody>{virtual&&virtualStart>0&&<tr className="ops-grid-spacer" aria-hidden="true"><td colSpan={columns.length+1} style={{height:offsets[virtualStart]}}/></tr>}
@@ -439,10 +450,10 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
       </table>
     </div>
     {!records.length&&<p>{t('لا توجد صفوف تطابق الفلاتر.','No rows match the filters.')}</p>}
-    {columnMenu&&<ColumnFilter key={columnMenu.key} t={t} zIndex={270010} column={definitions.get(columnMenu.key)[locale]} position={columnMenu.position}
+    {columnMenu&&<ColumnFilter key={columnMenu.key} t={t} zIndex={270010} column={columnName(columnMenu.key)} position={columnMenu.position}
       values={[...new Map(allRecords.map(row=>[filterValue(row,columnMenu.key),{value:filterValue(row,columnMenu.key),label:show(row,columnMenu.key)}])).values()]}
       selected={filters[columnMenu.key]} onClose={()=>setColumnMenu(null)} onApply={values=>{setFilters(previous=>{const next={...previous};if(values)next[columnMenu.key]=values;else delete next[columnMenu.key];return next;});setSelected(null);setColumnMenu(null);}}/>}
-    {searchOpen&&<TableSearchPanel ownerRef={grid} uiLanguage={locale} initialQuery={searchText} results={searchResults} currentIndex={searchIndex} columnLabel={key=>definitions.get(key)[locale]}
+    {searchOpen&&<TableSearchPanel ownerRef={grid} uiLanguage={locale} initialQuery={searchText} results={searchResults} currentIndex={searchIndex} columnLabel={columnName}
       onReplace={editAllowed?replaceSearch:undefined} onReplaceAll={editAllowed?(query,replacement)=>replaceSearch(query,replacement):undefined}
       onSearchChange={changeSearch} onClose={()=>{setSearchOpen(false);if(activePoint)focus(activePoint);}} onPrevious={()=>stepSearch(-1)} onNext={()=>stepSearch(1)} onJump={jump}/>}
     {contextMenu&&createPortal(<div ref={contextRoot} className="ops-grid-menu" role="menu" style={contextMenu} onKeyDown={event=>{if(event.key==='Escape')setContextMenu(null);}}>
@@ -451,7 +462,7 @@ export default function SpecificationGrid({items,catalogue,uiLanguage:locale,t,c
         <button type="button" role="menuitem" onClick={()=>menuAction('new')}>{t('اقتراح فتحة إضافية','Propose an additional opening')}</button></>}
       <button type="button" role="menuitem" onClick={()=>menuAction('details')}>{t('تفاصيل الفتحة','Opening details')}</button><button type="button" onClick={()=>setContextMenu(null)}>{t('إلغاء','Cancel')}</button>
     </div>,document.body)}
-    <SelectionStatus uiLanguage={locale} values={range?records.slice(range.rowStart,range.rowEnd+1).flatMap(row=>columns.slice(range.colStart,range.colEnd+1).map(key=>value(row,key))):[]}/>
+    <SelectionStatus uiLanguage={locale} values={range?records.slice(range.rowStart,range.rowEnd+1).flatMap(row=>columns.slice(range.colStart,range.colEnd+1).map(key=>displayValue(row,key))):[]}/>
     {fullscreen?<small><bdi>{records.length}</bdi> {t('صفوف','rows')}</small>:pagination}
   </section>;
 }

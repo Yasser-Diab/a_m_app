@@ -167,7 +167,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
     const html=loadingOrders.manualReport(order,req.body,branding());
     const pdf=await renderPdf(html,{report_language:req.body.locale==='en'?'en':'ar',prepared_by:access.user.display_name||access.user.username});
     const name=reportFilename(order.customer,{reference:order.edit_window?.active_reference||order.reference,loading_reference:order.edit_window?.active_reference||order.reference},{kind:'loading',locale:req.body.locale});
-    res.set('Cache-Control','no-store').set('Access-Control-Expose-Headers','Content-Disposition').attachment(name).type('application/pdf').send(pdf);
+    res.set('Cache-Control','no-store').set('Access-Control-Expose-Headers','Content-Disposition, X-Report-Page-Setup').attachment(name).type('application/pdf').send(pdf);
   });
   get('/delivery-notes',(req,access)=>require('./delivery-notes.cjs').list(db,access,req.query));
   get('/delivery-notes/:noteId',(req,access)=>require('./delivery-notes.cjs').get(db,access,req.params.noteId));
@@ -197,7 +197,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
     const html=management.managementReport(req.params.kind,data,req.body,branding());
     const pdf=await renderPdf(html,{landscape:req.params.kind==="progress",report_language:req.body.locale==="ar"?"ar":"en",prepared_by:access.user.display_name||access.user.username});
     const name=(req.params.kind==="progress"?"Current Work Summary":"Work Quantity Takeoff")+" - "+new Date().toISOString().slice(0,10)+".pdf";
-    res.set("Cache-Control","no-store").set("Access-Control-Expose-Headers","Content-Disposition").attachment(name).type("application/pdf").send(pdf);
+    res.set("Cache-Control","no-store").set("Access-Control-Expose-Headers","Content-Disposition, X-Report-Page-Setup").attachment(name).type("application/pdf").send(pdf);
   });
   post("/resolve-project","ops_edit",(req,access)=>core.resolveProject(db,access,req.body));
   get("/employees",()=>db.all("SELECT id,display_name AS name FROM users WHERE is_active=1 ORDER BY display_name"),"ops_edit");
@@ -330,7 +330,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
     const output=manual?require('./manual-shipments.cjs').report(db,access,'manual-'+manual.id,req.body,branding()):require('./shipment-report.cjs').shipmentReport(db,core.operation(db,id),current,idOf(req.params.loadId),req.body.locale,branding());
     const pdf=await renderPdf(output.html,{report_language:req.body.locale==='en'?'en':'ar',prepared_by:access.user.display_name||access.user.username});
     const name=reportFilename(output.customer,{reference:output.reference,loading_reference:output.reference},{kind:'delivery',locale:req.body.locale});
-    res.set('Cache-Control','no-store').set('Access-Control-Expose-Headers','Content-Disposition').attachment(name).type('application/pdf').send(pdf);
+    res.set('Cache-Control','no-store').set('Access-Control-Expose-Headers','Content-Disposition, X-Report-Page-Setup').attachment(name).type('application/pdf').send(pdf);
   });
   const prepareReport=(req,access,id)=>db.transaction(()=>{
     const current=production.prepareOutput(db,order(req,id),req.body,access.user);
@@ -350,7 +350,7 @@ function registerOperations(app,db,{branding,allocateDocument,renderPdf}) {
     const pdf=await appendDrawings(rendered,pdfDrawings);
     const customer=getCustomer(db,getProject(db,id).customer_id);
     const name=reportFilename(customer,current,req.body);
-    res.set("Cache-Control","no-store").set("Access-Control-Expose-Headers","Content-Disposition").attachment(name).type("application/pdf").send(pdf);
+    res.set("Cache-Control","no-store").set("Access-Control-Expose-Headers","Content-Disposition, X-Report-Page-Setup").attachment(name).type("application/pdf").send(pdf);
   });
   get(base+"/loading",(_,__,id)=>{
     const rows=db.all(`SELECT o.id,o.reference,o.status FROM ops_orders o WHERE o.project_id=? ORDER BY o.id DESC`,[id])

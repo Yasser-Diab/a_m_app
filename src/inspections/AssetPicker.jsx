@@ -1,0 +1,7 @@
+import {useEffect,useRef,useState} from 'react';
+import {queryString} from '../certificates/shared.jsx';
+export default function AssetPicker({value,request,projectId,t,onUpload,onRemove,disabled,accept='.png,.jpg,.jpeg,.webp'}){
+  const file=useRef(null),[name,setName]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(null);
+  useEffect(()=>{let live=true;setName('');if(value)request('/inspections/assets/'+encodeURIComponent(value)+'/info'+queryString({project_id:projectId})).then(info=>{if(live)setName(info.name);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[value,projectId,request]);
+  return <div className="inspection-asset-picker"><input ref={file} type="file" accept={accept} hidden disabled={disabled||busy} onChange={async event=>{const selected=event.target.files[0];event.target.value='';if(!selected)return;setBusy(true);setError(null);try{await onUpload(selected);setName(selected.name);}catch(e){setError(e.message);}finally{setBusy(false);}}}/><div className="pc-toolbar"><button type="button" disabled={disabled||busy} onClick={()=>file.current?.click()}>{busy?t('جارٍ الرفع…','Uploading…'):value?t('استبدال الملف','Replace file'):t('اختيار ملف','Choose file')}</button><span dir="auto" role="status">{name||(value?t('ملف مرفوع ومحفوظ','Uploaded file saved'):t('لم يُرفع ملف','No file uploaded'))}</span>{value&&onRemove&&<button type="button" disabled={disabled||busy} onClick={()=>{onRemove();setName('');}}>{t('إزالة','Remove')}</button>}</div>{error&&<small role="alert">{error}</small>}</div>;
+}

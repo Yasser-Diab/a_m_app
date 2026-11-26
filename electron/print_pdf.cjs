@@ -66,6 +66,7 @@ async function main() {
       left: 0.35,
       right: 0.35,
     },
+    ...(!footer.inspectionLayout?require("../server/report-page-setup.cjs").printOptions(footer.pageSetup):{}),
   });
 
   fs.mkdirSync(path.dirname(path.resolve(outputPdfPath)), { recursive: true });
