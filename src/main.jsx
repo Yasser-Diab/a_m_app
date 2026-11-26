@@ -8241,6 +8241,8 @@ function ReportWorkspace({
     isContractorWorkflow,
   ]);
 
+  useEffect(()=>setShowReportLogos(null),[documentId,partyId]);
+
   const selectedParty = parties.find(
     (item) => String(item.id) === String(partyId),
   );

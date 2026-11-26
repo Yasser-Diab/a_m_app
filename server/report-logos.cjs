@@ -33,7 +33,7 @@ function register(app,db){
  router.get('/',(req,res)=>{
   const a=access(req),i=identity(db,a,req.query.document_id),scope=req.query.scope==='customer'?'customer':'project',scopeId=scope==='customer'?i.customerId:i.projectScopeId;
   const row=scopeId?db.get('SELECT version,data FROM report_logo_profiles WHERE scope=? AND scope_id=?',[scope,scopeId]):null;
-  res.json({customer_id:i.customerId,project_id:i.projectId,project_available:Boolean(i.projectScopeId),customer:i.customer,project:i.project,scope,version:row?.version||0,data:row?parse(row.data):inherited(db,i.customerId,i.projectId,i.project),can_edit:Boolean(a.user.can_create_invoices||a.capabilities.includes('edit_draft')||a.capabilities.includes('ops_edit')),can_edit_customer:a.all_projects});
+  res.json({customer_id:i.customerId,project_id:i.projectId,project_available:Boolean(i.projectScopeId),customer:i.customer,project:i.project,scope,version:row?.version||0,data:row?parse(row.data):inherited(db,i.customerId,scope==='project'?i.projectId:null,scope==='project'?i.project:''),can_edit:Boolean(a.user.can_create_invoices||a.capabilities.includes('edit_draft')||a.capabilities.includes('ops_edit')),can_edit_customer:a.all_projects});
  });
  router.post('/',async(req,res)=>{
   const a=access(req),i=identity(db,a,req.body.document_id),scope=req.body.scope==='customer'?'customer':'project',scopeId=scope==='customer'?i.customerId:i.projectScopeId;
